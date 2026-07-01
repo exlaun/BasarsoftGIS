@@ -59,16 +59,20 @@ const TOOLS = [
   { key: 'delete', label: 'Delete', icon: DeleteIcon },
 ]
 
-export default function DrawToolbar({ activeTool, onSelectTool, shapeName, onNameChange }) {
+// Bottom-left hint per active tool. Kept accurate to each interaction: Pan drags (no click), a Point
+// finishes on a single click (no double-click), and only Line/Polygon need a double-click to finish.
+const TOOL_HINTS = {
+  none: 'Drag to move the map.',
+  Point: 'Click on the map to place a point.',
+  LineString: 'Click to add points, then double-click to finish the line.',
+  Polygon: 'Click to add corners, then double-click to finish the polygon.',
+  delete: 'Click a shape to remove it.',
+}
+
+export default function DrawToolbar({ activeTool, onSelectTool }) {
   return (
     <div className="draw-toolbar">
-      <p className="draw-toolbar-hint">
-        {activeTool === 'delete'
-          ? 'Click a shape to remove it.'
-          : activeTool === 'none'
-            ? 'Pick a tool, then click the map.'
-            : 'Click to draw. Double-click to finish lines/polygons.'}
-      </p>
+      <p className="draw-toolbar-hint">{TOOL_HINTS[activeTool] ?? TOOL_HINTS.none}</p>
 
       <div className="draw-toolbar-tools">
         {TOOLS.map((tool) => (
@@ -89,17 +93,6 @@ export default function DrawToolbar({ activeTool, onSelectTool, shapeName, onNam
           </button>
         ))}
       </div>
-
-      <label className="draw-toolbar-name">
-        <span>Name for new shapes</span>
-        <input
-          type="text"
-          value={shapeName}
-          onChange={(event) => onNameChange(event.target.value)}
-          placeholder="e.g. Warehouse A"
-          maxLength={80}
-        />
-      </label>
     </div>
   )
 }

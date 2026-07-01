@@ -1,4 +1,5 @@
 using Basarsoft.Api.DTOs;
+using NetTopologySuite.Geometries;
 
 namespace Basarsoft.Api.Services;
 
@@ -17,4 +18,8 @@ public interface IGeometryService
 
     // Soft-deletes the caller's own shape. Returns false if it doesn't exist or isn't theirs.
     Task<bool> DeleteAsync(string type, int id, int userId);
+
+    // Counts how many of the caller's existing shapes (points + lines + polygons) fall strictly inside
+    // `area` (ST_Within). Used after a polygon is drawn to report how many inventories are inside it.
+    Task<int> CountContainedAsync(Geometry area, int userId);
 }

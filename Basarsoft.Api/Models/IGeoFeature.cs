@@ -15,6 +15,9 @@ public interface IGeoFeature
     // Optional human label for the shape.
     string? Name { get; set; }
 
+    // Optional display color for the shape (hex string, e.g. "#2563eb"). Chosen by the user on save.
+    string? Color { get; set; }
+
     // The shape itself, stored as a PostGIS geometry (SRID 4326 / WGS84 lon-lat).
     Geometry Geom { get; set; }
 

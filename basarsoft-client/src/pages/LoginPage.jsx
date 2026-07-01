@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/auth-context'
 import SpaceGlobe from '../components/SpaceGlobe'
 import PasswordInput from '../components/PasswordInput'
-import ThemeToggle from '../components/ThemeToggle'
 import './LoginPage.css'
 
 export default function LoginPage() {
@@ -123,7 +122,6 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <SpaceGlobe ref={globeRef} />
-      <ThemeToggle className="login-theme-toggle" />
 
       <form
         className={`login-card${leaving ? ' login-card--leaving' : ''}`}

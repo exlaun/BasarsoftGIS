@@ -9,9 +9,14 @@ export async function listAllGeometry() {
   return data
 }
 
-// Save a drawn shape. `wkt` is Well-Known Text in EPSG:4326 (lon/lat). Returns the saved row.
-export async function saveGeometry(type, wkt, name) {
-  const { data } = await client.post(`/api/geometry/${type}`, { wkt, name: name || null })
+// Save a drawn shape. `wkt` is Well-Known Text in EPSG:4326 (lon/lat). `name` and `color` come from
+// the attribute popup. For polygons the response also carries `intersectionCount`. Returns the saved row.
+export async function saveGeometry(type, wkt, name, color) {
+  const { data } = await client.post(`/api/geometry/${type}`, {
+    wkt,
+    name, // required — the attribute popup blocks save until a non-empty name is entered
+    color: color || null,
+  })
   return data
 }
 

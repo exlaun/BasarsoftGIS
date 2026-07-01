@@ -1,0 +1,112 @@
+.attr-modal-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.attr-modal {
+  width: min(360px, calc(100% - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1.25rem 1.35rem;
+  border-radius: 12px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.attr-modal-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.attr-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  opacity: 0.95;
+}
+
+.attr-modal-field input[type='text'] {
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--bar-border);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--bar-text);
+  font-size: 0.9rem;
+}
+
+.attr-modal-field input[type='text']::placeholder {
+  color: currentColor;
+  opacity: 0.5;
+}
+
+.attr-modal-color {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.attr-modal-color input[type='color'] {
+  width: 48px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--bar-border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.attr-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.attr-modal-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--bar-border);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+
+.attr-modal-btn:active {
+  transform: scale(0.98);
+}
+
+.attr-modal-cancel {
+  background: transparent;
+  color: var(--bar-text);
+}
+
+.attr-modal-cancel:hover {
+  background: var(--bar-hover);
+}
+
+.attr-modal-save {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.attr-modal-save:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.attr-modal-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -10,5 +10,12 @@ public class GeometryResponse
 
     public string? Name { get; set; }
 
+    // Display color (hex) chosen by the user; null for older rows saved before this field existed.
+    public string? Color { get; set; }
+
     public DateTime CreatedAt { get; set; }
+
+    // Only populated when a polygon is created: how many of the caller's existing shapes fall inside it.
+    // Null for point/line saves and for read endpoints.
+    public int? IntersectionCount { get; set; }
 }

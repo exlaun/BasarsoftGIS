@@ -15,6 +15,7 @@ import { useAuth } from '../context/auth-context'
 import SessionTimer from '../components/SessionTimer'
 import ThemeToggle from '../components/ThemeToggle'
 import DrawToolbar from '../components/DrawToolbar'
+import AttributeModal from '../components/AttributeModal'
 import { listAllGeometry, saveGeometry, deleteGeometry } from '../api/geometry'
 import './MapPage.css'
 
@@ -35,40 +36,44 @@ const TOOL_CONFIG = {
 
 const wkt = new WKT()
 
-// One style covers all three geometry types: circle for points, stroke+fill for lines/polygons.
-const featureStyle = new Style({
-  fill: new Fill({ color: 'rgba(37, 99, 235, 0.15)' }),
-  stroke: new Stroke({ color: '#2563eb', width: 2 }),
-  image: new CircleStyle({
-    radius: 6,
-    fill: new Fill({ color: '#2563eb' }),
-    stroke: new Stroke({ color: '#ffffff', width: 1.5 }),
-  }),
-})
+// Fallback color for shapes drawn/saved before a color was chosen (older rows have color = null).
+const DEFAULT_COLOR = '#2563eb'
+
+// Build a style in the shape's own color: circle for points, stroke + translucent fill for lines/polygons.
+// '26' is the hex alpha (~15%) appended to make an 8-digit hex the canvas understands.
+const makeFeatureStyle = (color) => {
+  const c = color || DEFAULT_COLOR
+  return new Style({
+    fill: new Fill({ color: c + '26' }),
+    stroke: new Stroke({ color: c, width: 2 }),
+    image: new CircleStyle({
+      radius: 6,
+      fill: new Fill({ color: c }),
+      stroke: new Stroke({ color: '#ffffff', width: 1.5 }),
+    }),
+  })
+}
 
 export default function MapPage() {
   const mapElementRef = useRef(null)
   const tooltipElementRef = useRef(null)
   const mapRef = useRef(null)
   const sourceRef = useRef(null)
-  const nameRef = useRef('')
   const statusTimerRef = useRef(null)
   const { logout } = useAuth()
 
   const [activeTool, setActiveTool] = useState('none')
-  const [shapeName, setShapeName] = useState('')
   const [status, setStatus] = useState(null)
+  // Holds a shape that was drawn but not yet confirmed: { feature, geomWkt, apiType }. When set,
+  // the attribute popup is shown; the shape is only saved once the user clicks Save.
+  const [pendingDraw, setPendingDraw] = useState(null)
 
-  // Keep the latest label in a ref so drawend (bound once per tool) always reads the current value.
-  useEffect(() => {
-    nameRef.current = shapeName
-  }, [shapeName])
-
-  // Stable so effects can depend on it without re-running; shows a transient toast.
-  const flashStatus = useCallback((type, text) => {
+  // Stable so effects can depend on it without re-running; shows a transient toast. `duration` lets
+  // an important message (e.g. the polygon intersection result) linger longer so it isn't missed.
+  const flashStatus = useCallback((type, text, duration = 2800) => {
     setStatus({ type, text })
     window.clearTimeout(statusTimerRef.current)
-    statusTimerRef.current = window.setTimeout(() => setStatus(null), 2800)
+    statusTimerRef.current = window.setTimeout(() => setStatus(null), duration)
   }, [])
 
   // Create the map once and load the user's saved shapes.
@@ -80,7 +85,8 @@ export default function MapPage() {
       target: mapElementRef.current,
       layers: [
         new TileLayer({ source: new OSM() }),
-        new VectorLayer({ source, style: featureStyle }),
+        // Per-feature style so each shape renders in its own saved color.
+        new VectorLayer({ source, style: (feature) => makeFeatureStyle(feature.get('color')) }),
       ],
       view: new View({
         center: fromLonLat(TURKEY_CENTER),
@@ -132,6 +138,7 @@ export default function MapPage() {
             feature.set('apiType', apiType)
             feature.set('dbId', item.id)
             feature.set('name', item.name)
+            feature.set('color', item.color)
             source.addFeature(feature)
           }
         }
@@ -157,23 +164,15 @@ export default function MapPage() {
       const { drawType, apiType } = TOOL_CONFIG[activeTool]
       const draw = new Draw({ source, type: drawType })
 
-      draw.on('drawend', async (event) => {
+      // On finish, don't save yet — capture the shape and open the attribute popup.
+      draw.on('drawend', (event) => {
         const feature = event.feature
         // Transform from the map projection (3857) down to storage projection (4326) as WKT.
         const geomWkt = wkt.writeGeometry(feature.getGeometry(), {
           featureProjection: MAP_PROJ,
           dataProjection: DATA_PROJ,
         })
-        try {
-          const saved = await saveGeometry(apiType, geomWkt, nameRef.current)
-          feature.set('apiType', apiType)
-          feature.set('dbId', saved.id)
-          feature.set('name', nameRef.current || null)
-          flashStatus('success', `${apiType} saved.`)
-        } catch {
-          source.removeFeature(feature) // roll the drawing back if the save failed
-          flashStatus('error', `Could not save ${apiType}.`)
-        }
+        setPendingDraw({ feature, geomWkt, apiType })
       })
 
       map.addInteraction(draw)
@@ -202,13 +201,44 @@ export default function MapPage() {
     return undefined
   }, [activeTool, flashStatus])
 
+  // Attribute popup — Save: persist the pending shape with its name + color.
+  const handleModalSave = async (name, color) => {
+    if (!pendingDraw) return
+    const { feature, geomWkt, apiType } = pendingDraw
+    try {
+      const saved = await saveGeometry(apiType, geomWkt, name, color)
+      feature.set('apiType', apiType)
+      feature.set('dbId', saved.id)
+      feature.set('name', name || null)
+      feature.set('color', color || DEFAULT_COLOR)
+      feature.changed() // re-run the layer style so the shape shows in its chosen color
+      if (apiType === 'polygon' && saved.intersectionCount != null) {
+        const n = saved.intersectionCount
+        flashStatus('success', `Polygon saved. ${n} ${n === 1 ? 'inventory' : 'inventories'} inside.`, 6000)
+      } else {
+        flashStatus('success', `${apiType} saved.`)
+      }
+    } catch {
+      sourceRef.current?.removeFeature(feature) // roll the drawing back if the save failed
+      flashStatus('error', `Could not save ${apiType}.`)
+    } finally {
+      setPendingDraw(null)
+    }
+  }
+
+  // Attribute popup — Cancel: throw the drawn shape away, nothing is saved.
+  const handleModalCancel = () => {
+    if (pendingDraw) sourceRef.current?.removeFeature(pendingDraw.feature)
+    setPendingDraw(null)
+  }
+
   return (
     <div className="map-page">
       <header className="map-bar">
         <div className="map-bar-left">
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.0.2</span>
+        <span className="map-title">BasarsoftInternshipTask v0.0.3</span>
         <div className="map-bar-right">
           <ThemeToggle />
           <button className="map-logout" type="button" onClick={logout}>
@@ -217,14 +247,12 @@ export default function MapPage() {
         </div>
       </header>
       <div className="map-body">
-        <DrawToolbar
-          activeTool={activeTool}
-          onSelectTool={setActiveTool}
-          shapeName={shapeName}
-          onNameChange={setShapeName}
-        />
+        <DrawToolbar activeTool={activeTool} onSelectTool={setActiveTool} />
         <div ref={mapElementRef} className="map-container" />
         <div ref={tooltipElementRef} className="map-tooltip" hidden />
+        {pendingDraw && (
+          <AttributeModal onSave={handleModalSave} onCancel={handleModalCancel} />
+        )}
         {status && (
           <div className={`map-toast map-toast-${status.type}`} role="status">
             {status.text}
