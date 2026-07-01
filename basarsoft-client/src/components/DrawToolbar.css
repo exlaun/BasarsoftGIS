@@ -1,0 +1,105 @@
+.draw-toolbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.6rem 0.85rem;
+  padding: 0.6rem 1rem;
+  border-radius: 12px 12px 0 0;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  border-bottom: none;
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.22);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.draw-toolbar-tools {
+  justify-self: center;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.draw-tool {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--bar-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--bar-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+
+.draw-tool:hover {
+  background: var(--bar-hover);
+}
+
+.draw-tool:active {
+  transform: scale(0.98);
+}
+
+.draw-tool.is-active {
+  background: var(--bar-hover);
+  border-color: currentColor;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.draw-tool.is-delete.is-active {
+  color: #fca5a5;
+}
+
+.draw-tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+}
+
+.draw-toolbar-name {
+  justify-self: end;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  opacity: 0.9;
+  white-space: nowrap;
+}
+
+.draw-toolbar-name input {
+  width: 180px;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--bar-border);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--bar-text);
+  font-size: 0.82rem;
+}
+
+.draw-toolbar-name input::placeholder {
+  color: currentColor;
+  opacity: 0.5;
+}
+
+.draw-toolbar-hint {
+  justify-self: start;
+  margin: 0;
+  min-width: 0;
+  max-width: 24ch;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  opacity: 0.7;
+}

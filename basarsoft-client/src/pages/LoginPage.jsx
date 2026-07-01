@@ -2,6 +2,8 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/auth-context'
 import SpaceGlobe from '../components/SpaceGlobe'
+import PasswordInput from '../components/PasswordInput'
+import ThemeToggle from '../components/ThemeToggle'
 import './LoginPage.css'
 
 export default function LoginPage() {
@@ -121,6 +123,7 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <SpaceGlobe ref={globeRef} />
+      <ThemeToggle className="login-theme-toggle" />
 
       <form
         className={`login-card${leaving ? ' login-card--leaving' : ''}`}
@@ -147,9 +150,8 @@ export default function LoginPage() {
         {(isLogin || isRegister) && (
           <label className="login-label">
             Password
-            <input
+            <PasswordInput
               className="login-input"
-              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete={isRegister ? 'new-password' : 'current-password'}
@@ -163,9 +165,8 @@ export default function LoginPage() {
           <>
             <label className="login-label">
               New password
-              <input
+              <PasswordInput
                 className="login-input"
-                type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 autoComplete="new-password"
@@ -177,9 +178,8 @@ export default function LoginPage() {
 
             <label className="login-label">
               Confirm password
-              <input
+              <PasswordInput
                 className="login-input"
-                type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 autoComplete="new-password"

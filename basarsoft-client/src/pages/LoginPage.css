@@ -7,6 +7,22 @@
   padding: 1rem;
 }
 
+/* The login screen keeps its cinematic dark globe regardless of theme, so the
+   toggle here just sets the preference for the rest of the app. Pin it top-right
+   and force light-on-dark colors so it stays visible over the globe. */
+.login-theme-toggle {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2;
+  color: #eaf0ff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.login-theme-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .login-card {
   position: relative;
   z-index: 1;

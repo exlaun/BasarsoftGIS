@@ -13,8 +13,9 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
 // Register the database context and tell EF Core to use PostgreSQL (Npgsql).
+// UseNetTopologySuite() lets EF map C# geometry types (Point/LineString/Polygon) to PostGIS.
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(connectionString)
+    options.UseNpgsql(connectionString, o => o.UseNetTopologySuite())
            .UseSnakeCaseNamingConvention());
 
 // Bind the "Jwt" config section once and share it (TokenService reads Key/ExpiresMinutes from it).
@@ -25,6 +26,9 @@ builder.Services.AddSingleton(jwtSettings);
 // Auth services.
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+
+// Geometry (drawing) service.
+builder.Services.AddScoped<IGeometryService, GeometryService>();
 
 // Add controller support so [ApiController] classes work.
 builder.Services.AddControllers();

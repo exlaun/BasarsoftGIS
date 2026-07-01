@@ -41,7 +41,9 @@ public class AuthService : IAuthService
     public async Task<AuthResponse?> LoginAsync(LoginRequest request)
     {
         var user = await _db.Users.SingleOrDefaultAsync(u => u.Username == request.Username);
-        if (user is null || !BC.Verify(request.Password, user.PasswordHash))
+        // Soft-deleted users are already filtered out by the global query filter. A deactivated
+        // (is_active = false) account exists but cannot log in.
+        if (user is null || !user.IsActive || !BC.Verify(request.Password, user.PasswordHash))
             return null;
 
         return _tokenService.CreateToken(user);
