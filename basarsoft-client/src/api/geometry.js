@@ -20,7 +20,25 @@ export async function saveGeometry(type, wkt, name, color) {
   return data
 }
 
+// Update one of the user's own shapes. `name`/`color` are always sent; `wkt` (EPSG:4326) is optional —
+// omit it for an attribute-only edit, include it to move/reshape the geometry. Returns the updated row.
+export async function updateGeometry(type, id, { wkt, name, color }) {
+  const { data } = await client.put(`/api/geometry/${type}/${id}`, {
+    name,
+    color: color || null,
+    wkt: wkt || null,
+  })
+  return data
+}
+
 // Soft-delete one of the user's own shapes.
 export async function deleteGeometry(type, id) {
   await client.delete(`/api/geometry/${type}/${id}`)
+}
+
+// Inventory analysis: send a temporary polygon (WKT, EPSG:4326) and get back how many of the user's
+// shapes intersect it, broken down by type. The polygon is NOT saved on the server.
+export async function analyzeArea(wkt) {
+  const { data } = await client.post('/api/geometry/analysis', { wkt })
+  return data
 }

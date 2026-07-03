@@ -48,13 +48,7 @@ public class GeometryService : IGeometryService
             case "line" when geom.OgcGeometryType == OgcGeometryType.LineString:
                 return await AddAsync(_db.Lines, geom, request, userId);
             case "polygon" when geom.OgcGeometryType == OgcGeometryType.Polygon:
-                // Count the caller's existing shapes that fall inside this area BEFORE inserting the new
-                // polygon, otherwise the polygon would contain itself and inflate the count by one.
-                var intersectionCount = await CountContainedAsync(geom, userId);
-                var saved = await AddAsync(_db.Polygons, geom, request, userId);
-                if (saved is not null)
-                    saved.IntersectionCount = intersectionCount;
-                return saved;
+                return await AddAsync(_db.Polygons, geom, request, userId);
             default:
                 return null; // unknown type or WKT geometry doesn't match the table
         }
@@ -75,6 +69,15 @@ public class GeometryService : IGeometryService
         Lines = await QueryAsync(_db.Lines, userId),
         Polygons = await QueryAsync(_db.Polygons, userId),
     };
+
+    public Task<GeometryUpdateResult> UpdateAsync(string type, int id, GeometryUpdateRequest request, int userId) =>
+        type.ToLowerInvariant() switch
+        {
+            "point" => UpdateEntityAsync(_db.Points, id, request, userId, OgcGeometryType.Point),
+            "line" => UpdateEntityAsync(_db.Lines, id, request, userId, OgcGeometryType.LineString),
+            "polygon" => UpdateEntityAsync(_db.Polygons, id, request, userId, OgcGeometryType.Polygon),
+            _ => Task.FromResult(GeometryUpdateResult.NotFound),
+        };
 
     public Task<bool> DeleteAsync(string type, int id, int userId) =>
         type.ToLowerInvariant() switch
@@ -124,18 +127,78 @@ public class GeometryService : IGeometryService
         return true;
     }
 
-    // Counts the caller's existing (non-deleted) shapes that fall strictly INSIDE `area`. The mentor's
-    // spec asks for "polygon içerisinde kalan" (items remaining inside the polygon), so we use containment
-    // (`.Within()` -> PostGIS ST_Within) rather than a mere touch/overlap test: a shape that only clips
-    // the polygon's edge is NOT counted. ST_Within runs in the database, and the global !IsDeleted query
-    // filter applies automatically to each DbSet. Scope is the caller's own shapes (per the per-user
-    // isolation design) — widen the UserId filter here if a shared, cross-user inventory is intended.
-    public async Task<int> CountContainedAsync(Geometry area, int userId)
+    // Updates one shape the caller owns. `expectedType` guards the geometry column: a point can't be
+    // turned into a polygon, so new WKT of the wrong type is rejected as InvalidGeometry (a 400) rather
+    // than being sent to PostGIS to blow up as a 500. Geometry is only touched when WKT was supplied;
+    // an attributes-only edit leaves the shape where it is. Ownership is enforced via the WHERE clause.
+    private async Task<GeometryUpdateResult> UpdateEntityAsync<T>(
+        DbSet<T> set, int id, GeometryUpdateRequest request, int userId, OgcGeometryType expectedType)
+        where T : class, IGeoFeature
     {
-        var points = await _db.Points.Where(x => x.UserId == userId && x.Geom.Within(area)).CountAsync();
-        var lines = await _db.Lines.Where(x => x.UserId == userId && x.Geom.Within(area)).CountAsync();
-        var polygons = await _db.Polygons.Where(x => x.UserId == userId && x.Geom.Within(area)).CountAsync();
-        return points + lines + polygons;
+        var entity = await set.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId);
+        if (entity is null)
+            return GeometryUpdateResult.NotFound;
+
+        if (!string.IsNullOrWhiteSpace(request.Wkt))
+        {
+            Geometry geom;
+            try
+            {
+                geom = _wktReader.Read(request.Wkt);
+            }
+            catch
+            {
+                return GeometryUpdateResult.InvalidGeometry;
+            }
+
+            if (geom is null || geom.IsEmpty || geom.OgcGeometryType != expectedType)
+                return GeometryUpdateResult.InvalidGeometry;
+
+            geom.SRID = Srid;
+            entity.Geom = geom;
+        }
+
+        entity.Name = request.Name;
+        entity.Color = request.Color;
+        // ModifiedDate is stamped automatically by AppDbContext.SaveChanges (IGeoFeature : IAuditable).
+        await _db.SaveChangesAsync();
+        return GeometryUpdateResult.Ok(ToResponse(entity));
+    }
+
+    // Counts the caller's shapes that INTERSECT `area` (`.Intersects()` -> PostGIS ST_Intersects). Per
+    // the analysis-tool spec a shape counts even if it only slightly overlaps the polygon — full
+    // containment is NOT required (this is the deliberate difference from the earlier draw-time count,
+    // which used ST_Within). The three counts run sequentially because a single DbContext is not
+    // thread-safe (no Task.WhenAll). Scope is the caller's own shapes, matching the per-user isolation
+    // used everywhere else — widen the UserId filter here for a shared, cross-user inventory.
+    public async Task<AnalysisResponse?> AnalyzeAsync(string wkt, int userId)
+    {
+        Geometry area;
+        try
+        {
+            area = _wktReader.Read(wkt);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (area is null || area.IsEmpty || area.OgcGeometryType != OgcGeometryType.Polygon)
+            return null;
+
+        area.SRID = Srid;
+
+        var points = await _db.Points.CountAsync(x => x.UserId == userId && x.Geom.Intersects(area));
+        var lines = await _db.Lines.CountAsync(x => x.UserId == userId && x.Geom.Intersects(area));
+        var polygons = await _db.Polygons.CountAsync(x => x.UserId == userId && x.Geom.Intersects(area));
+
+        return new AnalysisResponse
+        {
+            Points = points,
+            Lines = lines,
+            Polygons = polygons,
+            Total = points + lines + polygons,
+        };
     }
 
     private static GeometryResponse ToResponse(IGeoFeature entity) => new()
@@ -146,5 +209,6 @@ public class GeometryService : IGeometryService
         Name = entity.Name,
         Color = entity.Color,
         CreatedAt = entity.CreatedAt,
+        ModifiedDate = entity.ModifiedDate,
     };
 }

@@ -15,7 +15,7 @@ public class GeometryResponse
 
     public DateTime CreatedAt { get; set; }
 
-    // Only populated when a polygon is created: how many of the caller's existing shapes fall inside it.
-    // Null for point/line saves and for read endpoints.
-    public int? IntersectionCount { get; set; }
+    // Last-edited timestamp, stamped automatically on every insert/update. Surfaced so the info popup
+    // can show when a shape was last changed (also the visible evidence that edit-tracking works).
+    public DateTime ModifiedDate { get; set; }
 }

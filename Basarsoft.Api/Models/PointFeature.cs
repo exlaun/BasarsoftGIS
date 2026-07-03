@@ -12,4 +12,6 @@ public class PointFeature : IGeoFeature
     public Geometry Geom { get; set; } = default!;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public bool IsDeleted { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTime ModifiedDate { get; set; } = DateTime.UtcNow;
 }

@@ -1,5 +1,6 @@
 using System.Text;
 using Basarsoft.Api.Data;
+using Basarsoft.Api.Middleware;
 using Basarsoft.Api.Services;
 using Basarsoft.Api.Settings;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -29,6 +30,12 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Geometry (drawing) service.
 builder.Services.AddScoped<IGeometryService, GeometryService>();
+
+// Global exception handling: a final safety net that converts any unhandled exception into a clean
+// 500 JSON response (the controllers also try-catch individually). AddProblemDetails() supplies the
+// standard error body format that UseExceptionHandler() falls back to.
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
 
 // Add controller support so [ApiController] classes work.
 builder.Services.AddControllers();
@@ -88,6 +95,10 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Catch unhandled exceptions first so nothing downstream can leak a stack trace. Delegates to
+// GlobalExceptionHandler (registered above).
+app.UseExceptionHandler();
 
 // Show Swagger UI only while developing.
 if (app.Environment.IsDevelopment())

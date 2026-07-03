@@ -42,7 +42,8 @@ public class AppDbContext : DbContext
         var entity = modelBuilder.Entity<T>();
         entity.ToTable(tableName);
         entity.Property(x => x.Geom).HasColumnType(geomType);
-        entity.HasQueryFilter(x => !x.IsDeleted);
+        // Hide both soft-deleted and deactivated shapes from every query automatically.
+        entity.HasQueryFilter(x => !x.IsDeleted && x.IsActive);
         entity.HasOne<User>().WithMany().HasForeignKey(x => x.UserId);
     }
 

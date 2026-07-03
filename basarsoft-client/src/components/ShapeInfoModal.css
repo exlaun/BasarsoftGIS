@@ -1,0 +1,47 @@
+/* Extra styling for the shape info/edit popup. Base styles are shared from AttributeModal.css. */
+
+.shape-info-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.5rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--bar-border);
+}
+
+.shape-info-meta div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.shape-info-meta dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
+.shape-info-meta dd {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.shape-info-type {
+  text-transform: capitalize;
+}
+
+/* Full-width secondary action that switches the map into geometry-drag mode. */
+.shape-info-edit-location {
+  width: 100%;
+  background: transparent;
+  color: var(--bar-text);
+  border: 1px dashed var(--bar-border);
+}
+
+.shape-info-edit-location:hover:not(:disabled) {
+  background: var(--bar-hover);
+}

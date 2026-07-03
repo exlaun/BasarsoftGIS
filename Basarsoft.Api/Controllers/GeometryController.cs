@@ -14,10 +14,12 @@ namespace Basarsoft.Api.Controllers;
 public class GeometryController : ControllerBase
 {
     private readonly IGeometryService _geometryService;
+    private readonly ILogger<GeometryController> _logger;
 
-    public GeometryController(IGeometryService geometryService)
+    public GeometryController(IGeometryService geometryService, ILogger<GeometryController> logger)
     {
         _geometryService = geometryService;
+        _logger = logger;
     }
 
     // The logged-in user's id, taken from the JWT "sub" claim (same claim AuthController.Me reads).
@@ -26,50 +28,134 @@ public class GeometryController : ControllerBase
     private bool TryGetUserId(out int userId) =>
         int.TryParse(User.FindFirstValue(JwtRegisteredClaimNames.Sub), out userId);
 
+    // Logs an unexpected failure and returns a generic 500 — never the exception text, which could
+    // leak connection strings / table names to the client. Each action calls this from its catch.
+    private ObjectResult ServerError(Exception ex, string action)
+    {
+        _logger.LogError(ex, "Unexpected error in GeometryController.{Action}", action);
+        return StatusCode(StatusCodes.Status500InternalServerError,
+            new { message = "An unexpected error occurred." });
+    }
+
     // GET /api/geometry -> every shape the caller owns, grouped by type (one-shot map load).
     [HttpGet]
     public async Task<ActionResult<AllGeometryResponse>> GetAll()
     {
-        if (!TryGetUserId(out var userId))
-            return Unauthorized();
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
 
-        return Ok(await _geometryService.ListAllAsync(userId));
+            return Ok(await _geometryService.ListAllAsync(userId));
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, nameof(GetAll));
+        }
     }
 
     // GET /api/geometry/{type} -> the caller's shapes of a single type.
     [HttpGet("{type}")]
     public async Task<ActionResult<IReadOnlyList<GeometryResponse>>> List(string type)
     {
-        if (!TryGetUserId(out var userId))
-            return Unauthorized();
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
 
-        return Ok(await _geometryService.ListAsync(type, userId));
+            return Ok(await _geometryService.ListAsync(type, userId));
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, nameof(List));
+        }
     }
 
     // POST /api/geometry/{type} -> save a drawn shape (owner = caller).
     [HttpPost("{type}")]
     public async Task<ActionResult<GeometryResponse>> Create(string type, GeometryCreateRequest request)
     {
-        if (!TryGetUserId(out var userId))
-            return Unauthorized();
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
 
-        var result = await _geometryService.CreateAsync(type, request, userId);
-        if (result is null)
-            return BadRequest(new { message = "Unknown geometry type or invalid WKT for this type." });
+            var result = await _geometryService.CreateAsync(type, request, userId);
+            if (result is null)
+                return BadRequest(new { message = "Unknown geometry type or invalid WKT for this type." });
 
-        return Ok(result);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, nameof(Create));
+        }
+    }
+
+    // PUT /api/geometry/{type}/{id} -> update the caller's own shape: its name/color and, optionally,
+    // its geometry (location). Returns the updated row.
+    [HttpPut("{type}/{id:int}")]
+    public async Task<ActionResult<GeometryResponse>> Update(string type, int id, GeometryUpdateRequest request)
+    {
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+
+            var result = await _geometryService.UpdateAsync(type, id, request, userId);
+            return result.Status switch
+            {
+                UpdateStatus.NotFound => NotFound(new { message = "Shape not found." }),
+                UpdateStatus.InvalidGeometry =>
+                    BadRequest(new { message = "Invalid WKT, or its geometry type doesn't match this shape." }),
+                _ => Ok(result.Response),
+            };
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, nameof(Update));
+        }
     }
 
     // DELETE /api/geometry/{type}/{id} -> soft-delete the caller's own shape.
     [HttpDelete("{type}/{id:int}")]
     public async Task<ActionResult> Delete(string type, int id)
     {
-        if (!TryGetUserId(out var userId))
-            return Unauthorized();
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
 
-        if (!await _geometryService.DeleteAsync(type, id, userId))
-            return NotFound(new { message = "Shape not found." });
+            if (!await _geometryService.DeleteAsync(type, id, userId))
+                return NotFound(new { message = "Shape not found." });
 
-        return NoContent();
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, nameof(Delete));
+        }
+    }
+
+    // POST /api/geometry/analysis -> count how many of the caller's shapes intersect a temporary
+    // polygon. The polygon is NOT persisted; this is a read-only spatial query for the analysis tool.
+    [HttpPost("analysis")]
+    public async Task<ActionResult<AnalysisResponse>> Analyze(AnalysisRequest request)
+    {
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+
+            var result = await _geometryService.AnalyzeAsync(request.Wkt, userId);
+            if (result is null)
+                return BadRequest(new { message = "Invalid WKT, or the shape is not a polygon." });
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, nameof(Analyze));
+        }
     }
 }

@@ -21,6 +21,13 @@ const PanIcon = (
     <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
   </svg>
 )
+// Cursor — select a shape to view/edit it.
+const SelectIcon = (
+  <svg {...iconProps}>
+    <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+    <path d="M13 13l6 6" />
+  </svg>
+)
 // Map pin — single point.
 const PointIcon = (
   <svg {...iconProps}>
@@ -49,24 +56,37 @@ const DeleteIcon = (
     <path d="M10 11v6M14 11v6" />
   </svg>
 )
+// Bar chart — inventory analysis (count shapes under a temporary polygon).
+const AnalysisIcon = (
+  <svg {...iconProps}>
+    <line x1="18" y1="20" x2="18" y2="10" />
+    <line x1="12" y1="20" x2="12" y2="4" />
+    <line x1="6" y1="20" x2="6" y2="14" />
+  </svg>
+)
 
-// Tool keys match what MapPage expects: 'none' pans, the three OL draw types draw, 'delete' removes.
+// Tool keys match what MapPage expects: 'none' pans, 'select' inspects/edits, the three OL draw types
+// draw, 'delete' removes, 'analysis' counts shapes under a temporary polygon.
 const TOOLS = [
   { key: 'none', label: 'Pan', icon: PanIcon },
+  { key: 'select', label: 'Select', icon: SelectIcon },
   { key: 'Point', label: 'Point', icon: PointIcon },
   { key: 'LineString', label: 'Line', icon: LineIcon },
   { key: 'Polygon', label: 'Polygon', icon: PolygonIcon },
   { key: 'delete', label: 'Delete', icon: DeleteIcon },
+  { key: 'analysis', label: 'Analysis', icon: AnalysisIcon },
 ]
 
 // Bottom-left hint per active tool. Kept accurate to each interaction: Pan drags (no click), a Point
 // finishes on a single click (no double-click), and only Line/Polygon need a double-click to finish.
 const TOOL_HINTS = {
   none: 'Drag to move the map.',
+  select: 'Click a shape to view and edit it.',
   Point: 'Click on the map to place a point.',
   LineString: 'Click to add points, then double-click to finish the line.',
   Polygon: 'Click to add corners, then double-click to finish the polygon.',
   delete: 'Click a shape to remove it.',
+  analysis: 'Draw a polygon to count the shapes it touches. Nothing is saved.',
 }
 
 export default function DrawToolbar({ activeTool, onSelectTool }) {

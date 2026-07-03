@@ -95,12 +95,119 @@
   pointer-events: none;
 }
 
-.map-toast {
+/* Shared bottom-center column for transient/persistent feedback (analysis panel, edit-bar, toast) —
+   one predictable place to look, anchored just above the draw toolbar. Grows upward as more of its
+   children appear since `bottom` is fixed rather than tied to the stack's own height. */
+.map-status-stack {
   position: absolute;
   bottom: 4.5rem;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 3;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Floating confirmation bar shown while dragging a shape's geometry. Positioned by the shared
+   .map-status-stack wrapper. */
+.map-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 10px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+.map-edit-hint {
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+.map-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.map-edit-btn {
+  padding: 0.4rem 0.85rem;
+  border-radius: 7px;
+  border: 1px solid var(--bar-border);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.map-edit-cancel {
+  background: transparent;
+  color: var(--bar-text);
+}
+
+.map-edit-cancel:hover {
+  background: var(--bar-hover);
+}
+
+.map-edit-save {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.map-edit-save:hover {
+  background: #1d4ed8;
+}
+
+/* Inventory-analysis result card. Persists until the user clicks Clear. Positioned by the shared
+   .map-status-stack wrapper. */
+.map-analysis-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  min-width: 190px;
+}
+
+.map-analysis-total {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.map-analysis-breakdown {
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
+
+.map-analysis-clear {
+  margin-top: 0.35rem;
+  align-self: center;
+  padding: 0.35rem 0.7rem;
+  border-radius: 7px;
+  border: 1px solid var(--bar-border);
+  background: transparent;
+  color: var(--bar-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.map-analysis-clear:hover {
+  background: var(--bar-hover);
+}
+
+/* Positioned by the shared .map-status-stack wrapper (bottom-center, closest to the toolbar). */
+.map-toast {
   padding: 0.55rem 1rem;
   border-radius: 8px;
   font-size: 0.85rem;
@@ -121,11 +228,11 @@
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 8px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: none;
   }
 }
 
