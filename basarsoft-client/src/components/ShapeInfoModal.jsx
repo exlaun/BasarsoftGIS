@@ -5,16 +5,19 @@ import './ShapeInfoModal.css'
 const DEFAULT_COLOR = '#2563eb'
 
 // Popup shown when an existing shape is clicked (Select tool). Displays the shape's type + last-edited
-// time, lets the user edit its Name and Color, and offers "Edit location on map" to reposition the
+// time/user, lets the user edit its Name and Color, and offers "Edit location on map" to reposition the
 // geometry. Save persists name+color; Edit location hands the current field values up and switches the
-// map into geometry-drag mode; Cancel closes without changes.
+// map into geometry-drag mode; Delete asks the parent to confirm a soft delete; Cancel closes without
+// changes.
 export default function ShapeInfoModal({
   type,
   initialName,
   initialColor,
   modifiedDate,
+  modifiedUserId,
   onSave,
   onEditLocation,
+  onDelete,
   onCancel,
 }) {
   const [name, setName] = useState(initialName ?? '')
@@ -47,7 +50,11 @@ export default function ShapeInfoModal({
     onEditLocation(trimmedName, color)
   }
 
-  const modifiedText = modifiedDate ? new Date(modifiedDate).toLocaleString() : null
+  // "when · by whom" — modified_user_id is the audit companion of the timestamp. Within the current
+  // per-user isolation the editor is always the owner; showing the id is the visible proof it's stored.
+  const modifiedText = modifiedDate
+    ? `${new Date(modifiedDate).toLocaleString()}${modifiedUserId != null ? ` · by user #${modifiedUserId}` : ''}`
+    : null
 
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Shape details">
@@ -98,6 +105,27 @@ export default function ShapeInfoModal({
         </button>
 
         <div className="attr-modal-actions">
+          <button
+            type="button"
+            className="attr-modal-btn attr-modal-danger shape-info-delete"
+            onClick={onDelete}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+            Delete
+          </button>
           <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onCancel}>
             Cancel
           </button>

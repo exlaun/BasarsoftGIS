@@ -48,7 +48,13 @@ public class GeometryService : IGeometryService
             case "line" when geom.OgcGeometryType == OgcGeometryType.LineString:
                 return await AddAsync(_db.Lines, geom, request, userId);
             case "polygon" when geom.OgcGeometryType == OgcGeometryType.Polygon:
-                return await AddAsync(_db.Polygons, geom, request, userId);
+                // Draw-time polygon save keeps the older "inside" result: count existing rows before
+                // inserting this polygon, otherwise it would count itself.
+                var containedCount = await CountContainedAsync(geom, userId);
+                var saved = await AddAsync(_db.Polygons, geom, request, userId);
+                if (saved is not null)
+                    saved.IntersectionCount = containedCount;
+                return saved;
             default:
                 return null; // unknown type or WKT geometry doesn't match the table
         }
@@ -98,6 +104,9 @@ public class GeometryService : IGeometryService
             Color = request.Color,
             Geom = geom,
             CreatedAt = DateTime.UtcNow,
+            // A never-edited shape reports its creator as the last modifier (same semantics as the
+            // modified_date = created_at backfill).
+            ModifiedUserId = userId,
         };
         set.Add(entity);
         await _db.SaveChangesAsync();
@@ -123,8 +132,21 @@ public class GeometryService : IGeometryService
             return false;
 
         entity.IsDeleted = true;
+        // A soft delete is a modification of the row, so it's audited like any other edit.
+        entity.ModifiedUserId = userId;
         await _db.SaveChangesAsync();
         return true;
+    }
+
+    // Counts the caller's existing shapes that fall fully INSIDE a polygon being saved. This is
+    // intentionally stricter than the Analysis tool below: .Within() maps to ST_Within, so a shape
+    // that only clips or touches the polygon edge is not counted.
+    private async Task<int> CountContainedAsync(Geometry area, int userId)
+    {
+        var points = await _db.Points.CountAsync(x => x.UserId == userId && x.Geom.Within(area));
+        var lines = await _db.Lines.CountAsync(x => x.UserId == userId && x.Geom.Within(area));
+        var polygons = await _db.Polygons.CountAsync(x => x.UserId == userId && x.Geom.Within(area));
+        return points + lines + polygons;
     }
 
     // Updates one shape the caller owns. `expectedType` guards the geometry column: a point can't be
@@ -160,17 +182,18 @@ public class GeometryService : IGeometryService
 
         entity.Name = request.Name;
         entity.Color = request.Color;
+        entity.ModifiedUserId = userId;
         // ModifiedDate is stamped automatically by AppDbContext.SaveChanges (IGeoFeature : IAuditable).
         await _db.SaveChangesAsync();
         return GeometryUpdateResult.Ok(ToResponse(entity));
     }
 
     // Counts the caller's shapes that INTERSECT `area` (`.Intersects()` -> PostGIS ST_Intersects). Per
-    // the analysis-tool spec a shape counts even if it only slightly overlaps the polygon — full
-    // containment is NOT required (this is the deliberate difference from the earlier draw-time count,
-    // which used ST_Within). The three counts run sequentially because a single DbContext is not
-    // thread-safe (no Task.WhenAll). Scope is the caller's own shapes, matching the per-user isolation
-    // used everywhere else — widen the UserId filter here for a shared, cross-user inventory.
+    // the analysis-tool spec a shape counts even if it only slightly overlaps the polygon; full
+    // containment is NOT required. This deliberately differs from saved-polygon counting above, which
+    // uses ST_Within. The three counts run sequentially because a single DbContext is not thread-safe
+    // (no Task.WhenAll). Scope is the caller's own shapes, matching the per-user isolation used
+    // everywhere else; widen the UserId filter here for a shared, cross-user inventory.
     public async Task<AnalysisResponse?> AnalyzeAsync(string wkt, int userId)
     {
         Geometry area;
@@ -201,6 +224,96 @@ public class GeometryService : IGeometryService
         };
     }
 
+    // The query panel's contract: filter, sort, AND page in SQL — the client never trims rows itself.
+    // The three tables share an identical projected shape, so Queryable.Concat chains them into a
+    // single UNION ALL; CountAsync and OrderBy/Skip/Take then compose over that union in one statement
+    // (EF Core translates set operations when both operands project to the same member-init shape).
+    // The global !IsDeleted && IsActive filter applies inside each operand automatically. Returns null
+    // for values outside the SortBy/SortDir/Types whitelists (the controller turns that into a 400).
+    public async Task<GeometryQueryResponse?> QueryPageAsync(GeometryQueryRequest request, int userId)
+    {
+        var sortBy = request.SortBy.Trim().ToLowerInvariant();
+        var sortDir = request.SortDir.Trim().ToLowerInvariant();
+        if (sortBy is not ("name" or "createdat") || sortDir is not ("asc" or "desc"))
+            return null;
+
+        // CSV type filter -> the tables to union. Blank means all three; an unknown token is a 400,
+        // not silently ignored, so a typo like "poligon" can't masquerade as an empty result.
+        string[] included = string.IsNullOrWhiteSpace(request.Types)
+            ? ["point", "line", "polygon"]
+            : request.Types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(t => t.ToLowerInvariant()).Distinct().ToArray();
+        if (included.Length == 0 || included.Any(t => t is not ("point" or "line" or "polygon")))
+            return null;
+
+        // Case-insensitive "contains" via ILIKE. The user's term is escaped so %, _ and \ match
+        // literally — otherwise searching "100%" would match every row.
+        string? pattern = null;
+        var term = request.Name?.Trim();
+        if (!string.IsNullOrEmpty(term))
+            pattern = "%" + term.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+
+        IQueryable<GeometryListItem>? query = null;
+        foreach (var type in included)
+        {
+            var part = type switch
+            {
+                "point" => ProjectRows(_db.Points, "point", userId, pattern),
+                "line" => ProjectRows(_db.Lines, "line", userId, pattern),
+                _ => ProjectRows(_db.Polygons, "polygon", userId, pattern),
+            };
+            query = query is null ? part : query.Concat(part);
+        }
+
+        // Two sequential awaits on purpose: one DbContext is not thread-safe (no Task.WhenAll).
+        var total = await query!.CountAsync();
+
+        var ordered = (sortBy, descending: sortDir == "desc") switch
+        {
+            ("name", false) => query!.OrderBy(r => r.Name),
+            ("name", true) => query!.OrderByDescending(r => r.Name),
+            ("createdat", false) => query!.OrderBy(r => r.CreatedAt),
+            _ => query!.OrderByDescending(r => r.CreatedAt),
+        };
+
+        // (Type, Id) tie-break makes the order total: Id alone repeats across the union (point 3 vs
+        // line 3), and LIMIT/OFFSET over a non-total order can duplicate or drop rows between pages.
+        var items = await ordered
+            .ThenBy(r => r.Type)
+            .ThenBy(r => r.Id)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToListAsync();
+
+        return new GeometryQueryResponse
+        {
+            Items = items,
+            Total = total,
+            Page = request.Page,
+            PageSize = request.PageSize,
+        };
+    }
+
+    // One table's contribution to the union: the caller's rows, optionally name-filtered, projected
+    // to the shared row shape with its type discriminator baked in.
+    private static IQueryable<GeometryListItem> ProjectRows<T>(
+        DbSet<T> set, string type, int userId, string? namePattern)
+        where T : class, IGeoFeature
+    {
+        IQueryable<T> q = set.Where(x => x.UserId == userId);
+        if (namePattern is not null)
+            q = q.Where(x => x.Name != null && EF.Functions.ILike(x.Name, namePattern, "\\"));
+        return q.Select(x => new GeometryListItem
+        {
+            Id = x.Id,
+            Type = type,
+            Name = x.Name,
+            Color = x.Color,
+            CreatedAt = x.CreatedAt,
+            ModifiedDate = x.ModifiedDate,
+        });
+    }
+
     private static GeometryResponse ToResponse(IGeoFeature entity) => new()
     {
         Id = entity.Id,
@@ -210,5 +323,6 @@ public class GeometryService : IGeometryService
         Color = entity.Color,
         CreatedAt = entity.CreatedAt,
         ModifiedDate = entity.ModifiedDate,
+        ModifiedUserId = entity.ModifiedUserId,
     };
 }

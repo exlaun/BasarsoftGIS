@@ -6,7 +6,7 @@ public interface IGeometryService
 {
     // Saves a shape (from WKT) into the table for `type` (point|line|polygon), owned by `userId`.
     // Returns the saved row as WKT, or null if the type is unknown / the WKT is invalid or the
-    // wrong geometry type for that table.
+    // wrong geometry type for that table. Polygon creates also include the contained-shape count.
     Task<GeometryResponse?> CreateAsync(string type, GeometryCreateRequest request, int userId);
 
     // Lists the caller's non-deleted shapes of one type as WKT. Empty if the type is unknown.
@@ -27,4 +27,8 @@ public interface IGeometryService
     // as WKT — even a small overlap counts (ST_Intersects). The polygon is NOT saved. Returns null if
     // the WKT is invalid or isn't a polygon.
     Task<AnalysisResponse?> AnalyzeAsync(string wkt, int userId);
+
+    // One page of the caller's shapes as flat rows, filtered/sorted/paged IN SQL (the query panel's
+    // server-side contract). Returns null when SortBy/SortDir/Types fall outside their whitelists.
+    Task<GeometryQueryResponse?> QueryPageAsync(GeometryQueryRequest request, int userId);
 }

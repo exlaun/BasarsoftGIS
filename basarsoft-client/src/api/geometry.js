@@ -10,7 +10,8 @@ export async function listAllGeometry() {
 }
 
 // Save a drawn shape. `wkt` is Well-Known Text in EPSG:4326 (lon/lat). `name` and `color` come from
-// the attribute popup. For polygons the response also carries `intersectionCount`. Returns the saved row.
+// the attribute popup. Polygon creates also return `intersectionCount`: existing shapes fully within
+// the saved polygon (stricter than the temporary Analysis tool's intersects count).
 export async function saveGeometry(type, wkt, name, color) {
   const { data } = await client.post(`/api/geometry/${type}`, {
     wkt,
@@ -40,5 +41,13 @@ export async function deleteGeometry(type, id) {
 // shapes intersect it, broken down by type. The polygon is NOT saved on the server.
 export async function analyzeArea(wkt) {
   const { data } = await client.post('/api/geometry/analysis', { wkt })
+  return data
+}
+
+// Query panel: one page of the user's shapes as flat rows { items, total, page, pageSize }.
+// Filtering (name/types), sorting and paging all happen in SQL on the server — params are
+// { name?, types? (CSV), sortBy, sortDir, page, pageSize }.
+export async function queryGeometry(params) {
+  const { data } = await client.get('/api/geometry/query', { params })
   return data
 }

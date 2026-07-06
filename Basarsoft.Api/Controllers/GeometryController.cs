@@ -54,6 +54,35 @@ public class GeometryController : ControllerBase
         }
     }
 
+    // GET /api/geometry/query -> a flat, paged list of the caller's shapes for the query panel.
+    // Filtering (name contains, type), sorting and paging all run in SQL (WHERE / ORDER BY /
+    // LIMIT-OFFSET over a UNION ALL of the three tables) — nothing is trimmed client-side.
+    // Route note: "query" is a literal segment, which ASP.NET Core ranks above the {type} parameter
+    // of GET /api/geometry/{type}, so this can never be captured as type="query".
+    [HttpGet("query")]
+    public async Task<ActionResult<GeometryQueryResponse>> Query([FromQuery] GeometryQueryRequest request)
+    {
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+
+            var result = await _geometryService.QueryPageAsync(request, userId);
+            if (result is null)
+                return BadRequest(new
+                {
+                    message = "Invalid query: sortBy must be name|createdAt, sortDir asc|desc, " +
+                              "types a comma list of point|line|polygon.",
+                });
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, nameof(Query));
+        }
+    }
+
     // GET /api/geometry/{type} -> the caller's shapes of a single type.
     [HttpGet("{type}")]
     public async Task<ActionResult<IReadOnlyList<GeometryResponse>>> List(string type)

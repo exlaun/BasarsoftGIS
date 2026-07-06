@@ -1,0 +1,240 @@
+/* Right-side slide-in drawer over the map. Always mounted (so the close animation plays);
+   z-index 5 sits above the status stack (4) and layer panel (3) but below modal overlays (10),
+   so a shape's info popup opens on top of the open drawer. */
+.query-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(400px, 92vw);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border-left: 1px solid var(--bar-border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25);
+  transform: translateX(100%);
+  /* Delay hiding until the slide-out finishes so the close animation isn't cut short. */
+  transition: transform 0.25s ease, visibility 0s linear 0.25s;
+  visibility: hidden;
+}
+
+.query-panel.is-open {
+  transform: translateX(0);
+  transition: transform 0.25s ease;
+  visibility: visible;
+}
+
+.query-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.query-panel-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.query-panel-close {
+  display: inline-flex;
+  padding: 0.3rem;
+  border: 1px solid var(--bar-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bar-text);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.query-panel-close:hover {
+  background: var(--bar-hover);
+}
+
+.query-panel-search {
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--bar-border);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--bar-text);
+  font-size: 0.88rem;
+}
+
+.query-panel-search::placeholder {
+  color: currentColor;
+  opacity: 0.5;
+}
+
+.query-panel-types {
+  display: flex;
+  gap: 0.9rem;
+}
+
+.query-panel-type {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  cursor: pointer;
+  user-select: none;
+}
+
+.query-panel-type input[type='checkbox'] {
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.query-panel-table-wrap {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--bar-border);
+  border-radius: 8px;
+}
+
+.query-panel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.query-panel-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bar-bg);
+  text-align: left;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.75;
+  border-bottom: 1px solid var(--bar-border);
+}
+
+.query-panel-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.query-panel-sort:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.query-panel-chevron {
+  flex-shrink: 0;
+}
+
+.query-panel-row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.query-panel-row:hover {
+  background: var(--bar-hover);
+}
+
+.query-panel-table td {
+  padding: 0.5rem 0.55rem;
+  border-bottom: 1px solid var(--bar-border);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 0;
+}
+
+.query-panel-table td:first-child {
+  width: 55%;
+}
+
+.query-panel-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  vertical-align: baseline;
+}
+
+.query-panel-type-cell {
+  text-transform: capitalize;
+  opacity: 0.75;
+}
+
+.query-panel-date {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.query-panel-empty {
+  margin: 0;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.82rem;
+  opacity: 0.7;
+}
+
+.query-panel-error {
+  color: #fca5a5;
+  opacity: 1;
+}
+
+.query-panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.query-panel-total {
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+
+.query-panel-pager {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.query-panel-page-btn {
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid var(--bar-border);
+  background: transparent;
+  color: var(--bar-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.query-panel-page-btn:hover:not(:disabled) {
+  background: var(--bar-hover);
+}
+
+.query-panel-page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.query-panel-page-label {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}

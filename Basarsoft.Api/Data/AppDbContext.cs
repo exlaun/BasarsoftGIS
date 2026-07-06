@@ -45,6 +45,8 @@ public class AppDbContext : DbContext
         // Hide both soft-deleted and deactivated shapes from every query automatically.
         entity.HasQueryFilter(x => !x.IsDeleted && x.IsActive);
         entity.HasOne<User>().WithMany().HasForeignKey(x => x.UserId);
+        // Second FK to users: who last modified the shape (nullable — legacy rows predate the column).
+        entity.HasOne<User>().WithMany().HasForeignKey(x => x.ModifiedUserId);
     }
 
     // Stamp ModifiedDate on every insert/update so no service ever forgets to.

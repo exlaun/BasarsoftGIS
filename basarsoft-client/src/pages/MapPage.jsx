@@ -12,14 +12,19 @@ import Modify from 'ol/interaction/Modify'
 import Translate from 'ol/interaction/Translate'
 import WKT from 'ol/format/WKT'
 import { fromLonLat } from 'ol/proj'
+import { getCenter } from 'ol/extent'
 import { Style, Circle as CircleStyle, Fill, Stroke } from 'ol/style'
 import 'ol/ol.css'
 import { useAuth } from '../context/auth-context'
 import SessionTimer from '../components/SessionTimer'
 import ThemeToggle from '../components/ThemeToggle'
 import DrawToolbar from '../components/DrawToolbar'
+import LayerPanel from '../components/LayerPanel'
 import AttributeModal from '../components/AttributeModal'
 import ShapeInfoModal from '../components/ShapeInfoModal'
+import ConfirmModal from '../components/ConfirmModal'
+import ShapePickerModal from '../components/ShapePickerModal'
+import QueryPanel from '../components/QueryPanel'
 import { listAllGeometry, saveGeometry, updateGeometry, deleteGeometry, analyzeArea } from '../api/geometry'
 import './MapPage.css'
 
@@ -68,7 +73,10 @@ export default function MapPage() {
   const mapElementRef = useRef(null)
   const tooltipElementRef = useRef(null)
   const mapRef = useRef(null)
-  const sourceRef = useRef(null)
+  // One VectorSource/VectorLayer per geometry type so each can be shown/hidden independently
+  // by the layer-control checkboxes. Keyed by apiType: { point, line, polygon }.
+  const sourcesRef = useRef(null)
+  const layersRef = useRef(null)
   const analysisSourceRef = useRef(null)
   const statusTimerRef = useRef(null)
   // Geometry captured before an edit so a cancelled edit can restore the shape's original position.
@@ -84,10 +92,20 @@ export default function MapPage() {
   const [pendingDraw, setPendingDraw] = useState(null)
   // The saved shape currently selected for viewing/editing (Select tool): { feature } or null.
   const [selectedShape, setSelectedShape] = useState(null)
+  // True while the delete-confirmation dialog is replacing the info popup for the selected shape.
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // Features stacked under one Select-tool click (2+): drives the which-shape chooser modal.
+  const [overlapChoices, setOverlapChoices] = useState(null)
   // True while the selected shape's geometry is being dragged (Modify/Translate active).
   const [editingGeom, setEditingGeom] = useState(false)
   // Latest inventory-analysis result { points, lines, polygons, total }, or null. Persists until cleared.
   const [analysisResult, setAnalysisResult] = useState(null)
+  // Which geometry types are visible on the map (layer-control checkboxes). All shown by default.
+  const [layerVisibility, setLayerVisibility] = useState({ point: true, line: true, polygon: true })
+  // Query-panel drawer open/closed.
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  // Bumped after every successful create/update/move/delete so an open query panel refetches.
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // Stable so effects can depend on it without re-running; shows a transient toast. `duration` lets
   // an important message linger longer so it isn't missed.
@@ -99,8 +117,20 @@ export default function MapPage() {
 
   // Create the map once and load the user's saved shapes.
   useEffect(() => {
-    const source = new VectorSource()
-    sourceRef.current = source
+    // Per-feature style so each shape renders in its own saved color.
+    const styleFn = (feature) => makeFeatureStyle(feature.get('color'))
+    const sources = {
+      point: new VectorSource(),
+      line: new VectorSource(),
+      polygon: new VectorSource(),
+    }
+    const layers = {
+      point: new VectorLayer({ source: sources.point, style: styleFn }),
+      line: new VectorLayer({ source: sources.line, style: styleFn }),
+      polygon: new VectorLayer({ source: sources.polygon, style: styleFn }),
+    }
+    sourcesRef.current = sources
+    layersRef.current = layers
     const analysisSource = new VectorSource()
     analysisSourceRef.current = analysisSource
 
@@ -108,8 +138,10 @@ export default function MapPage() {
       target: mapElementRef.current,
       layers: [
         new TileLayer({ source: new OSM() }),
-        // Per-feature style so each shape renders in its own saved color.
-        new VectorLayer({ source, style: (feature) => makeFeatureStyle(feature.get('color')) }),
+        // Polygons under lines under points, so small shapes stay clickable on top of large ones.
+        layers.polygon,
+        layers.line,
+        layers.point,
         // Temporary analysis polygon lives on its own layer so it never mixes with saved shapes.
         new VectorLayer({ source: analysisSource, style: ANALYSIS_STYLE }),
       ],
@@ -165,7 +197,8 @@ export default function MapPage() {
             feature.set('name', item.name)
             feature.set('color', item.color)
             feature.set('modifiedDate', item.modifiedDate)
-            source.addFeature(feature)
+            feature.set('modifiedUserId', item.modifiedUserId)
+            sources[apiType].addFeature(feature)
           }
         }
       })
@@ -175,23 +208,43 @@ export default function MapPage() {
       map.un('pointermove', onPointerMove)
       map.setTarget(undefined)
       mapRef.current = null
-      sourceRef.current = null
+      sourcesRef.current = null
+      layersRef.current = null
       analysisSourceRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Apply the layer-control checkboxes: hidden layers keep their features but stop rendering,
+  // and OpenLayers' hit-testing (hover/select) skips invisible layers automatically.
+  useEffect(() => {
+    for (const [type, layer] of Object.entries(layersRef.current ?? {})) {
+      layer.setVisible(layerVisibility[type])
+    }
+  }, [layerVisibility])
+
+  const toggleLayer = (type) =>
+    setLayerVisibility((prev) => ({ ...prev, [type]: !prev[type] }))
+
+  // Picking a draw tool re-enables that type's layer if it was unchecked, so a freshly
+  // saved shape doesn't silently vanish into a hidden layer.
+  const handleSelectTool = (tool) => {
+    const apiType = TOOL_CONFIG[tool]?.apiType
+    if (apiType) setLayerVisibility((prev) => (prev[apiType] ? prev : { ...prev, [apiType]: true }))
+    setActiveTool(tool)
+  }
 
   // React to the selected tool: swap the Draw interaction, or wire up select / delete / analysis clicks.
   // While a geometry edit is in progress no tool interaction is added, so the Modify/Translate handles
   // (attached by the effect below) can't fight a draw/delete interaction.
   useEffect(() => {
     const map = mapRef.current
-    const source = sourceRef.current
-    if (!map || !source || editingGeom) return undefined
+    const sources = sourcesRef.current
+    if (!map || !sources || editingGeom) return undefined
 
     if (activeTool in TOOL_CONFIG) {
       const { drawType, apiType } = TOOL_CONFIG[activeTool]
-      const draw = new Draw({ source, type: drawType })
+      const draw = new Draw({ source: sources[apiType], type: drawType })
 
       // On finish, don't save yet — capture the shape and open the attribute popup.
       draw.on('drawend', (event) => {
@@ -210,34 +263,27 @@ export default function MapPage() {
 
     if (activeTool === 'select') {
       const onClick = (event) => {
-        const feature = map.forEachFeatureAtPixel(event.pixel, (f) => f)
-        if (!feature) return
-        const apiType = feature.get('apiType')
-        const dbId = feature.get('dbId')
-        if (!apiType || dbId == null) return // not a saved shape (e.g. the analysis polygon)
-        setSelectedShape({ feature })
-      }
-      map.on('singleclick', onClick)
-      return () => map.un('singleclick', onClick)
-    }
-
-    if (activeTool === 'delete') {
-      const onClick = async (event) => {
-        const feature = map.forEachFeatureAtPixel(event.pixel, (f) => f)
-        if (!feature) return
-        const apiType = feature.get('apiType')
-        const dbId = feature.get('dbId')
-        if (!apiType || dbId == null) return // an unsaved shape — nothing to delete server-side
-        try {
-          await deleteGeometry(apiType, dbId)
-          source.removeFeature(feature)
-          flashStatus('success', 'Shape deleted.')
-        } catch {
-          flashStatus('error', 'Could not delete shape.')
+        // Collect EVERY saved shape under the click, not just the topmost: the callback returning
+        // undefined tells forEachFeatureAtPixel to keep iterating (across all visible layers,
+        // top-to-bottom), so stacked shapes all land in `hits`. Hidden layers are skipped by the
+        // hit-test itself, and the analysis polygon fails the apiType/dbId guard.
+        const hits = []
+        map.forEachFeatureAtPixel(event.pixel, (f) => {
+          if (f.get('apiType') && f.get('dbId') != null && !hits.includes(f)) hits.push(f)
+        })
+        if (hits.length === 0) return
+        if (hits.length === 1) {
+          setSelectedShape({ feature: hits[0] })
+          return
         }
+        // Overlapping shapes: let the user pick which one to open.
+        setOverlapChoices(hits)
       }
       map.on('singleclick', onClick)
-      return () => map.un('singleclick', onClick)
+      return () => {
+        map.un('singleclick', onClick)
+        setOverlapChoices(null) // no stale chooser if the tool changes mid-choice
+      }
     }
 
     if (activeTool === 'analysis') {
@@ -284,13 +330,38 @@ export default function MapPage() {
     const map = mapRef.current
     if (!map || !editingGeom || !selectedShape) return undefined
 
-    const features = new Collection([selectedShape.feature])
+    const feature = selectedShape.feature
+    const features = new Collection([feature])
     const translate = new Translate({ features, hitTolerance: 6 })
     const modify = new Modify({ features, insertVertexCondition: () => false })
     map.addInteraction(translate)
     map.addInteraction(modify)
 
+    // Click-to-place: a single click AWAY from the shape moves it there (points land exactly on the
+    // click; lines/polygons translate so their extent center does). This can't fight the drag paths:
+    // OL only fires `singleclick` when the pointer did NOT move between down and up, so a Translate/
+    // Modify drag never also triggers it. The one real overlap — clicking the shape itself without
+    // dragging — is treated as a grab, not a jump, via the self-hit guard below (same 6px tolerance
+    // as Translate, so "grabbable" and "ignored for placement" are the same area).
+    const onClick = (event) => {
+      const hitSelf = map.forEachFeatureAtPixel(
+        event.pixel,
+        (f) => (f === feature ? f : undefined),
+        { hitTolerance: 6 },
+      )
+      if (hitSelf) return
+      const geom = feature.getGeometry()
+      if (geom.getType() === 'Point') {
+        geom.setCoordinates(event.coordinate)
+      } else {
+        const [centerX, centerY] = getCenter(geom.getExtent())
+        geom.translate(event.coordinate[0] - centerX, event.coordinate[1] - centerY)
+      }
+    }
+    map.on('singleclick', onClick)
+
     return () => {
+      map.un('singleclick', onClick)
       map.removeInteraction(modify)
       map.removeInteraction(translate)
     }
@@ -307,10 +378,17 @@ export default function MapPage() {
       feature.set('name', name || null)
       feature.set('color', color || DEFAULT_COLOR)
       feature.set('modifiedDate', saved.modifiedDate)
+      feature.set('modifiedUserId', saved.modifiedUserId)
       feature.changed() // re-run the layer style so the shape shows in its chosen color
-      flashStatus('success', `${apiType} saved.`)
+      setRefreshKey((key) => key + 1)
+      if (apiType === 'polygon' && saved.intersectionCount != null) {
+        const n = saved.intersectionCount
+        flashStatus('success', `Polygon saved. ${n} ${n === 1 ? 'inventory' : 'inventories'} inside.`, 6000)
+      } else {
+        flashStatus('success', `${apiType} saved.`)
+      }
     } catch {
-      sourceRef.current?.removeFeature(feature) // roll the drawing back if the save failed
+      sourcesRef.current?.[apiType].removeFeature(feature) // roll the drawing back if the save failed
       flashStatus('error', `Could not save ${apiType}.`)
     } finally {
       setPendingDraw(null)
@@ -319,7 +397,7 @@ export default function MapPage() {
 
   // Attribute popup (new draw) — Cancel: throw the drawn shape away, nothing is saved.
   const handleModalCancel = () => {
-    if (pendingDraw) sourceRef.current?.removeFeature(pendingDraw.feature)
+    if (pendingDraw) sourcesRef.current?.[pendingDraw.apiType].removeFeature(pendingDraw.feature)
     setPendingDraw(null)
   }
 
@@ -334,7 +412,9 @@ export default function MapPage() {
       feature.set('name', name)
       feature.set('color', color)
       feature.set('modifiedDate', updated.modifiedDate)
+      feature.set('modifiedUserId', updated.modifiedUserId)
       feature.changed()
+      setRefreshKey((key) => key + 1)
       flashStatus('success', 'Shape updated.')
     } catch {
       flashStatus('error', 'Could not update shape.')
@@ -371,7 +451,9 @@ export default function MapPage() {
       feature.set('name', name)
       feature.set('color', color)
       feature.set('modifiedDate', updated.modifiedDate)
+      feature.set('modifiedUserId', updated.modifiedUserId)
       feature.changed()
+      setRefreshKey((key) => key + 1)
       flashStatus('success', 'Location updated.')
     } catch {
       // Roll the shape back to where it was if the save failed.
@@ -397,12 +479,59 @@ export default function MapPage() {
   }
 
   // Info popup — Cancel: close without changes.
-  const handleInfoCancel = () => setSelectedShape(null)
+  const handleInfoCancel = () => {
+    setSelectedShape(null)
+    setConfirmingDelete(false)
+  }
+
+  // Confirm dialog — Delete: soft-delete on the server, then drop the feature from its layer.
+  // On failure the selection is kept, so the info popup comes back as a natural retry path.
+  const handleConfirmDelete = async () => {
+    if (!selectedShape) return
+    const { feature } = selectedShape
+    const apiType = feature.get('apiType')
+    const dbId = feature.get('dbId')
+    try {
+      await deleteGeometry(apiType, dbId)
+      sourcesRef.current?.[apiType].removeFeature(feature)
+      setRefreshKey((key) => key + 1)
+      flashStatus('success', 'Shape deleted.')
+      setSelectedShape(null)
+    } catch {
+      flashStatus('error', 'Could not delete shape.')
+    } finally {
+      setConfirmingDelete(false)
+    }
+  }
 
   // Analysis — Clear: remove the temporary polygon and hide the result panel.
   const handleClearAnalysis = () => {
     analysisSourceRef.current?.clear()
     setAnalysisResult(null)
+  }
+
+  // Query panel — row click: fly the map to that shape and open its info popup. The drawer stays
+  // open underneath (the popup overlay has the higher z-index). The right padding keeps the shape
+  // centered in the VISIBLE part of the map instead of under the 400px drawer.
+  const handleRowClick = (item) => {
+    if (editingGeom) return // don't hijack an in-progress geometry edit
+    const feature = sourcesRef.current?.[item.type]
+      ?.getFeatures()
+      .find((f) => f.get('dbId') === item.id)
+    if (!feature) {
+      flashStatus('error', 'Shape is not on the map.')
+      return
+    }
+    // Re-enable the type's layer if it was unchecked — zooming to an invisible shape helps no one.
+    setLayerVisibility((prev) => (prev[item.type] ? prev : { ...prev, [item.type]: true }))
+    const geom = feature.getGeometry()
+    const view = mapRef.current.getView()
+    if (geom.getType() === 'Point') {
+      view.animate({ center: geom.getCoordinates(), zoom: 15, duration: 450 })
+    } else {
+      view.fit(geom.getExtent(), { padding: [90, 440, 90, 90], maxZoom: 16, duration: 450 })
+    }
+    setSelectedShape({ feature })
   }
 
   return (
@@ -411,8 +540,29 @@ export default function MapPage() {
         <div className="map-bar-left">
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.0.4</span>
+        <span className="map-title">BasarsoftInternshipTask v0.0.6</span>
         <div className="map-bar-right">
+          <button
+            className="map-logout"
+            type="button"
+            onClick={() => setDrawerOpen((openNow) => !openNow)}
+            aria-pressed={drawerOpen}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+            </svg>{' '}
+            Shapes
+          </button>
           <ThemeToggle />
           <button className="map-logout" type="button" onClick={logout}>
             Logout
@@ -420,22 +570,53 @@ export default function MapPage() {
         </div>
       </header>
       <div className="map-body">
-        <DrawToolbar activeTool={activeTool} onSelectTool={setActiveTool} />
+        <DrawToolbar activeTool={activeTool} onSelectTool={handleSelectTool} />
         <div ref={mapElementRef} className="map-container" />
         <div ref={tooltipElementRef} className="map-tooltip" hidden />
+
+        {/* Hidden while a geometry edit is active — hiding the very layer being edited makes no sense. */}
+        {!editingGeom && <LayerPanel visibility={layerVisibility} onToggle={toggleLayer} />}
+
+        <QueryPanel
+          open={drawerOpen}
+          refreshKey={refreshKey}
+          onRowClick={handleRowClick}
+          onClose={() => setDrawerOpen(false)}
+        />
 
         {pendingDraw && (
           <AttributeModal onSave={handleModalSave} onCancel={handleModalCancel} />
         )}
-        {selectedShape && !editingGeom && (
+        {selectedShape && !editingGeom && !confirmingDelete && (
           <ShapeInfoModal
             type={selectedShape.feature.get('apiType')}
             initialName={selectedShape.feature.get('name')}
             initialColor={selectedShape.feature.get('color')}
             modifiedDate={selectedShape.feature.get('modifiedDate')}
+            modifiedUserId={selectedShape.feature.get('modifiedUserId')}
             onSave={handleInfoSave}
             onEditLocation={handleEditLocation}
+            onDelete={() => setConfirmingDelete(true)}
             onCancel={handleInfoCancel}
+          />
+        )}
+        {selectedShape && confirmingDelete && (
+          <ConfirmModal
+            title="Delete shape"
+            message={`Delete "${selectedShape.feature.get('name') ?? 'this shape'}"? It will be hidden from the map but kept in the database (soft delete).`}
+            confirmLabel="Delete"
+            onConfirm={handleConfirmDelete}
+            onCancel={() => setConfirmingDelete(false)}
+          />
+        )}
+        {overlapChoices && (
+          <ShapePickerModal
+            features={overlapChoices}
+            onPick={(feature) => {
+              setOverlapChoices(null)
+              setSelectedShape({ feature })
+            }}
+            onCancel={() => setOverlapChoices(null)}
           />
         )}
 
@@ -459,7 +640,9 @@ export default function MapPage() {
 
           {editingGeom && (
             <div className="map-edit-bar" role="status">
-              <span className="map-edit-hint">Drag the shape or its points, then save.</span>
+              <span className="map-edit-hint">
+                Drag the shape or its points, or click the map to move it there, then save.
+              </span>
               <div className="map-edit-actions">
                 <button type="button" className="map-edit-btn map-edit-cancel" onClick={handleGeomCancel}>
                   Cancel

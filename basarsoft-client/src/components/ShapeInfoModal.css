@@ -45,3 +45,8 @@
 .shape-info-edit-location:hover:not(:disabled) {
   background: var(--bar-hover);
 }
+
+/* Push the destructive action away from Cancel/Save so it can't be hit by muscle memory. */
+.shape-info-delete {
+  margin-right: auto;
+}

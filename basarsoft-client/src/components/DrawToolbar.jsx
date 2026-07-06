@@ -49,13 +49,6 @@ const PolygonIcon = (
     <path d="M12 2l9.5 6.9-3.6 11.2H6.1L2.5 8.9 12 2z" />
   </svg>
 )
-// Trash — delete a shape.
-const DeleteIcon = (
-  <svg {...iconProps}>
-    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-    <path d="M10 11v6M14 11v6" />
-  </svg>
-)
 // Bar chart — inventory analysis (count shapes under a temporary polygon).
 const AnalysisIcon = (
   <svg {...iconProps}>
@@ -65,15 +58,15 @@ const AnalysisIcon = (
   </svg>
 )
 
-// Tool keys match what MapPage expects: 'none' pans, 'select' inspects/edits, the three OL draw types
-// draw, 'delete' removes, 'analysis' counts shapes under a temporary polygon.
+// Tool keys match what MapPage expects: 'none' pans, 'select' inspects/edits/deletes, the three OL
+// draw types draw, 'analysis' counts shapes under a temporary polygon. Deleting lives inside the
+// Select popup (behind a confirmation) rather than as a click-to-delete tool.
 const TOOLS = [
   { key: 'none', label: 'Pan', icon: PanIcon },
   { key: 'select', label: 'Select', icon: SelectIcon },
   { key: 'Point', label: 'Point', icon: PointIcon },
   { key: 'LineString', label: 'Line', icon: LineIcon },
   { key: 'Polygon', label: 'Polygon', icon: PolygonIcon },
-  { key: 'delete', label: 'Delete', icon: DeleteIcon },
   { key: 'analysis', label: 'Analysis', icon: AnalysisIcon },
 ]
 
@@ -81,11 +74,10 @@ const TOOLS = [
 // finishes on a single click (no double-click), and only Line/Polygon need a double-click to finish.
 const TOOL_HINTS = {
   none: 'Drag to move the map.',
-  select: 'Click a shape to view and edit it.',
+  select: 'Click a shape to view, edit, or delete it.',
   Point: 'Click on the map to place a point.',
   LineString: 'Click to add points, then double-click to finish the line.',
   Polygon: 'Click to add corners, then double-click to finish the polygon.',
-  delete: 'Click a shape to remove it.',
   analysis: 'Draw a polygon to count the shapes it touches. Nothing is saved.',
 }
 
@@ -99,9 +91,7 @@ export default function DrawToolbar({ activeTool, onSelectTool }) {
           <button
             key={tool.key}
             type="button"
-            className={`draw-tool${activeTool === tool.key ? ' is-active' : ''}${
-              tool.key === 'delete' ? ' is-delete' : ''
-            }`}
+            className={`draw-tool${activeTool === tool.key ? ' is-active' : ''}`}
             onClick={() => onSelectTool(tool.key)}
             aria-pressed={activeTool === tool.key}
             title={tool.label}

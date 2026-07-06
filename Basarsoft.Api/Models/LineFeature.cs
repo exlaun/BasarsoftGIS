@@ -13,5 +13,6 @@ public class LineFeature : IGeoFeature
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public bool IsDeleted { get; set; }
     public bool IsActive { get; set; } = true;
+    public int? ModifiedUserId { get; set; }
     public DateTime ModifiedDate { get; set; } = DateTime.UtcNow;
 }

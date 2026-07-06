@@ -34,5 +34,10 @@ public interface IGeoFeature : IAuditable
     // audit columns (the mentor asked every drawing table to carry the full audit set).
     bool IsActive { get; set; }
 
+    // FK -> users.id. WHO last changed the shape (create / update / soft delete), the companion of
+    // ModifiedDate's WHEN. Stamped from the JWT in the service layer — SaveChanges can't do it because
+    // the DbContext has no user context. Nullable: rows from before this column can't know their editor.
+    int? ModifiedUserId { get; set; }
+
     // ModifiedDate is inherited from IAuditable (stamped in AppDbContext.SaveChanges).
 }

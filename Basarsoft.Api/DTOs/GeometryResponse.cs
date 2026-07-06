@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Basarsoft.Api.DTOs;
 
 // Returned by the geometry read endpoints. The geometry is handed back as WKT text (EPSG:4326),
@@ -18,4 +20,13 @@ public class GeometryResponse
     // Last-edited timestamp, stamped automatically on every insert/update. Surfaced so the info popup
     // can show when a shape was last changed (also the visible evidence that edit-tracking works).
     public DateTime ModifiedDate { get; set; }
+
+    // Who last changed the shape (users.id), the companion of ModifiedDate. Null only for rows that
+    // predate the column and were never touched since.
+    public int? ModifiedUserId { get; set; }
+
+    // Only populated when a polygon is created: how many of the caller's existing shapes fall fully
+    // inside it. Hidden on point/line/read/update responses.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? IntersectionCount { get; set; }
 }
