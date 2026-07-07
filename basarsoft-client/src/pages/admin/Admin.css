@@ -1,0 +1,508 @@
+/* Admin panel — a standalone full-screen section with its own left navbar. Themed via the same CSS
+   variables as the rest of the app (--app-bg / --bar-bg / --bar-text / --bar-border / --bar-hover),
+   plus a few admin-local surface/accent tokens layered on top so both light and dark read well. */
+.admin {
+  --admin-surface: rgba(255, 255, 255, 0.04);
+  --admin-surface-2: rgba(255, 255, 255, 0.08);
+  --admin-accent: #2563eb;
+  --admin-accent-hover: #1d4ed8;
+  --admin-danger: #dc2626;
+
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  background: var(--app-bg);
+  color: var(--bar-text);
+  font-size: 0.9rem;
+}
+
+[data-theme='light'] .admin {
+  --admin-surface: rgba(15, 23, 42, 0.03);
+  --admin-surface-2: rgba(15, 23, 42, 0.07);
+}
+
+/* ---- Left vertical navbar (the mentor's "sol tarafa dik yaslı navbar") ---- */
+.admin-nav {
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1rem 0.85rem;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border-right: 1px solid var(--bar-border);
+}
+
+.admin-nav-brand {
+  padding: 0.3rem 0.6rem 0.9rem;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.admin-nav-brand small {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.admin-nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  color: var(--bar-text);
+  text-decoration: none;
+  font-weight: 600;
+  opacity: 0.8;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.admin-nav-link:hover {
+  background: var(--bar-hover);
+  opacity: 1;
+}
+
+.admin-nav-link.is-active {
+  background: var(--bar-hover);
+  opacity: 1;
+  box-shadow: inset 3px 0 0 var(--admin-accent);
+}
+
+.admin-nav-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--bar-border);
+}
+
+.admin-nav-user {
+  padding: 0 0.6rem;
+  font-size: 0.74rem;
+  opacity: 0.7;
+}
+
+.admin-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-nav-row .admin-btn {
+  flex: 1;
+  justify-content: center;
+}
+
+/* ---- Main content ---- */
+.admin-main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 1.4rem 1.8rem;
+}
+
+.admin-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.1rem;
+}
+
+.admin-page-title {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+
+.admin-page-sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  opacity: 0.65;
+}
+
+/* ---- Buttons ---- */
+.admin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--bar-border);
+  background: var(--admin-surface);
+  color: var(--bar-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+
+.admin-btn:hover:not(:disabled) {
+  background: var(--admin-surface-2);
+}
+
+.admin-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.admin-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-btn-primary {
+  background: var(--admin-accent);
+  border-color: var(--admin-accent);
+  color: #fff;
+}
+
+.admin-btn-primary:hover:not(:disabled) {
+  background: var(--admin-accent-hover);
+}
+
+.admin-btn-danger {
+  background: transparent;
+  border-color: var(--admin-danger);
+  color: var(--admin-danger);
+}
+
+.admin-btn-danger:hover:not(:disabled) {
+  background: var(--admin-danger);
+  color: #fff;
+}
+
+.admin-btn-sm {
+  padding: 0.34rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+/* ---- Card + table ---- */
+.admin-card {
+  background: var(--admin-surface);
+  border: 1px solid var(--bar-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.admin-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--bar-border);
+  white-space: nowrap;
+}
+
+.admin-table th {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  opacity: 0.6;
+  font-weight: 700;
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-table tbody tr:hover {
+  background: var(--admin-surface-2);
+}
+
+.admin-table td.admin-wrap {
+  white-space: normal;
+  max-width: 320px;
+}
+
+.admin-table-actions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.admin-empty {
+  padding: 1.5rem;
+  text-align: center;
+  opacity: 0.6;
+  font-size: 0.85rem;
+}
+
+.admin-muted {
+  opacity: 0.5;
+}
+
+.admin-loading {
+  padding: 2rem;
+  text-align: center;
+  opacity: 0.6;
+}
+
+/* ---- Badges + status ---- */
+.admin-badge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.admin-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.71rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.admin-badge-role {
+  background: rgba(37, 99, 235, 0.16);
+  color: #60a5fa;
+  border-color: rgba(37, 99, 235, 0.4);
+}
+
+.admin-badge-direct {
+  background: rgba(22, 163, 74, 0.16);
+  color: #4ade80;
+  border-color: rgba(22, 163, 74, 0.4);
+}
+
+.admin-badge-muted {
+  background: var(--admin-surface-2);
+  opacity: 0.7;
+}
+
+[data-theme='light'] .admin-badge-role {
+  color: #1d4ed8;
+}
+
+[data-theme='light'] .admin-badge-direct {
+  color: #15803d;
+}
+
+.admin-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.admin-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.admin-dot-on {
+  background: #16a34a;
+}
+
+.admin-dot-off {
+  background: #9ca3af;
+}
+
+/* ---- Modal (fixed, covers the viewport) ---- */
+.admin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.admin-modal {
+  width: min(460px, 100%);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.admin-modal-wide {
+  width: min(560px, 100%);
+}
+
+.admin-modal-head {
+  padding: 1.1rem 1.3rem 0.5rem;
+}
+
+.admin-modal-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.admin-modal-desc {
+  margin: 0.3rem 0 0;
+  font-size: 0.78rem;
+  opacity: 0.7;
+  line-height: 1.4;
+}
+
+.admin-modal-body {
+  padding: 0.8rem 1.3rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.admin-modal-foot {
+  padding: 0.9rem 1.3rem 1.1rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  border-top: 1px solid var(--bar-border);
+}
+
+/* ---- Form fields ---- */
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.admin-field input[type='text'],
+.admin-field input[type='password'],
+.admin-field textarea {
+  padding: 0.5rem 0.6rem;
+  border-radius: 7px;
+  border: 1px solid var(--bar-border);
+  background: var(--admin-surface);
+  color: var(--bar-text);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.admin-field textarea {
+  resize: vertical;
+  min-height: 56px;
+}
+
+.admin-field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-error {
+  margin: 0;
+  color: #f87171;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+/* ---- Checklist (role / permission assignment) ---- */
+.admin-checklist {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--bar-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.admin-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--bar-border);
+  cursor: pointer;
+}
+
+.admin-check-row:last-child {
+  border-bottom: none;
+}
+
+.admin-check-row.is-inherited {
+  background: var(--admin-surface);
+  cursor: not-allowed;
+}
+
+.admin-check-row input {
+  margin-top: 0.15rem;
+}
+
+.admin-check-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.admin-check-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.admin-check-desc {
+  font-size: 0.74rem;
+  opacity: 0.65;
+}
+
+/* ---- Toast ---- */
+.admin-toast {
+  position: fixed;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+
+.admin-toast-success {
+  background: #16a34a;
+}
+
+.admin-toast-error {
+  background: #dc2626;
+}
+
+@media (max-width: 640px) {
+  .admin-nav {
+    flex-basis: 168px;
+  }
+  .admin-main {
+    padding: 1rem;
+  }
+}

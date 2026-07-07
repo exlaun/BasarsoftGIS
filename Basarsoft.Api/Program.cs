@@ -1,9 +1,11 @@
 using System.Text;
 using Basarsoft.Api.Data;
 using Basarsoft.Api.Middleware;
+using Basarsoft.Api.Security;
 using Basarsoft.Api.Services;
 using Basarsoft.Api.Settings;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -30,6 +32,11 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Geometry (drawing) service.
 builder.Services.AddScoped<IGeometryService, GeometryService>();
+
+// Admin (RBAC) services: user/role/permission management + effective-permission resolution.
+builder.Services.AddScoped<IPermissionService, PermissionService>();
+builder.Services.AddScoped<IRoleService, RoleService>();
+builder.Services.AddScoped<IUserAdminService, UserAdminService>();
 
 // Global exception handling: a final safety net that converts any unhandled exception into a clean
 // 500 JSON response (the controllers also try-catch individually). AddProblemDetails() supplies the
@@ -82,7 +89,17 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Key))
         };
     });
-builder.Services.AddAuthorization();
+// Authorization with a DB-backed "AdminAccess" policy: AdminAccessHandler checks the caller's effective
+// permissions, so only users holding a management permission can reach the admin controllers.
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(AdminAccessRequirement.PolicyName, policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.AddRequirements(new AdminAccessRequirement());
+    });
+});
+builder.Services.AddScoped<IAuthorizationHandler, AdminAccessHandler>();
 
 // CORS policy so the React (Vite) dev server is allowed to call this API.
 const string AllowReactApp = "AllowReactApp";
@@ -95,6 +112,14 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Seed the RBAC baseline (permission catalogue, Admin role, and the demo0 admin grant) idempotently on
+// startup. The migration must already be applied (tables exist); each step is guarded so re-runs no-op.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await AdminSeeder.SeedAsync(db);
+}
 
 // Catch unhandled exceptions first so nothing downstream can leak a stack trace. Delegates to
 // GlobalExceptionHandler (registered above).

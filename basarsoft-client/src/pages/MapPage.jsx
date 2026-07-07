@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Map from 'ol/Map'
 import View from 'ol/View'
 import Overlay from 'ol/Overlay'
@@ -25,6 +26,7 @@ import ShapeInfoModal from '../components/ShapeInfoModal'
 import ConfirmModal from '../components/ConfirmModal'
 import ShapePickerModal from '../components/ShapePickerModal'
 import QueryPanel from '../components/QueryPanel'
+import InventoryInfoModal from '../components/InventoryInfoModal'
 import { listAllGeometry, saveGeometry, updateGeometry, deleteGeometry, analyzeArea } from '../api/geometry'
 import './MapPage.css'
 
@@ -36,11 +38,11 @@ const TURKEY_CENTER = [35.2433, 38.9637]
 const MAP_PROJ = 'EPSG:3857'
 const DATA_PROJ = 'EPSG:4326'
 
-// tool key -> [OpenLayers draw type, backend {type} path segment].
+// tool key -> OpenLayers draw type, backend {type} path segment, and required RBAC permission.
 const TOOL_CONFIG = {
-  Point: { drawType: 'Point', apiType: 'point' },
-  LineString: { drawType: 'LineString', apiType: 'line' },
-  Polygon: { drawType: 'Polygon', apiType: 'polygon' },
+  Point: { drawType: 'Point', apiType: 'point', permission: 'point_ekleme' },
+  LineString: { drawType: 'LineString', apiType: 'line', permission: 'line_ekleme' },
+  Polygon: { drawType: 'Polygon', apiType: 'polygon', permission: 'polygon_ekleme' },
 }
 
 const wkt = new WKT()
@@ -83,7 +85,8 @@ export default function MapPage() {
   const originalGeomRef = useRef(null)
   // Name/color carried from the info popup into geometry-edit mode, saved together with the new location.
   const pendingEditAttrsRef = useRef(null)
-  const { logout } = useAuth()
+  const { logout, isAdmin, permissions } = useAuth()
+  const navigate = useNavigate()
 
   const [activeTool, setActiveTool] = useState('none')
   const [status, setStatus] = useState(null)
@@ -106,6 +109,17 @@ export default function MapPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   // Bumped after every successful create/update/move/delete so an open query panel refetches.
   const [refreshKey, setRefreshKey] = useState(0)
+  // Read-only inventory info window (opened by the query panel's "i" button); null when closed.
+  const [infoItem, setInfoItem] = useState(null)
+
+  const disabledDrawTools = useMemo(() => {
+    const granted = new Set(permissions)
+    return new Set(
+      Object.entries(TOOL_CONFIG)
+        .filter(([, config]) => !granted.has(config.permission))
+        .map(([tool]) => tool),
+    )
+  }, [permissions])
 
   // Stable so effects can depend on it without re-running; shows a transient toast. `duration` lets
   // an important message linger longer so it isn't missed.
@@ -229,10 +243,29 @@ export default function MapPage() {
   // Picking a draw tool re-enables that type's layer if it was unchecked, so a freshly
   // saved shape doesn't silently vanish into a hidden layer.
   const handleSelectTool = (tool) => {
+    if (disabledDrawTools.has(tool)) {
+      flashStatus('error', 'You do not have permission to use that draw tool.')
+      return
+    }
     const apiType = TOOL_CONFIG[tool]?.apiType
     if (apiType) setLayerVisibility((prev) => (prev[apiType] ? prev : { ...prev, [apiType]: true }))
     setActiveTool(tool)
   }
+
+  // If permissions are changed from the admin panel while a draw tool is active, drop back to Pan and
+  // remove any unsaved shape that was waiting in the attribute modal.
+  useEffect(() => {
+    if (!disabledDrawTools.has(activeTool)) return undefined
+    const timer = window.setTimeout(() => {
+      setActiveTool('none')
+      setPendingDraw((draw) => {
+        if (draw) sourcesRef.current?.[draw.apiType].removeFeature(draw.feature)
+        return null
+      })
+      flashStatus('error', 'Your drawing permission changed. The tool was disabled.')
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [activeTool, disabledDrawTools, flashStatus])
 
   // React to the selected tool: swap the Draw interaction, or wire up select / delete / analysis clicks.
   // While a geometry edit is in progress no tool interaction is added, so the Modify/Translate handles
@@ -243,6 +276,7 @@ export default function MapPage() {
     if (!map || !sources || editingGeom) return undefined
 
     if (activeTool in TOOL_CONFIG) {
+      if (disabledDrawTools.has(activeTool)) return undefined
       const { drawType, apiType } = TOOL_CONFIG[activeTool]
       const draw = new Draw({ source: sources[apiType], type: drawType })
 
@@ -311,7 +345,7 @@ export default function MapPage() {
     }
 
     return undefined
-  }, [activeTool, editingGeom, flashStatus])
+  }, [activeTool, disabledDrawTools, editingGeom, flashStatus])
 
   // Geometry-edit mode: attach Modify (drag individual vertices) + Translate (drag the whole shape)
   // to just the selected feature. Both are removed when editing ends.
@@ -387,9 +421,12 @@ export default function MapPage() {
       } else {
         flashStatus('success', `${apiType} saved.`)
       }
-    } catch {
+    } catch (error) {
       sourcesRef.current?.[apiType].removeFeature(feature) // roll the drawing back if the save failed
-      flashStatus('error', `Could not save ${apiType}.`)
+      const message = error.response?.status === 403
+        ? 'You do not have permission to save this shape type.'
+        : `Could not save ${apiType}.`
+      flashStatus('error', message)
     } finally {
       setPendingDraw(null)
     }
@@ -534,13 +571,41 @@ export default function MapPage() {
     setSelectedShape({ feature })
   }
 
+  // Query panel — info ("i") button: open a read-only info window for that inventory. Reuses the same
+  // (type, id) feature lookup as handleRowClick to pull the shape's coordinates + last editor off the
+  // map; falls back to the row data if the feature isn't currently loaded. Does not zoom or edit.
+  const handleInfoClick = (item) => {
+    const feature = sourcesRef.current?.[item.type]
+      ?.getFeatures()
+      .find((f) => f.get('dbId') === item.id)
+    let geomWkt = null
+    let modifiedUserId = null
+    if (feature) {
+      geomWkt = wkt.writeGeometry(feature.getGeometry(), {
+        featureProjection: MAP_PROJ,
+        dataProjection: DATA_PROJ,
+      })
+      modifiedUserId = feature.get('modifiedUserId')
+    }
+    setInfoItem({
+      id: item.id,
+      type: item.type,
+      name: item.name,
+      color: item.color,
+      createdAt: item.createdAt,
+      modifiedDate: item.modifiedDate,
+      modifiedUserId,
+      wkt: geomWkt,
+    })
+  }
+
   return (
     <div className="map-page">
       <header className="map-bar">
         <div className="map-bar-left">
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.0.6</span>
+        <span className="map-title">BasarsoftInternshipTask v0.0.7</span>
         <div className="map-bar-right">
           <button
             className="map-logout"
@@ -563,6 +628,11 @@ export default function MapPage() {
             </svg>{' '}
             Shapes
           </button>
+          {isAdmin && (
+            <button className="map-logout" type="button" onClick={() => navigate('/admin')}>
+              Yönetim Paneli
+            </button>
+          )}
           <ThemeToggle />
           <button className="map-logout" type="button" onClick={logout}>
             Logout
@@ -570,7 +640,11 @@ export default function MapPage() {
         </div>
       </header>
       <div className="map-body">
-        <DrawToolbar activeTool={activeTool} onSelectTool={handleSelectTool} />
+        <DrawToolbar
+          activeTool={activeTool}
+          disabledTools={disabledDrawTools}
+          onSelectTool={handleSelectTool}
+        />
         <div ref={mapElementRef} className="map-container" />
         <div ref={tooltipElementRef} className="map-tooltip" hidden />
 
@@ -581,6 +655,7 @@ export default function MapPage() {
           open={drawerOpen}
           refreshKey={refreshKey}
           onRowClick={handleRowClick}
+          onInfoClick={handleInfoClick}
           onClose={() => setDrawerOpen(false)}
         />
 
@@ -619,6 +694,7 @@ export default function MapPage() {
             onCancel={() => setOverlapChoices(null)}
           />
         )}
+        {infoItem && <InventoryInfoModal info={infoItem} onClose={() => setInfoItem(null)} />}
 
         {/* Shared bottom-center feedback column, anchored just above the toolbar. Analysis panel is the
             most long-lived so it sits furthest up when stacked; the toast is the most transient and

@@ -81,27 +81,31 @@ const TOOL_HINTS = {
   analysis: 'Draw a polygon to count the shapes it touches. Nothing is saved.',
 }
 
-export default function DrawToolbar({ activeTool, onSelectTool }) {
+export default function DrawToolbar({ activeTool, onSelectTool, disabledTools = new Set() }) {
   return (
     <div className="draw-toolbar">
       <p className="draw-toolbar-hint">{TOOL_HINTS[activeTool] ?? TOOL_HINTS.none}</p>
 
       <div className="draw-toolbar-tools">
-        {TOOLS.map((tool) => (
-          <button
-            key={tool.key}
-            type="button"
-            className={`draw-tool${activeTool === tool.key ? ' is-active' : ''}`}
-            onClick={() => onSelectTool(tool.key)}
-            aria-pressed={activeTool === tool.key}
-            title={tool.label}
-          >
-            <span className="draw-tool-icon" aria-hidden="true">
-              {tool.icon}
-            </span>
-            <span className="draw-tool-label">{tool.label}</span>
-          </button>
-        ))}
+        {TOOLS.map((tool) => {
+          const disabled = disabledTools.has(tool.key)
+          return (
+            <button
+              key={tool.key}
+              type="button"
+              className={`draw-tool${activeTool === tool.key ? ' is-active' : ''}`}
+              onClick={() => onSelectTool(tool.key)}
+              aria-pressed={activeTool === tool.key}
+              disabled={disabled}
+              title={disabled ? `${tool.label} permission required` : tool.label}
+            >
+              <span className="draw-tool-icon" aria-hidden="true">
+                {tool.icon}
+              </span>
+              <span className="draw-tool-label">{tool.label}</span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

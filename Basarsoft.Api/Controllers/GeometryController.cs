@@ -13,12 +13,25 @@ namespace Basarsoft.Api.Controllers;
 [Route("api/geometry")]
 public class GeometryController : ControllerBase
 {
+    private static readonly IReadOnlyDictionary<string, string> CreatePermissionsByType =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["point"] = "point_ekleme",
+            ["line"] = "line_ekleme",
+            ["polygon"] = "polygon_ekleme",
+        };
+
     private readonly IGeometryService _geometryService;
+    private readonly IUserAdminService _userAdminService;
     private readonly ILogger<GeometryController> _logger;
 
-    public GeometryController(IGeometryService geometryService, ILogger<GeometryController> logger)
+    public GeometryController(
+        IGeometryService geometryService,
+        IUserAdminService userAdminService,
+        ILogger<GeometryController> logger)
     {
         _geometryService = geometryService;
+        _userAdminService = userAdminService;
         _logger = logger;
     }
 
@@ -100,7 +113,8 @@ public class GeometryController : ControllerBase
         }
     }
 
-    // POST /api/geometry/{type} -> save a drawn shape (owner = caller).
+    // POST /api/geometry/{type} -> save a drawn shape (owner = caller). Creating each geometry type
+    // requires its matching draw permission: point_ekleme / line_ekleme / polygon_ekleme.
     [HttpPost("{type}")]
     public async Task<ActionResult<GeometryResponse>> Create(string type, GeometryCreateRequest request)
     {
@@ -108,6 +122,12 @@ public class GeometryController : ControllerBase
         {
             if (!TryGetUserId(out var userId))
                 return Unauthorized();
+
+            if (!CreatePermissionsByType.TryGetValue(type, out var permissionName))
+                return BadRequest(new { message = "Unknown geometry type or invalid WKT for this type." });
+
+            if (!await _userAdminService.HasPermissionAsync(userId, permissionName))
+                return Forbid();
 
             var result = await _geometryService.CreateAsync(type, request, userId);
             if (result is null)

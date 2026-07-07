@@ -15,10 +15,17 @@ function loadInitialAuth() {
 
 export function AuthProvider({ children }) {
   const [auth, setAuth] = useState(loadInitialAuth)
+  // RBAC context from GET /api/auth/me: { isAdmin, roles[], permissions[] }. Null until loaded.
+  const [profile, setProfile] = useState(null)
+  // True while /me is in flight for the current token, so guards can wait instead of wrongly
+  // redirecting a would-be admin before their access is known (e.g. a hard refresh on /admin).
+  const [profileLoading, setProfileLoading] = useState(() => Boolean(loadInitialAuth()?.token))
 
   const logout = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY)
     setAuth(null)
+    setProfile(null)
+    setProfileLoading(false)
   }, [])
 
   // Core requirement: auto-logout the instant the token expires. Re-arm a timer
@@ -31,9 +38,34 @@ export function AuthProvider({ children }) {
     return () => clearTimeout(timer)
   }, [auth, logout])
 
+  // Load the caller's RBAC context whenever the token changes (login/register/refresh). Drives the
+  // map's admin button and the /admin route guard. The loading flag is flipped ON in persist()/at init
+  // (event/init time) and OFF here in the async callbacks, so the effect body itself never calls
+  // setState synchronously. A failure just leaves the user as non-admin; a 401 is handled by the axios
+  // client (which force-logs-out). No token -> nothing to load (logout already cleared the profile).
+  useEffect(() => {
+    if (!auth?.token) return undefined
+    let cancelled = false
+    client
+      .get('/api/auth/me')
+      .then(({ data }) => {
+        if (!cancelled) setProfile(data)
+      })
+      .catch(() => {
+        if (!cancelled) setProfile(null)
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [auth?.token])
+
   const persist = (data) => {
     // data = { token, username, expiresAt }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    setProfileLoading(true) // about to (re)load /api/auth/me for the new token
     setAuth(data)
   }
 
@@ -62,18 +94,41 @@ export function AuthProvider({ children }) {
     return data
   }, [])
 
+  // Re-read the caller's current roles/permissions after an admin mutation. The JWT itself does not
+  // carry RBAC data, so a profile refresh is enough to make permission changes affect the open session.
+  const refreshProfile = useCallback(async () => {
+    if (!auth?.token) return null
+    setProfileLoading(true)
+    try {
+      const { data } = await client.get('/api/auth/me')
+      setProfile(data)
+      return data
+    } catch {
+      setProfile(null)
+      return null
+    } finally {
+      setProfileLoading(false)
+    }
+  }, [auth?.token])
+
   const value = useMemo(
     () => ({
       username: auth?.username ?? null,
       expiresAt: auth?.expiresAt ?? null,
       isAuthenticated: Boolean(auth?.token),
+      // RBAC context (from /api/auth/me). isAdmin gates the admin button + /admin route.
+      isAdmin: profile?.isAdmin ?? false,
+      roles: profile?.roles ?? [],
+      permissions: profile?.permissions ?? [],
+      profileLoading,
       login,
       register,
       forgotPassword,
       resetPassword,
+      refreshProfile,
       logout,
     }),
-    [auth, login, register, forgotPassword, resetPassword, logout],
+    [auth, profile, profileLoading, login, register, forgotPassword, resetPassword, refreshProfile, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -172,6 +172,37 @@
   vertical-align: baseline;
 }
 
+/* Narrow trailing column holding the per-row info ("i") button. */
+.query-panel-info-th {
+  width: 34px;
+}
+
+.query-panel-info-cell {
+  width: 34px;
+  max-width: 34px;
+  text-align: center;
+  overflow: visible;
+}
+
+.query-panel-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border: 1px solid var(--bar-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bar-text);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.query-panel-info-btn:hover {
+  background: var(--bar-hover);
+  opacity: 1;
+}
+
 .query-panel-type-cell {
   text-transform: capitalize;
   opacity: 0.75;

@@ -47,6 +47,15 @@
   background: var(--bar-hover);
 }
 
+.draw-tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.draw-tool:disabled:hover {
+  background: transparent;
+}
+
 .draw-tool:active {
   transform: scale(0.98);
 }

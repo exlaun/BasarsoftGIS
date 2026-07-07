@@ -29,7 +29,7 @@ const SortChevron = ({ dir }) => (
 // (mentor requirement); this component never trims or reorders rows itself. `refreshKey` bumps
 // whenever the map mutates a shape, so an open drawer stays in sync. Clicking a row hands the
 // item up (MapPage zooms to the shape and opens its popup).
-export default function QueryPanel({ open, refreshKey, onRowClick, onClose }) {
+export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, onClose }) {
   const [name, setName] = useState('')
   const [debouncedName, setDebouncedName] = useState('')
   const [types, setTypes] = useState({ point: true, line: true, polygon: true })
@@ -143,6 +143,7 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onClose }) {
                   Created {sortBy === 'createdAt' && <SortChevron dir={sortDir} />}
                 </button>
               </th>
+              <th className="query-panel-info-th" aria-label="Info" />
             </tr>
           </thead>
           <tbody>
@@ -163,6 +164,23 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onClose }) {
                 </td>
                 <td className="query-panel-type-cell">{item.type}</td>
                 <td className="query-panel-date">{new Date(item.createdAt).toLocaleDateString()}</td>
+                <td className="query-panel-info-cell">
+                  <button
+                    type="button"
+                    className="query-panel-info-btn"
+                    title="Show inventory info"
+                    aria-label={`Info about ${item.name ?? 'shape'}`}
+                    onClick={(event) => {
+                      event.stopPropagation() // don't trigger the row's zoom+edit click
+                      onInfoClick(item)
+                    }}
+                  >
+                    <svg {...iconProps}>
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 16v-4M12 8h.01" />
+                    </svg>
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

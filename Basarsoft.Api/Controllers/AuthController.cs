@@ -12,11 +12,16 @@ namespace Basarsoft.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly IUserAdminService _userAdminService;
     private readonly ILogger<AuthController> _logger;
 
-    public AuthController(IAuthService authService, ILogger<AuthController> logger)
+    public AuthController(
+        IAuthService authService,
+        IUserAdminService userAdminService,
+        ILogger<AuthController> logger)
     {
         _authService = authService;
+        _userAdminService = userAdminService;
         _logger = logger;
     }
 
@@ -101,16 +106,20 @@ public class AuthController : ControllerBase
         }
     }
 
-    // Protected endpoint to prove the token gate works (200 with a valid token, 401 without).
+    // Identity + RBAC context for the caller: roles, effective permission names, and whether they may
+    // open the admin panel (isAdmin). The client calls this after login to gate the admin button/route.
+    // Returns 401 if the token's user no longer exists (account deleted) so the client re-authenticates.
     [Authorize]
     [HttpGet("me")]
-    public ActionResult Me()
+    public async Task<ActionResult<MeResponse>> Me()
     {
         try
         {
-            var id = User.FindFirstValue(JwtRegisteredClaimNames.Sub);
-            var username = User.FindFirstValue(JwtRegisteredClaimNames.UniqueName);
-            return Ok(new { id, username });
+            if (!int.TryParse(User.FindFirstValue(JwtRegisteredClaimNames.Sub), out var userId))
+                return Unauthorized();
+
+            var me = await _userAdminService.GetMeAsync(userId);
+            return me is null ? Unauthorized() : Ok(me);
         }
         catch (Exception ex)
         {
