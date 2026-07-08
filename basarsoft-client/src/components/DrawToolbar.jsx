@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import './DrawToolbar.css'
 
 // Inline feather-style icons (inherit currentColor, no icon dependency) — matches the
@@ -57,6 +58,22 @@ const AnalysisIcon = (
     <line x1="6" y1="20" x2="6" y2="14" />
   </svg>
 )
+// Stacked sheets — toggles the layer-visibility menu.
+const LayersIcon = (
+  <svg {...iconProps}>
+    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+    <path d="M2 17l10 5 10-5" />
+    <path d="M2 12l10 5 10-5" />
+  </svg>
+)
+
+// The three geometry layers the Layers menu can show/hide. Reuses the draw-tool icons above so a
+// layer reads as the same thing as its draw tool.
+const LAYER_OPTIONS = [
+  { type: 'point', label: 'Points', icon: PointIcon },
+  { type: 'line', label: 'Lines', icon: LineIcon },
+  { type: 'polygon', label: 'Polygons', icon: PolygonIcon },
+]
 
 // Tool keys match what MapPage expects: 'none' pans, 'select' inspects/edits/deletes, the three OL
 // draw types draw, 'analysis' counts shapes under a temporary polygon. Deleting lives inside the
@@ -81,31 +98,84 @@ const TOOL_HINTS = {
   analysis: 'Draw a polygon to count the shapes it touches. Nothing is saved.',
 }
 
-export default function DrawToolbar({ activeTool, onSelectTool, disabledTools = new Set() }) {
+export default function DrawToolbar({
+  activeTool,
+  onSelectTool,
+  disabledTools = new Set(),
+  layerVisibility = {},
+  onToggleLayer,
+}) {
+  // A tool the caller has no permission for is removed from the bar entirely (not just disabled), so
+  // it never appears on that user's screen. Pan/Select/Analysis carry no permission gate and always show.
+  const visibleTools = TOOLS.filter((tool) => !disabledTools.has(tool.key))
+
+  // The Layers button opens an inline menu of the three visibility checkboxes. Kept open while the user
+  // ticks boxes; a click anywhere outside closes it.
+  const [layersOpen, setLayersOpen] = useState(false)
+  const layersRef = useRef(null)
+  useEffect(() => {
+    if (!layersOpen) return undefined
+    const onDocPointerDown = (event) => {
+      if (layersRef.current && !layersRef.current.contains(event.target)) setLayersOpen(false)
+    }
+    document.addEventListener('mousedown', onDocPointerDown)
+    return () => document.removeEventListener('mousedown', onDocPointerDown)
+  }, [layersOpen])
+
   return (
     <div className="draw-toolbar">
       <p className="draw-toolbar-hint">{TOOL_HINTS[activeTool] ?? TOOL_HINTS.none}</p>
 
       <div className="draw-toolbar-tools">
-        {TOOLS.map((tool) => {
-          const disabled = disabledTools.has(tool.key)
-          return (
-            <button
-              key={tool.key}
-              type="button"
-              className={`draw-tool${activeTool === tool.key ? ' is-active' : ''}`}
-              onClick={() => onSelectTool(tool.key)}
-              aria-pressed={activeTool === tool.key}
-              disabled={disabled}
-              title={disabled ? `${tool.label} permission required` : tool.label}
-            >
-              <span className="draw-tool-icon" aria-hidden="true">
-                {tool.icon}
-              </span>
-              <span className="draw-tool-label">{tool.label}</span>
-            </button>
-          )
-        })}
+        {visibleTools.map((tool) => (
+          <button
+            key={tool.key}
+            type="button"
+            className={`draw-tool${activeTool === tool.key ? ' is-active' : ''}`}
+            onClick={() => onSelectTool(tool.key)}
+            aria-pressed={activeTool === tool.key}
+            title={tool.label}
+          >
+            <span className="draw-tool-icon" aria-hidden="true">
+              {tool.icon}
+            </span>
+            <span className="draw-tool-label">{tool.label}</span>
+          </button>
+        ))}
+
+        <div className="draw-layers" ref={layersRef}>
+          <button
+            type="button"
+            className={`draw-tool${layersOpen ? ' is-active' : ''}`}
+            onClick={() => setLayersOpen((open) => !open)}
+            aria-haspopup="true"
+            aria-expanded={layersOpen}
+            title="Layers"
+          >
+            <span className="draw-tool-icon" aria-hidden="true">
+              {LayersIcon}
+            </span>
+            <span className="draw-tool-label">Layers</span>
+          </button>
+
+          {layersOpen && (
+            <div className="draw-layers-menu" role="group" aria-label="Layer visibility">
+              {LAYER_OPTIONS.map(({ type, label, icon }) => (
+                <label key={type} className="draw-layers-row">
+                  <input
+                    type="checkbox"
+                    checked={layerVisibility[type] ?? true}
+                    onChange={() => onToggleLayer?.(type)}
+                  />
+                  <span className="draw-layers-icon" aria-hidden="true">
+                    {icon}
+                  </span>
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

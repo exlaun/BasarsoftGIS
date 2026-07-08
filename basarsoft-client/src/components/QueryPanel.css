@@ -6,7 +6,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(400px, 92vw);
+  width: min(460px, 94vw);
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -71,13 +71,20 @@
 
 .query-panel-types {
   display: flex;
-  gap: 0.9rem;
+  gap: 0.5rem;
 }
 
+/* Each filter takes an equal third and centers its checkbox+label, so the three read as tidy,
+   symmetrical segments instead of left-bunched labels with uneven spacing. */
 .query-panel-type {
+  flex: 1;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.35rem;
+  padding: 0.3rem 0.2rem;
+  border: 1px solid var(--bar-border);
+  border-radius: 6px;
   font-size: 0.8rem;
   font-weight: 600;
   text-transform: capitalize;
@@ -92,13 +99,17 @@
 
 .query-panel-table-wrap {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid var(--bar-border);
   border-radius: 8px;
 }
 
+/* Fixed layout so columns obey the <colgroup> widths (driven by the resizable-column fractions) and
+   long cell content ellipsis-truncates instead of stretching the table wider than the panel. */
 .query-panel-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.8rem;
 }
@@ -114,6 +125,33 @@
   letter-spacing: 0.05em;
   opacity: 0.75;
   border-bottom: 1px solid var(--bar-border);
+}
+
+/* Drag handle straddling a header cell's right edge to resize the column. Sits above the sort button
+   so a grab on the divider never triggers a sort. */
+.query-panel-resize {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 9px;
+  height: 100%;
+  z-index: 2;
+  cursor: col-resize;
+  user-select: none;
+}
+
+.query-panel-resize::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  left: 50%;
+  width: 1px;
+  height: 60%;
+  background: var(--bar-border);
+}
+
+.query-panel-resize:hover::after {
+  background: currentColor;
 }
 
 .query-panel-sort {
@@ -155,11 +193,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 0;
-}
-
-.query-panel-table td:first-child {
-  width: 55%;
 }
 
 .query-panel-swatch {
@@ -172,14 +205,13 @@
   vertical-align: baseline;
 }
 
-/* Narrow trailing column holding the per-row info ("i") button. */
-.query-panel-info-th {
-  width: 34px;
-}
-
+/* Narrow trailing column holding the per-row info ("i") button. Centered within a fixed-width column,
+   so the button always sits fully inside the box regardless of the other columns' content. */
+.query-panel-info-th,
 .query-panel-info-cell {
-  width: 34px;
-  max-width: 34px;
+  width: 46px;
+  padding-left: 0.2rem;
+  padding-right: 0.2rem;
   text-align: center;
   overflow: visible;
 }

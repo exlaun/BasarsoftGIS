@@ -1,10 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { queryGeometry } from '../api/geometry'
 import './QueryPanel.css'
 
 const TYPES = ['point', 'line', 'polygon']
 const DEFAULT_COLOR = '#2563eb'
 const PAGE_SIZE = 10
+
+// Trailing info-button column is a fixed width; Name/Type/Created share the rest by fraction so the
+// user can drag the dividers between them. INFO_W must match the col width rendered below.
+const INFO_W = 46
+const MIN_COL_PX = 46 // a resizable column can't be dragged narrower than this
 
 const iconProps = {
   width: 14,
@@ -38,6 +43,14 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
   const [page, setPage] = useState(1)
   const [data, setData] = useState(null)
   const [error, setError] = useState(false)
+
+  // Resizable columns: Name/Type/Created widths as fractions of the space left after the fixed info
+  // column. They always sum to 1, so the table stays exactly as wide as the panel (no overflow).
+  const [colFracs, setColFracs] = useState({ name: 0.5, type: 0.22, created: 0.28 })
+  // Live pixel width available to the three resizable columns (panel width minus the info column).
+  // Kept in state so the <col> widths render as concrete px — `calc()` on table columns is unreliable.
+  const [avail, setAvail] = useState(360)
+  const wrapRef = useRef(null)
 
   // Debounce typing so we query once per pause, not once per keystroke.
   useEffect(() => {
@@ -85,16 +98,59 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
     setPage(1)
   }
 
-  // Click the active column to flip direction; a new column starts with its natural direction.
+  // Click the active column to flip direction; a new column starts with its natural direction
+  // (names/types read best A→Z; dates newest-first).
   const handleSort = (field) => {
     if (sortBy === field) {
       setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortBy(field)
-      setSortDir(field === 'name' ? 'asc' : 'desc')
+      setSortDir(field === 'createdAt' ? 'desc' : 'asc')
     }
     setPage(1)
   }
+
+  // Track the table area's pixel width (measured before paint to avoid a first-frame flash) so the
+  // column widths render in px and a resize drag can be expressed as a fraction of it.
+  useLayoutEffect(() => {
+    const el = wrapRef.current
+    if (!el) return undefined
+    const measure = () => setAvail(Math.max(1, el.clientWidth - INFO_W))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // Drag the divider on the right edge of `left`, transferring width between `left` and `right` while
+  // keeping their combined fraction constant (so the other columns are untouched and nothing overflows).
+  const startResize = (left, right) => (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const startX = event.clientX
+    const minFrac = MIN_COL_PX / avail
+    const startLeft = colFracs[left]
+    const pairSum = colFracs[left] + colFracs[right]
+
+    const onMove = (moveEvent) => {
+      let l = startLeft + (moveEvent.clientX - startX) / avail
+      l = Math.max(minFrac, Math.min(pairSum - minFrac, l))
+      setColFracs((prev) => ({ ...prev, [left]: l, [right]: pairSum - l }))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  // Width of a resizable column in px: its fraction of the space left after the fixed info column.
+  const colWidth = (key) => `${Math.round(colFracs[key] * avail)}px`
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
   const showEmpty = typesKey && data && data.total === 0
@@ -128,16 +184,38 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
         ))}
       </div>
 
-      <div className="query-panel-table-wrap">
+      <div className="query-panel-table-wrap" ref={wrapRef}>
         <table className="query-panel-table">
+          <colgroup>
+            <col style={{ width: colWidth('name') }} />
+            <col style={{ width: colWidth('type') }} />
+            <col style={{ width: colWidth('created') }} />
+            <col style={{ width: `${INFO_W}px` }} />
+          </colgroup>
           <thead>
             <tr>
               <th>
                 <button type="button" className="query-panel-sort" onClick={() => handleSort('name')}>
                   Name {sortBy === 'name' && <SortChevron dir={sortDir} />}
                 </button>
+                <span
+                  className="query-panel-resize"
+                  onMouseDown={startResize('name', 'type')}
+                  role="separator"
+                  aria-label="Resize name column"
+                />
               </th>
-              <th>Type</th>
+              <th>
+                <button type="button" className="query-panel-sort" onClick={() => handleSort('type')}>
+                  Type {sortBy === 'type' && <SortChevron dir={sortDir} />}
+                </button>
+                <span
+                  className="query-panel-resize"
+                  onMouseDown={startResize('type', 'created')}
+                  role="separator"
+                  aria-label="Resize type column"
+                />
+              </th>
               <th>
                 <button type="button" className="query-panel-sort" onClick={() => handleSort('createdAt')}>
                   Created {sortBy === 'createdAt' && <SortChevron dir={sortDir} />}

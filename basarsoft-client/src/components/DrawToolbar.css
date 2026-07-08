@@ -1,30 +1,37 @@
+/* Positioning shell only: centered near the top so the tool pill hangs right under the version text,
+   with the active-tool hint stacked directly beneath it (column-reverse puts the pill above the hint).
+   The shell is transparent and click-through — `pointer-events: none` keeps the map draggable in the
+   empty area; the interactive children opt back in. Centering the hint here (rather than the old
+   bottom-left spot) also keeps it clear of the top-left zoom control. */
 .draw-toolbar {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  top: 0.8rem;
   z-index: 2;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
+  flex-direction: column-reverse;
   align-items: center;
-  gap: 0.6rem 0.85rem;
-  padding: 0.6rem 1rem;
-  border-radius: 12px 12px 0 0;
-  background: var(--bar-bg);
-  color: var(--bar-text);
-  border: 1px solid var(--bar-border);
-  border-bottom: none;
-  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.22);
-  transition: background 0.2s ease, color 0.2s ease;
+  gap: 0.5rem;
+  padding: 0 1rem;
+  pointer-events: none;
 }
 
+/* The visible floating pill: rounded on every corner and shadowed so it reads as hanging over the map. */
 .draw-toolbar-tools {
-  justify-self: center;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.35rem;
+  padding: 0.5rem 0.55rem;
+  border-radius: 14px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  pointer-events: auto;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 .draw-tool {
@@ -73,6 +80,50 @@
   width: 1.2rem;
 }
 
+/* Layers button + its drop-down menu. The wrapper anchors the menu; the menu drops below the pill
+   (the toolbar hangs from the top) and is right-aligned so it can't spill off the right edge. */
+.draw-layers {
+  position: relative;
+  display: inline-flex;
+}
+
+.draw-layers-menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  white-space: nowrap;
+}
+
+.draw-layers-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.draw-layers-row input[type='checkbox'] {
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.draw-layers-icon {
+  display: inline-flex;
+  opacity: 0.85;
+}
+
 .draw-toolbar-name {
   justify-self: end;
   display: flex;
@@ -99,17 +150,23 @@
   opacity: 0.5;
 }
 
+/* Floating hint pill centered under the tool pill. Carries its own backdrop (the toolbar shell is
+   transparent now) so it stays readable against any tile. */
 .draw-toolbar-hint {
-  justify-self: stretch;
   margin: 0;
-  min-width: 0;
-  /* Always a single row so the bar's height never changes when switching tools (the polygon hint
-     is the longest). If a window is too narrow to fit the text, clip it with an ellipsis rather
-     than wrapping onto a second line. */
+  max-width: 100%;
+  padding: 0.35rem 0.6rem;
+  border-radius: 10px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  /* Always a single row so its height never changes when switching tools (the polygon hint is the
+     longest). If the column is too narrow, clip with an ellipsis rather than wrapping. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 0.72rem;
   line-height: 1.35;
-  opacity: 0.7;
 }

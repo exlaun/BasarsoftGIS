@@ -21,7 +21,6 @@ import { useAuth } from '../context/auth-context'
 import SessionTimer from '../components/SessionTimer'
 import ThemeToggle from '../components/ThemeToggle'
 import DrawToolbar from '../components/DrawToolbar'
-import LayerPanel from '../components/LayerPanel'
 import AttributeModal from '../components/AttributeModal'
 import ShapeInfoModal from '../components/ShapeInfoModal'
 import ConfirmModal from '../components/ConfirmModal'
@@ -671,10 +670,20 @@ export default function MapPage() {
     <div className="map-page">
       <header className="map-bar">
         <div className="map-bar-left">
+          <button className="map-logout" type="button" onClick={logout}>
+            Logout
+          </button>
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.0.7</span>
+        <span className="map-title">BasarsoftInternshipTask v0.1.3</span>
         <div className="map-bar-right">
+          <ThemeToggle />
+          <span className="map-bar-divider" aria-hidden="true" />
+          {isAdmin && (
+            <button className="map-logout" type="button" onClick={() => navigate('/admin')}>
+              Admin Panel
+            </button>
+          )}
           <button
             className="map-logout"
             type="button"
@@ -696,15 +705,6 @@ export default function MapPage() {
             </svg>{' '}
             Shapes
           </button>
-          {isAdmin && (
-            <button className="map-logout" type="button" onClick={() => navigate('/admin')}>
-              Admin Panel
-            </button>
-          )}
-          <ThemeToggle />
-          <button className="map-logout" type="button" onClick={logout}>
-            Logout
-          </button>
         </div>
       </header>
       <div className="map-body">
@@ -712,12 +712,11 @@ export default function MapPage() {
           activeTool={activeTool}
           disabledTools={disabledDrawTools}
           onSelectTool={handleSelectTool}
+          layerVisibility={layerVisibility}
+          onToggleLayer={toggleLayer}
         />
         <div ref={mapElementRef} className="map-container" />
         <div ref={tooltipElementRef} className="map-tooltip" hidden />
-
-        {/* Hidden while a geometry edit is active — hiding the very layer being edited makes no sense. */}
-        {!editingGeom && <LayerPanel visibility={layerVisibility} onToggle={toggleLayer} />}
 
         <QueryPanel
           open={drawerOpen}

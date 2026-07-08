@@ -84,7 +84,7 @@ public class GeometryController : ControllerBase
             if (result is null)
                 return BadRequest(new
                 {
-                    message = "Invalid query: sortBy must be name|createdAt, sortDir asc|desc, " +
+                    message = "Invalid query: sortBy must be name|type|createdAt, sortDir asc|desc, " +
                               "types a comma list of point|line|polygon.",
                 });
 

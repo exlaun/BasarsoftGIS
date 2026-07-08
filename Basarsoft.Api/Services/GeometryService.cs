@@ -262,7 +262,7 @@ public class GeometryService : IGeometryService
     {
         var sortBy = request.SortBy.Trim().ToLowerInvariant();
         var sortDir = request.SortDir.Trim().ToLowerInvariant();
-        if (sortBy is not ("name" or "createdat") || sortDir is not ("asc" or "desc"))
+        if (sortBy is not ("name" or "type" or "createdat") || sortDir is not ("asc" or "desc"))
             return null;
 
         // CSV type filter -> the tables to union. Blank means all three; an unknown token is a 400,
@@ -300,6 +300,8 @@ public class GeometryService : IGeometryService
         {
             ("name", false) => query!.OrderBy(r => r.Name),
             ("name", true) => query!.OrderByDescending(r => r.Name),
+            ("type", false) => query!.OrderBy(r => r.Type),
+            ("type", true) => query!.OrderByDescending(r => r.Type),
             ("createdat", false) => query!.OrderBy(r => r.CreatedAt),
             _ => query!.OrderByDescending(r => r.CreatedAt),
         };
