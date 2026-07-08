@@ -16,9 +16,9 @@ public class GeometryController : ControllerBase
     private static readonly IReadOnlyDictionary<string, string> CreatePermissionsByType =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["point"] = "point_ekleme",
-            ["line"] = "line_ekleme",
-            ["polygon"] = "polygon_ekleme",
+            ["point"] = "add_point",
+            ["line"] = "add_line",
+            ["polygon"] = "add_polygon",
         };
 
     private readonly IGeometryService _geometryService;
@@ -114,7 +114,7 @@ public class GeometryController : ControllerBase
     }
 
     // POST /api/geometry/{type} -> save a drawn shape (owner = caller). Creating each geometry type
-    // requires its matching draw permission: point_ekleme / line_ekleme / polygon_ekleme.
+    // requires its matching draw permission: add_point / add_line / add_polygon.
     [HttpPost("{type}")]
     public async Task<ActionResult<GeometryResponse>> Create(string type, GeometryCreateRequest request)
     {
@@ -130,10 +130,16 @@ public class GeometryController : ControllerBase
                 return Forbid();
 
             var result = await _geometryService.CreateAsync(type, request, userId);
-            if (result is null)
-                return BadRequest(new { message = "Unknown geometry type or invalid WKT for this type." });
-
-            return Ok(result);
+            return result.Status switch
+            {
+                UpdateStatus.InvalidGeometry =>
+                    BadRequest(new { message = "Unknown geometry type or invalid WKT for this type." }),
+                // The `code` field lets the client tell this 403 apart from the plain permission 403
+                // above (which it reports as "no permission for this shape type").
+                UpdateStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
+                    new { message = "The shape is outside your authorized area.", code = "outside_authorized_area" }),
+                _ => Ok(result.Response),
+            };
         }
         catch (Exception ex)
         {
@@ -157,6 +163,8 @@ public class GeometryController : ControllerBase
                 UpdateStatus.NotFound => NotFound(new { message = "Shape not found." }),
                 UpdateStatus.InvalidGeometry =>
                     BadRequest(new { message = "Invalid WKT, or its geometry type doesn't match this shape." }),
+                UpdateStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
+                    new { message = "The shape is outside your authorized area.", code = "outside_authorized_area" }),
                 _ => Ok(result.Response),
             };
         }

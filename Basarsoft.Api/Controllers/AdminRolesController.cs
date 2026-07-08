@@ -13,11 +13,16 @@ namespace Basarsoft.Api.Controllers;
 public class AdminRolesController : ControllerBase
 {
     private readonly IRoleService _roles;
+    private readonly IGeoAuthorizationService _geoAuth;
     private readonly ILogger<AdminRolesController> _logger;
 
-    public AdminRolesController(IRoleService roles, ILogger<AdminRolesController> logger)
+    public AdminRolesController(
+        IRoleService roles,
+        IGeoAuthorizationService geoAuth,
+        ILogger<AdminRolesController> logger)
     {
         _roles = roles;
+        _geoAuth = geoAuth;
         _logger = logger;
     }
 
@@ -110,5 +115,47 @@ public class AdminRolesController : ControllerBase
                 : NotFound(new { message = "Role not found." });
         }
         catch (Exception ex) { return ServerError(ex, nameof(SetPermissions)); }
+    }
+
+    // The role's geographic authorization area as WKT (wkt null = none assigned).
+    [HttpGet("{id:int}/geo-area")]
+    public async Task<ActionResult<GeoAreaResponse>> GetGeoArea(int id)
+    {
+        try
+        {
+            var area = await _geoAuth.GetForRoleAsync(id);
+            return area is null ? NotFound(new { message = "Role not found." }) : Ok(area);
+        }
+        catch (Exception ex) { return ServerError(ex, nameof(GetGeoArea)); }
+    }
+
+    // Assign/replace the role's geographic authorization area (polygon WKT, EPSG:4326).
+    [HttpPut("{id:int}/geo-area")]
+    public async Task<ActionResult> SetGeoArea(int id, GeoAreaRequest request)
+    {
+        try
+        {
+            return await _geoAuth.SetForRoleAsync(id, request.Wkt) switch
+            {
+                GeoAreaWriteStatus.NotFound => NotFound(new { message = "Role not found." }),
+                GeoAreaWriteStatus.InvalidGeometry =>
+                    BadRequest(new { message = "WKT must be a single valid polygon." }),
+                _ => NoContent(),
+            };
+        }
+        catch (Exception ex) { return ServerError(ex, nameof(SetGeoArea)); }
+    }
+
+    // Remove the role's geographic authorization area.
+    [HttpDelete("{id:int}/geo-area")]
+    public async Task<ActionResult> ClearGeoArea(int id)
+    {
+        try
+        {
+            return await _geoAuth.ClearForRoleAsync(id)
+                ? NoContent()
+                : NotFound(new { message = "Role has no assigned area." });
+        }
+        catch (Exception ex) { return ServerError(ex, nameof(ClearGeoArea)); }
     }
 }

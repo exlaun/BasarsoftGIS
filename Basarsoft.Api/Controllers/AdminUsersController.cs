@@ -14,11 +14,16 @@ namespace Basarsoft.Api.Controllers;
 public class AdminUsersController : ControllerBase
 {
     private readonly IUserAdminService _users;
+    private readonly IGeoAuthorizationService _geoAuth;
     private readonly ILogger<AdminUsersController> _logger;
 
-    public AdminUsersController(IUserAdminService users, ILogger<AdminUsersController> logger)
+    public AdminUsersController(
+        IUserAdminService users,
+        IGeoAuthorizationService geoAuth,
+        ILogger<AdminUsersController> logger)
     {
         _users = users;
+        _geoAuth = geoAuth;
         _logger = logger;
     }
 
@@ -136,5 +141,48 @@ public class AdminUsersController : ControllerBase
                 : NotFound(new { message = "User not found." });
         }
         catch (Exception ex) { return ServerError(ex, nameof(SetPermissions)); }
+    }
+
+    // The user's geographic authorization area as WKT (wkt null = none assigned).
+    [HttpGet("{id:int}/geo-area")]
+    public async Task<ActionResult<GeoAreaResponse>> GetGeoArea(int id)
+    {
+        try
+        {
+            var area = await _geoAuth.GetForUserAsync(id);
+            return area is null ? NotFound(new { message = "User not found." }) : Ok(area);
+        }
+        catch (Exception ex) { return ServerError(ex, nameof(GetGeoArea)); }
+    }
+
+    // Assign/replace the user's geographic authorization area (polygon WKT, EPSG:4326).
+    [HttpPut("{id:int}/geo-area")]
+    public async Task<ActionResult> SetGeoArea(int id, GeoAreaRequest request)
+    {
+        try
+        {
+            return await _geoAuth.SetForUserAsync(id, request.Wkt) switch
+            {
+                GeoAreaWriteStatus.NotFound => NotFound(new { message = "User not found." }),
+                GeoAreaWriteStatus.InvalidGeometry =>
+                    BadRequest(new { message = "WKT must be a single valid polygon." }),
+                _ => NoContent(),
+            };
+        }
+        catch (Exception ex) { return ServerError(ex, nameof(SetGeoArea)); }
+    }
+
+    // Remove the user's geographic authorization area (drawing becomes unrestricted for them,
+    // unless one of their roles still has an area).
+    [HttpDelete("{id:int}/geo-area")]
+    public async Task<ActionResult> ClearGeoArea(int id)
+    {
+        try
+        {
+            return await _geoAuth.ClearForUserAsync(id)
+                ? NoContent()
+                : NotFound(new { message = "User has no assigned area." });
+        }
+        catch (Exception ex) { return ServerError(ex, nameof(ClearGeoArea)); }
     }
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { listRoles, listPermissions, deleteRole } from '../../api/admin'
 import RoleFormModal from './RoleFormModal'
 import RolePermissionsModal from './RolePermissionsModal'
+import GeoAuthModal from './GeoAuthModal'
 import AdminConfirm from './AdminConfirm'
 import { useAuth } from '../../context/auth-context'
 
@@ -100,6 +101,9 @@ export default function RolesPage() {
                         <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'perms', role: r })}>
                           Permissions
                         </button>
+                        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'geo', role: r })}>
+                          Geographic Access
+                        </button>
                         <button type="button" className="admin-btn admin-btn-sm admin-btn-danger" onClick={() => setModal({ type: 'delete', role: r })}>
                           Delete
                         </button>
@@ -118,6 +122,15 @@ export default function RolesPage() {
       )}
       {modal?.type === 'perms' && (
         <RolePermissionsModal role={modal.role} allPermissions={permissions} onClose={() => setModal(null)} onSuccess={closeAnd} />
+      )}
+      {modal?.type === 'geo' && (
+        <GeoAuthModal
+          kind="role"
+          targetId={modal.role.id}
+          targetLabel={modal.role.name}
+          onClose={() => setModal(null)}
+          onSuccess={closeAnd}
+        />
       )}
       {modal?.type === 'delete' && (
         <AdminConfirm

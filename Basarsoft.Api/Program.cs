@@ -38,6 +38,9 @@ builder.Services.AddScoped<IPermissionService, PermissionService>();
 builder.Services.AddScoped<IRoleService, RoleService>();
 builder.Services.AddScoped<IUserAdminService, UserAdminService>();
 
+// Geographic authorization: per-user/per-role drawing areas + enforcement lookup.
+builder.Services.AddScoped<IGeoAuthorizationService, GeoAuthorizationService>();
+
 // Global exception handling: a final safety net that converts any unhandled exception into a clean
 // 500 JSON response (the controllers also try-catch individually). AddProblemDetails() supplies the
 // standard error body format that UseExceptionHandler() falls back to.

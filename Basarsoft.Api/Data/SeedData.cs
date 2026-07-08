@@ -10,23 +10,23 @@ public static class SeedData
     // The user bootstrapped as an admin (granted the Admin role by the seeder), if present.
     public const string BootstrapAdminUsername = "demo0";
 
-    // The shared permission catalogue: name (machine key) -> Turkish description. The mentor's examples
-    // (point/line/polygon ekleme) plus the management permissions that gate the admin panel itself.
+    // The shared permission catalogue: name (machine key) -> English description. Drawing permissions
+    // plus the management permissions that gate the admin panel itself.
     public static readonly IReadOnlyList<(string Name, string Description)> Permissions = new[]
     {
-        ("point_ekleme",   "Haritaya nokta ekleme"),
-        ("line_ekleme",    "Haritaya çizgi ekleme"),
-        ("polygon_ekleme", "Haritaya poligon ekleme"),
-        ("user_yonetimi",  "Kullanıcı ekleme/çıkarma/güncelleme"),
-        ("rol_yonetimi",   "Rol ekleme/çıkarma/silme"),
-        ("yetki_yonetimi", "Yetki (permission) yönetimi"),
+        ("add_point",          "Add points to the map"),
+        ("add_line",           "Add lines to the map"),
+        ("add_polygon",        "Add polygons to the map"),
+        ("manage_users",       "Create, update, and delete users"),
+        ("manage_roles",       "Create, update, and delete roles"),
+        ("manage_permissions", "Manage permissions"),
     };
 
     // Holding ANY of these effective permissions lets a user open the admin panel.
     public static readonly IReadOnlySet<string> AdminPermissions = new HashSet<string>
     {
-        "user_yonetimi",
-        "rol_yonetimi",
-        "yetki_yonetimi",
+        "manage_users",
+        "manage_roles",
+        "manage_permissions",
     };
 }

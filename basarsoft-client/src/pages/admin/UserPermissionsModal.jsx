@@ -4,7 +4,7 @@ import { getUserPermissions, setUserPermissions } from '../../api/admin'
 // The inheritance-aware permission editor — the literal implementation of the mentor's rule.
 // Every catalogue permission is shown with its source:
 //   • source "role"  -> inherited from a role: the checkbox is CHECKED + DISABLED, with a
-//                       "Rolden: <RoleName>" badge, so the admin can't re-pick what already comes from
+//                       "From role: <RoleName>" badge, so the admin can't re-pick what already comes from
 //                       the role.
 //   • source "direct"-> granted straight to the user: a normal ticked, toggleable checkbox.
 //   • source "none"  -> not granted: an empty, toggleable checkbox.
@@ -72,7 +72,7 @@ export default function UserPermissionsModal({ user, onClose, onSuccess }) {
         <div className="admin-modal-head">
           <h2 className="admin-modal-title">Permissions — {user.username}</h2>
           <p className="admin-modal-desc">
-            Permissions that come from a role are locked and marked <em>Rolden</em>. Tick the rest to grant
+            Permissions that come from a role are locked and marked <em>From role</em>. Tick the rest to grant
             them directly to this user.
           </p>
         </div>
@@ -100,10 +100,10 @@ export default function UserPermissionsModal({ user, onClose, onSuccess }) {
                       <div className="admin-check-name">
                         {p.name}
                         {inherited && (
-                          <span className="admin-badge admin-badge-role">Rolden: {p.roleName}</span>
+                          <span className="admin-badge admin-badge-role">From role: {p.roleName}</span>
                         )}
                         {!inherited && p.source === 'direct' && (
-                          <span className="admin-badge admin-badge-direct">Kullanıcı</span>
+                          <span className="admin-badge admin-badge-direct">Direct</span>
                         )}
                       </div>
                       {p.description && <div className="admin-check-desc">{p.description}</div>}

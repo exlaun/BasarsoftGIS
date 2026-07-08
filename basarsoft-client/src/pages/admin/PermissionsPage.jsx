@@ -58,7 +58,7 @@ export default function PermissionsPage() {
       <div className="admin-page-head">
         <div>
           <h1 className="admin-page-title">Permissions</h1>
-          <p className="admin-page-sub">The shared catalogue (yetki) assigned to roles and users.</p>
+          <p className="admin-page-sub">The shared catalogue assigned to roles and users.</p>
         </div>
         <button type="button" className="admin-btn admin-btn-primary" onClick={() => setModal({ type: 'create' })}>
           + Add permission

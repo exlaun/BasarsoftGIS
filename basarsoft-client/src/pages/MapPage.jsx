@@ -4,6 +4,7 @@ import Map from 'ol/Map'
 import View from 'ol/View'
 import Overlay from 'ol/Overlay'
 import Collection from 'ol/Collection'
+import Feature from 'ol/Feature'
 import TileLayer from 'ol/layer/Tile'
 import OSM from 'ol/source/OSM'
 import VectorLayer from 'ol/layer/Vector'
@@ -40,9 +41,9 @@ const DATA_PROJ = 'EPSG:4326'
 
 // tool key -> OpenLayers draw type, backend {type} path segment, and required RBAC permission.
 const TOOL_CONFIG = {
-  Point: { drawType: 'Point', apiType: 'point', permission: 'point_ekleme' },
-  LineString: { drawType: 'LineString', apiType: 'line', permission: 'line_ekleme' },
-  Polygon: { drawType: 'Polygon', apiType: 'polygon', permission: 'polygon_ekleme' },
+  Point: { drawType: 'Point', apiType: 'point', permission: 'add_point' },
+  LineString: { drawType: 'LineString', apiType: 'line', permission: 'add_line' },
+  Polygon: { drawType: 'Polygon', apiType: 'polygon', permission: 'add_polygon' },
 }
 
 const wkt = new WKT()
@@ -71,6 +72,13 @@ const ANALYSIS_STYLE = new Style({
   stroke: new Stroke({ color: '#f97316', width: 2, lineDash: [6, 6] }),
 })
 
+// The caller's geographic authorization boundary (green dashed, matching the admin modal's preview).
+// Drawing outside this area is rejected — pre-checked here for instant feedback, enforced server-side.
+const AUTH_AREA_STYLE = new Style({
+  fill: new Fill({ color: 'rgba(22, 163, 74, 0.06)' }),
+  stroke: new Stroke({ color: '#16a34a', width: 2, lineDash: [4, 8] }),
+})
+
 export default function MapPage() {
   const mapElementRef = useRef(null)
   const tooltipElementRef = useRef(null)
@@ -80,12 +88,16 @@ export default function MapPage() {
   const sourcesRef = useRef(null)
   const layersRef = useRef(null)
   const analysisSourceRef = useRef(null)
+  // Geographic authorization boundary: its own source (for display) plus the raw OL geometry in map
+  // projection (for the drawend inside-check without re-parsing WKT every draw).
+  const authAreaSourceRef = useRef(null)
+  const authGeomRef = useRef(null)
   const statusTimerRef = useRef(null)
   // Geometry captured before an edit so a cancelled edit can restore the shape's original position.
   const originalGeomRef = useRef(null)
   // Name/color carried from the info popup into geometry-edit mode, saved together with the new location.
   const pendingEditAttrsRef = useRef(null)
-  const { logout, isAdmin, permissions } = useAuth()
+  const { logout, isAdmin, permissions, authorizedAreaWkt } = useAuth()
   const navigate = useNavigate()
 
   const [activeTool, setActiveTool] = useState('none')
@@ -147,11 +159,16 @@ export default function MapPage() {
     layersRef.current = layers
     const analysisSource = new VectorSource()
     analysisSourceRef.current = analysisSource
+    const authAreaSource = new VectorSource()
+    authAreaSourceRef.current = authAreaSource
 
     const map = new Map({
       target: mapElementRef.current,
       layers: [
         new TileLayer({ source: new OSM() }),
+        // Authorization boundary sits under every shape layer: it's a backdrop, never clickable
+        // (its feature carries no apiType/dbId, so select/hover logic skips it anyway).
+        new VectorLayer({ source: authAreaSource, style: AUTH_AREA_STYLE }),
         // Polygons under lines under points, so small shapes stay clickable on top of large ones.
         layers.polygon,
         layers.line,
@@ -225,9 +242,32 @@ export default function MapPage() {
       sourcesRef.current = null
       layersRef.current = null
       analysisSourceRef.current = null
+      authAreaSourceRef.current = null
+      authGeomRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Keep the authorization boundary in sync with the profile: it arrives async after login and can
+  // change while the map is open (refreshProfile after an admin edits areas). Null = unrestricted,
+  // so the layer is simply left empty.
+  useEffect(() => {
+    const source = authAreaSourceRef.current
+    if (!source) return
+    source.clear()
+    authGeomRef.current = null
+    if (!authorizedAreaWkt) return
+    try {
+      const geom = wkt.readGeometry(authorizedAreaWkt, {
+        dataProjection: DATA_PROJ,
+        featureProjection: MAP_PROJ,
+      })
+      authGeomRef.current = geom
+      source.addFeature(new Feature(geom))
+    } catch {
+      // A malformed area must not break the map; the server still enforces on save.
+    }
+  }, [authorizedAreaWkt])
 
   // Apply the layer-control checkboxes: hidden layers keep their features but stop rendering,
   // and OpenLayers' hit-testing (hover/select) skips invisible layers automatically.
@@ -283,8 +323,31 @@ export default function MapPage() {
       // On finish, don't save yet — capture the shape and open the attribute popup.
       draw.on('drawend', (event) => {
         const feature = event.feature
+        const geometry = feature.getGeometry()
+
+        // Geographic authorization pre-check: every vertex must fall inside the boundary. A vertex
+        // test can miss an edge that dips outside between two inside vertices, so this is fast
+        // feedback only — the server re-checks with full geometry containment on save.
+        const authGeom = authGeomRef.current
+        if (authGeom) {
+          const geomType = geometry.getType()
+          const vertices =
+            geomType === 'Point'
+              ? [geometry.getCoordinates()]
+              : geomType === 'LineString'
+                ? geometry.getCoordinates()
+                : geometry.getCoordinates()[0] // Polygon outer ring
+          if (vertices.some((coord) => !authGeom.intersectsCoordinate(coord))) {
+            // drawend fires BEFORE OpenLayers adds the feature to the source, so remove on the
+            // next tick — a synchronous removeFeature here would be a no-op.
+            window.setTimeout(() => sourcesRef.current?.[apiType].removeFeature(feature), 0)
+            flashStatus('error', 'The shape is outside your authorized area.')
+            return
+          }
+        }
+
         // Transform from the map projection (3857) down to storage projection (4326) as WKT.
-        const geomWkt = wkt.writeGeometry(feature.getGeometry(), {
+        const geomWkt = wkt.writeGeometry(geometry, {
           featureProjection: MAP_PROJ,
           dataProjection: DATA_PROJ,
         })
@@ -423,9 +486,12 @@ export default function MapPage() {
       }
     } catch (error) {
       sourcesRef.current?.[apiType].removeFeature(feature) // roll the drawing back if the save failed
-      const message = error.response?.status === 403
-        ? 'You do not have permission to save this shape type.'
-        : `Could not save ${apiType}.`
+      // The area rejection is also a 403, so the specific `code` must be checked first.
+      const message = error.response?.data?.code === 'outside_authorized_area'
+        ? 'The shape is outside your authorized area.'
+        : error.response?.status === 403
+          ? 'You do not have permission to save this shape type.'
+          : `Could not save ${apiType}.`
       flashStatus('error', message)
     } finally {
       setPendingDraw(null)
@@ -492,10 +558,12 @@ export default function MapPage() {
       feature.changed()
       setRefreshKey((key) => key + 1)
       flashStatus('success', 'Location updated.')
-    } catch {
+    } catch (error) {
       // Roll the shape back to where it was if the save failed.
       if (originalGeomRef.current) feature.setGeometry(originalGeomRef.current)
-      flashStatus('error', 'Could not update location.')
+      flashStatus('error', error.response?.data?.code === 'outside_authorized_area'
+        ? 'The new location is outside your authorized area.'
+        : 'Could not update location.')
     } finally {
       setEditingGeom(false)
       setSelectedShape(null)
@@ -630,7 +698,7 @@ export default function MapPage() {
           </button>
           {isAdmin && (
             <button className="map-logout" type="button" onClick={() => navigate('/admin')}>
-              Yönetim Paneli
+              Admin Panel
             </button>
           )}
           <ThemeToggle />

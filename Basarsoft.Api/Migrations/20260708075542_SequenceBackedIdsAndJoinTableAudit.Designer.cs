@@ -3,6 +3,7 @@ using System;
 using Basarsoft.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NetTopologySuite.Geometries;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Basarsoft.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260708075542_SequenceBackedIdsAndJoinTableAudit")]
+    partial class SequenceBackedIdsAndJoinTableAudit
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -30,8 +33,6 @@ namespace Basarsoft.Api.Migrations
 
             modelBuilder.HasSequence<int>("seq_roles");
 
-            modelBuilder.HasSequence<int>("seq_tbl_geo_authorization");
-
             modelBuilder.HasSequence<int>("seq_tbl_line");
 
             modelBuilder.HasSequence<int>("seq_tbl_point");
@@ -43,63 +44,6 @@ namespace Basarsoft.Api.Migrations
             modelBuilder.HasSequence<int>("seq_user_roles");
 
             modelBuilder.HasSequence<int>("seq_users");
-
-            modelBuilder.Entity("Basarsoft.Api.Models.GeoAuthorization", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id")
-                        .HasDefaultValueSql("nextval('seq_tbl_geo_authorization')")
-                        .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.None);
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<Geometry>("Geom")
-                        .IsRequired()
-                        .HasColumnType("geometry(Polygon,4326)")
-                        .HasColumnName("geom");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_active");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_deleted");
-
-                    b.Property<DateTime>("ModifiedDate")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("modified_date");
-
-                    b.Property<int?>("RoleId")
-                        .HasColumnType("integer")
-                        .HasColumnName("role_id");
-
-                    b.Property<int?>("UserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_tbl_geo_authorization");
-
-                    b.HasIndex("RoleId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_tbl_geo_authorization_role_id")
-                        .HasFilter("role_id IS NOT NULL AND NOT is_deleted");
-
-                    b.HasIndex("UserId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_tbl_geo_authorization_user_id")
-                        .HasFilter("user_id IS NOT NULL AND NOT is_deleted");
-
-                    b.ToTable("tbl_geo_authorization", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_tbl_geo_authorization_target", "num_nonnulls(user_id, role_id) = 1");
-                        });
-                });
 
             modelBuilder.Entity("Basarsoft.Api.Models.LineFeature", b =>
                 {
@@ -540,21 +484,6 @@ namespace Basarsoft.Api.Migrations
                         .HasDatabaseName("ix_user_roles_user_id_role_id");
 
                     b.ToTable("user_roles", (string)null);
-                });
-
-            modelBuilder.Entity("Basarsoft.Api.Models.GeoAuthorization", b =>
-                {
-                    b.HasOne("Basarsoft.Api.Models.Role", null)
-                        .WithMany()
-                        .HasForeignKey("RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .HasConstraintName("fk_tbl_geo_authorization_roles_role_id");
-
-                    b.HasOne("Basarsoft.Api.Models.User", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .HasConstraintName("fk_tbl_geo_authorization_users_user_id");
                 });
 
             modelBuilder.Entity("Basarsoft.Api.Models.LineFeature", b =>

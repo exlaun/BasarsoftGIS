@@ -41,6 +41,21 @@ export async function setUserPermissions(id, ids) {
   await client.put(`/api/admin/users/${id}/permissions`, { ids })
 }
 
+// ---- Geographic authorization areas ----
+// The assigned drawing area as { wkt, modifiedDate } — wkt is null when none is assigned.
+export async function getUserGeoArea(id) {
+  const { data } = await client.get(`/api/admin/users/${id}/geo-area`)
+  return data
+}
+
+export async function setUserGeoArea(id, wkt) {
+  await client.put(`/api/admin/users/${id}/geo-area`, { wkt })
+}
+
+export async function clearUserGeoArea(id) {
+  await client.delete(`/api/admin/users/${id}/geo-area`)
+}
+
 // ---- Roles ----
 export async function listRoles() {
   const { data } = await client.get('/api/admin/roles')
@@ -63,6 +78,19 @@ export async function deleteRole(id) {
 
 export async function setRolePermissions(id, ids) {
   await client.put(`/api/admin/roles/${id}/permissions`, { ids })
+}
+
+export async function getRoleGeoArea(id) {
+  const { data } = await client.get(`/api/admin/roles/${id}/geo-area`)
+  return data
+}
+
+export async function setRoleGeoArea(id, wkt) {
+  await client.put(`/api/admin/roles/${id}/geo-area`, { wkt })
+}
+
+export async function clearRoleGeoArea(id) {
+  await client.delete(`/api/admin/roles/${id}/geo-area`)
 }
 
 // ---- Permissions ----

@@ -21,7 +21,7 @@
   --admin-surface-2: rgba(15, 23, 42, 0.07);
 }
 
-/* ---- Left vertical navbar (the mentor's "sol tarafa dik yaslı navbar") ---- */
+/* ---- Left vertical navbar ---- */
 .admin-nav {
   flex: 0 0 220px;
   display: flex;
@@ -382,6 +382,14 @@
   justify-content: flex-end;
   gap: 0.6rem;
   border-top: 1px solid var(--bar-border);
+}
+
+/* Small OpenLayers map inside the Geographic Access modal. */
+.admin-geo-map {
+  height: 380px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
 /* ---- Form fields ---- */

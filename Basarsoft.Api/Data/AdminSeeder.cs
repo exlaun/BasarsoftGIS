@@ -10,14 +10,36 @@ public static class AdminSeeder
 {
     public static async Task SeedAsync(AppDbContext db)
     {
-        // 1) Ensure every catalogue permission exists.
-        var existingNames = await db.Permissions.Select(p => p.Name).ToListAsync();
-        var missing = SeedData.Permissions.Where(p => !existingNames.Contains(p.Name)).ToList();
-        if (missing.Count > 0)
+        // 1) Ensure every English catalogue permission exists. IgnoreQueryFilters prevents duplicate
+        // inserts when a seeded permission was soft-deleted; in that case, restore the seed row.
+        var seedNames = SeedData.Permissions.Select(seed => seed.Name).ToList();
+        var permissions = await db.Permissions
+            .IgnoreQueryFilters()
+            .Where(p => seedNames.Contains(p.Name))
+            .ToListAsync();
+
+        var permissionsChanged = false;
+        foreach (var (name, description) in SeedData.Permissions)
         {
-            db.Permissions.AddRange(missing.Select(p => new Permission { Name = p.Name, Description = p.Description }));
-            await db.SaveChangesAsync();
+            var permission = permissions.FirstOrDefault(p => p.Name == name);
+            if (permission is null)
+            {
+                db.Permissions.Add(new Permission { Name = name, Description = description });
+                permissionsChanged = true;
+                continue;
+            }
+
+            if (permission.Description != description || permission.IsDeleted || !permission.IsActive)
+            {
+                permission.Description = description;
+                permission.IsDeleted = false;
+                permission.IsActive = true;
+                permissionsChanged = true;
+            }
         }
+
+        if (permissionsChanged)
+            await db.SaveChangesAsync();
 
         // 2) Ensure the Admin role exists.
         var createdAdminRole = false;
@@ -52,4 +74,5 @@ public static class AdminSeeder
             await db.SaveChangesAsync();
         }
     }
+
 }

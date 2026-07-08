@@ -48,7 +48,7 @@ export default function PermissionFormModal({ onClose, onSuccess }) {
       <form className="admin-modal" onSubmit={handleSubmit}>
         <div className="admin-modal-head">
           <h2 className="admin-modal-title">Add permission</h2>
-          <p className="admin-modal-desc">Name is the machine key (e.g. point_ekleme).</p>
+          <p className="admin-modal-desc">Name is the machine key (e.g. add_point).</p>
         </div>
 
         <div className="admin-modal-body">
@@ -59,7 +59,7 @@ export default function PermissionFormModal({ onClose, onSuccess }) {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. rapor_alma"
+              placeholder="e.g. export_report"
               maxLength={80}
             />
           </label>

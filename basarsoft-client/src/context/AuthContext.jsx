@@ -120,6 +120,8 @@ export function AuthProvider({ children }) {
       isAdmin: profile?.isAdmin ?? false,
       roles: profile?.roles ?? [],
       permissions: profile?.permissions ?? [],
+      // Effective geographic authorization area (WKT, EPSG:4326); null = unrestricted drawing.
+      authorizedAreaWkt: profile?.authorizedAreaWkt ?? null,
       profileLoading,
       login,
       register,

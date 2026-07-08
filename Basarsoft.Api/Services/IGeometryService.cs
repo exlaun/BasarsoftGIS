@@ -5,9 +5,11 @@ namespace Basarsoft.Api.Services;
 public interface IGeometryService
 {
     // Saves a shape (from WKT) into the table for `type` (point|line|polygon), owned by `userId`.
-    // Returns the saved row as WKT, or null if the type is unknown / the WKT is invalid or the
-    // wrong geometry type for that table. Polygon creates also include the contained-shape count.
-    Task<GeometryResponse?> CreateAsync(string type, GeometryCreateRequest request, int userId);
+    // Returns Success (with the saved row as WKT), InvalidGeometry (unknown type / bad WKT / wrong
+    // geometry type for that table), or OutsideAuthorizedArea (the caller has a geographic
+    // authorization area and the shape isn't fully inside it). Polygon creates also include the
+    // contained-shape count.
+    Task<GeometryUpdateResult> CreateAsync(string type, GeometryCreateRequest request, int userId);
 
     // Lists the caller's non-deleted shapes of one type as WKT. Empty if the type is unknown.
     Task<IReadOnlyList<GeometryResponse>> ListAsync(string type, int userId);

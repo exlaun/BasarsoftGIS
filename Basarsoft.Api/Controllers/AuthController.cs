@@ -13,15 +13,18 @@ public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
     private readonly IUserAdminService _userAdminService;
+    private readonly IGeoAuthorizationService _geoAuthService;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
         IAuthService authService,
         IUserAdminService userAdminService,
+        IGeoAuthorizationService geoAuthService,
         ILogger<AuthController> logger)
     {
         _authService = authService;
         _userAdminService = userAdminService;
+        _geoAuthService = geoAuthService;
         _logger = logger;
     }
 
@@ -119,7 +122,13 @@ public class AuthController : ControllerBase
                 return Unauthorized();
 
             var me = await _userAdminService.GetMeAsync(userId);
-            return me is null ? Unauthorized() : Ok(me);
+            if (me is null)
+                return Unauthorized();
+
+            // Composed here (not inside UserAdminService) to keep the RBAC service decoupled from
+            // the geographic-authorization feature.
+            me.AuthorizedAreaWkt = (await _geoAuthService.GetEffectiveAreaAsync(userId))?.AsText();
+            return Ok(me);
         }
         catch (Exception ex)
         {

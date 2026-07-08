@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Basarsoft.Api.Models;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace Basarsoft.Api.Data;
 
@@ -17,12 +18,15 @@ public class AppDbContext : DbContext
     public DbSet<LineFeature> Lines { get; set; }
     public DbSet<PolygonFeature> Polygons { get; set; }
 
-    // RBAC: roles + permissions (the shared "yetki" list) and the three many-to-many link tables.
+    // RBAC: roles + permissions (the shared permission list) and the three many-to-many link tables.
     public DbSet<Role> Roles { get; set; }
     public DbSet<Permission> Permissions { get; set; }
     public DbSet<UserRole> UserRoles { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }
     public DbSet<UserPermission> UserPermissions { get; set; }
+
+    // Geographic authorization areas: one polygon per user or role limiting where they may draw.
+    public DbSet<GeoAuthorization> GeoAuthorizations { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -32,8 +36,22 @@ public class AppDbContext : DbContext
         // Declaring it here makes EF emit "CREATE EXTENSION postgis" in the migration.
         modelBuilder.HasPostgresExtension("postgis");
 
+        // Every table gets its id from a named per-table sequence (seq_<table>) instead of an implicit
+        // identity column, so the sequences are visible, inspectable objects in the database.
+        foreach (var table in new[]
+                 {
+                     "users", "roles", "permissions",
+                     "tbl_point", "tbl_line", "tbl_polygon",
+                     "user_roles", "role_permissions", "user_permissions",
+                     "tbl_geo_authorization",
+                 })
+        {
+            modelBuilder.HasSequence<int>($"seq_{table}");
+        }
+
         // Soft-deleted users disappear from every query automatically (no need to add WHERE clauses).
         modelBuilder.Entity<User>().HasQueryFilter(u => !u.IsDeleted);
+        UseSequenceId<User>(modelBuilder, "users");
 
         // The three drawing tables share the same shape; only the table name + geometry type differ.
         ConfigureGeometry<PointFeature>(modelBuilder, "tbl_point", "geometry(Point,4326)");
@@ -41,6 +59,26 @@ public class AppDbContext : DbContext
         ConfigureGeometry<PolygonFeature>(modelBuilder, "tbl_polygon", "geometry(Polygon,4326)");
 
         ConfigureRbac(modelBuilder);
+        ConfigureGeoAuthorization(modelBuilder);
+    }
+
+    // Geographic authorization areas: each row belongs to exactly ONE user or ONE
+    // role (check constraint), holds a single polygon, and at most one live row exists per target
+    // (partial unique indexes skip soft-deleted rows so history can accumulate).
+    private static void ConfigureGeoAuthorization(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<GeoAuthorization>(e =>
+        {
+            e.ToTable("tbl_geo_authorization", t =>
+                t.HasCheckConstraint("ck_tbl_geo_authorization_target", "num_nonnulls(user_id, role_id) = 1"));
+            e.Property(x => x.Geom).HasColumnType("geometry(Polygon,4326)");
+            e.HasQueryFilter(x => !x.IsDeleted);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Role>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.UserId).IsUnique().HasFilter("user_id IS NOT NULL AND NOT is_deleted");
+            e.HasIndex(x => x.RoleId).IsUnique().HasFilter("role_id IS NOT NULL AND NOT is_deleted");
+        });
+        UseSequenceId<GeoAuthorization>(modelBuilder, "tbl_geo_authorization");
     }
 
     // Roles/permissions and their many-to-many links. Roles + permissions get the same soft-delete
@@ -54,6 +92,7 @@ public class AppDbContext : DbContext
             e.HasQueryFilter(r => !r.IsDeleted);
             e.HasIndex(r => r.Name).IsUnique();
         });
+        UseSequenceId<Role>(modelBuilder, "roles");
 
         modelBuilder.Entity<Permission>(e =>
         {
@@ -61,33 +100,50 @@ public class AppDbContext : DbContext
             e.HasQueryFilter(p => !p.IsDeleted);
             e.HasIndex(p => p.Name).IsUnique();
         });
+        UseSequenceId<Permission>(modelBuilder, "permissions");
 
-        // user_roles: which roles a user holds.
+        // user_roles: which roles a user holds. Surrogate sequence-backed id; the old composite key
+        // lives on as a unique index so the same pair can never be linked twice.
         modelBuilder.Entity<UserRole>(e =>
         {
             e.ToTable("user_roles");
-            e.HasKey(x => new { x.UserId, x.RoleId });
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.RoleId }).IsUnique();
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Role>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
         });
+        UseSequenceId<UserRole>(modelBuilder, "user_roles");
 
         // role_permissions: which permissions a role grants.
         modelBuilder.Entity<RolePermission>(e =>
         {
             e.ToTable("role_permissions");
-            e.HasKey(x => new { x.RoleId, x.PermissionId });
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.RoleId, x.PermissionId }).IsUnique();
             e.HasOne<Role>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Permission>().WithMany().HasForeignKey(x => x.PermissionId).OnDelete(DeleteBehavior.Cascade);
         });
+        UseSequenceId<RolePermission>(modelBuilder, "role_permissions");
 
         // user_permissions: permissions granted directly to a user, independent of any role.
         modelBuilder.Entity<UserPermission>(e =>
         {
             e.ToTable("user_permissions");
-            e.HasKey(x => new { x.UserId, x.PermissionId });
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.PermissionId }).IsUnique();
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Permission>().WithMany().HasForeignKey(x => x.PermissionId).OnDelete(DeleteBehavior.Cascade);
         });
+        UseSequenceId<UserPermission>(modelBuilder, "user_permissions");
+    }
+
+    // Point an entity's Id at its per-table sequence (default nextval) and switch off the provider's
+    // identity-column convention so the column really is plain int + sequence default in the database.
+    private static void UseSequenceId<T>(ModelBuilder modelBuilder, string tableName) where T : class
+    {
+        modelBuilder.Entity<T>().Property<int>("Id")
+            .HasDefaultValueSql($"nextval('seq_{tableName}')")
+            .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.None);
     }
 
     // Shared mapping for a geometry table: explicit table name (so snake_case doesn't pluralize it),
@@ -97,6 +153,7 @@ public class AppDbContext : DbContext
     {
         var entity = modelBuilder.Entity<T>();
         entity.ToTable(tableName);
+        UseSequenceId<T>(modelBuilder, tableName);
         entity.Property(x => x.Geom).HasColumnType(geomType);
         // Hide both soft-deleted and deactivated shapes from every query automatically.
         entity.HasQueryFilter(x => !x.IsDeleted && x.IsActive);

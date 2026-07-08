@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Basarsoft.Api.DTOs;
 
-// Body for adding a permission to the shared catalogue. Name is the machine key (e.g. "point_ekleme").
+// Body for adding a permission to the shared catalogue. Name is the machine key (e.g. "add_point").
 public class PermissionCreateRequest
 {
     [Required]

@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Basarsoft.Api.Controllers;
 
-// The shared permission (yetki) catalogue. Mostly seeded; the admin can add or remove entries.
+// The shared permission catalogue. Mostly seeded; the admin can add or remove entries.
 [ApiController]
 [Authorize(Policy = AdminAccessRequirement.PolicyName)]
 [Route("api/admin/permissions")]

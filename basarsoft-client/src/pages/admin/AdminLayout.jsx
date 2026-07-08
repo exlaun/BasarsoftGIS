@@ -5,7 +5,7 @@ import './Admin.css'
 
 // Standalone full-screen admin shell: a left vertical navbar + a content area that renders the active
 // admin page via <Outlet />. No map or map top-bar here — this is a separate interface reached from the
-// map's "Yönetim Paneli" button.
+// map's "Admin Panel" button.
 const NAV = [
   { to: '/admin', end: true, label: 'Users' },
   { to: '/admin/roles', end: false, label: 'Roles' },
@@ -20,7 +20,7 @@ export default function AdminLayout() {
     <div className="admin">
       <nav className="admin-nav" aria-label="Admin navigation">
         <div className="admin-nav-brand">
-          Yönetim Paneli
+          Admin Panel
           <small>Admin</small>
         </div>
 

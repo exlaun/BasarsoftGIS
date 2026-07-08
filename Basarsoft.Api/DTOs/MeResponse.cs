@@ -14,4 +14,9 @@ public class MeResponse
     public IReadOnlyList<string> Roles { get; set; } = Array.Empty<string>();
 
     public IReadOnlyList<string> Permissions { get; set; } = Array.Empty<string>();
+
+    // The caller's effective geographic authorization area as WKT (own area, else union of role
+    // areas — possibly a MULTIPOLYGON). Null = unrestricted drawing. The map uses this to show the
+    // boundary and pre-check draws; the server re-checks on every save regardless.
+    public string? AuthorizedAreaWkt { get; set; }
 }

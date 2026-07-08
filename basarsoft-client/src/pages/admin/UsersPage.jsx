@@ -3,6 +3,7 @@ import { listUsers, listRoles, deleteUser } from '../../api/admin'
 import UserFormModal from './UserFormModal'
 import UserRolesModal from './UserRolesModal'
 import UserPermissionsModal from './UserPermissionsModal'
+import GeoAuthModal from './GeoAuthModal'
 import AdminConfirm from './AdminConfirm'
 import { useAuth } from '../../context/auth-context'
 
@@ -125,6 +126,9 @@ export default function UsersPage() {
                         <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'perms', user: u })}>
                           Permissions
                         </button>
+                        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'geo', user: u })}>
+                          Geographic Access
+                        </button>
                         <button type="button" className="admin-btn admin-btn-sm admin-btn-danger" onClick={() => setModal({ type: 'delete', user: u })}>
                           Delete
                         </button>
@@ -152,6 +156,15 @@ export default function UsersPage() {
       )}
       {modal?.type === 'perms' && (
         <UserPermissionsModal user={modal.user} onClose={() => setModal(null)} onSuccess={closeAnd} />
+      )}
+      {modal?.type === 'geo' && (
+        <GeoAuthModal
+          kind="user"
+          targetId={modal.user.id}
+          targetLabel={modal.user.username}
+          onClose={() => setModal(null)}
+          onSuccess={closeAnd}
+        />
       )}
       {modal?.type === 'delete' && (
         <AdminConfirm

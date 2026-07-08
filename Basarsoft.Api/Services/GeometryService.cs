@@ -11,20 +11,23 @@ public class GeometryService : IGeometryService
 {
     private readonly AppDbContext _db;
 
+    private readonly IGeoAuthorizationService _geoAuth;
+
     // Turns WKT text into a NetTopologySuite geometry. Reusable within this scoped (per-request) service.
     private readonly WKTReader _wktReader = new();
 
     // The coordinate system we store everything in: EPSG:4326 (WGS84 lon-lat).
     private const int Srid = 4326;
 
-    public GeometryService(AppDbContext db)
+    public GeometryService(AppDbContext db, IGeoAuthorizationService geoAuth)
     {
         _db = db;
+        _geoAuth = geoAuth;
     }
 
-    public async Task<GeometryResponse?> CreateAsync(string type, GeometryCreateRequest request, int userId)
+    public async Task<GeometryUpdateResult> CreateAsync(string type, GeometryCreateRequest request, int userId)
     {
-        // Parse the WKT the client drew. Bad text -> null -> the controller returns 400.
+        // Parse the WKT the client drew. Bad text -> InvalidGeometry -> the controller returns 400.
         Geometry geom;
         try
         {
@@ -32,32 +35,51 @@ public class GeometryService : IGeometryService
         }
         catch
         {
-            return null;
+            return GeometryUpdateResult.InvalidGeometry;
         }
 
         if (geom is null || geom.IsEmpty)
-            return null;
+            return GeometryUpdateResult.InvalidGeometry;
 
         // The DB columns are typed (geometry(Point,4326) etc.), so the WKT must match the endpoint.
         geom.SRID = Srid;
 
+        // Geographic authorization: a user with an assigned area may only draw fully inside it.
+        // Covers (not Within) so a shape touching the boundary still counts as inside. Runs in
+        // memory on the two NTS geometries — no SQL round-trip.
+        if (await GetBlockingAreaAsync(geom, userId))
+            return GeometryUpdateResult.OutsideAuthorizedArea;
+
+        GeometryResponse? saved;
         switch (type.ToLowerInvariant())
         {
             case "point" when geom.OgcGeometryType == OgcGeometryType.Point:
-                return await AddAsync(_db.Points, geom, request, userId);
+                saved = await AddAsync(_db.Points, geom, request, userId);
+                break;
             case "line" when geom.OgcGeometryType == OgcGeometryType.LineString:
-                return await AddAsync(_db.Lines, geom, request, userId);
+                saved = await AddAsync(_db.Lines, geom, request, userId);
+                break;
             case "polygon" when geom.OgcGeometryType == OgcGeometryType.Polygon:
                 // Draw-time polygon save keeps the older "inside" result: count existing rows before
                 // inserting this polygon, otherwise it would count itself.
                 var containedCount = await CountContainedAsync(geom, userId);
-                var saved = await AddAsync(_db.Polygons, geom, request, userId);
+                saved = await AddAsync(_db.Polygons, geom, request, userId);
                 if (saved is not null)
                     saved.IntersectionCount = containedCount;
-                return saved;
+                break;
             default:
-                return null; // unknown type or WKT geometry doesn't match the table
+                saved = null; // unknown type or WKT geometry doesn't match the table
+                break;
         }
+
+        return saved is null ? GeometryUpdateResult.InvalidGeometry : GeometryUpdateResult.Ok(saved);
+    }
+
+    // True when the caller has an effective authorization area and `geom` is not fully inside it.
+    private async Task<bool> GetBlockingAreaAsync(Geometry geom, int userId)
+    {
+        var area = await _geoAuth.GetEffectiveAreaAsync(userId);
+        return area is not null && !area.Covers(geom);
     }
 
     public Task<IReadOnlyList<GeometryResponse>> ListAsync(string type, int userId) =>
@@ -177,6 +199,12 @@ public class GeometryService : IGeometryService
                 return GeometryUpdateResult.InvalidGeometry;
 
             geom.SRID = Srid;
+
+            // Moving/reshaping a shape is bound by the same geographic authorization as drawing it;
+            // attribute-only edits (no WKT in the request) stay unrestricted.
+            if (await GetBlockingAreaAsync(geom, userId))
+                return GeometryUpdateResult.OutsideAuthorizedArea;
+
             entity.Geom = geom;
         }
 
