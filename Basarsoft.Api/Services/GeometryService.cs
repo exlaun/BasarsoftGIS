@@ -91,13 +91,6 @@ public class GeometryService : IGeometryService
             _ => Task.FromResult<IReadOnlyList<GeometryResponse>>(Array.Empty<GeometryResponse>()),
         };
 
-    public async Task<AllGeometryResponse> ListAllAsync(int userId) => new()
-    {
-        Points = await QueryAsync(_db.Points, userId),
-        Lines = await QueryAsync(_db.Lines, userId),
-        Polygons = await QueryAsync(_db.Polygons, userId),
-    };
-
     public Task<GeometryUpdateResult> UpdateAsync(string type, int id, GeometryUpdateRequest request, int userId) =>
         type.ToLowerInvariant() switch
         {

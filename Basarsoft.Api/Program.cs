@@ -26,12 +26,21 @@ var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
     ?? throw new InvalidOperationException("Missing 'Jwt' configuration section.");
 builder.Services.AddSingleton(jwtSettings);
 
+// Bind the "GeoServer" config section and share it with the WFS reader below.
+var geoServerSettings = builder.Configuration.GetSection("GeoServer").Get<GeoServerSettings>()
+    ?? throw new InvalidOperationException("Missing 'GeoServer' configuration section.");
+builder.Services.AddSingleton(geoServerSettings);
+
 // Auth services.
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
-// Geometry (drawing) service.
+// Geometry (drawing) service — still owns writes/query/analysis against PostGIS.
 builder.Services.AddScoped<IGeometryService, GeometryService>();
+
+// Reads the drawn geometry back through GeoServer's WFS (the map's one-shot load). A typed HttpClient
+// so it gets connection pooling and can be configured/tested independently.
+builder.Services.AddHttpClient<IGeoServerReadService, GeoServerReadService>();
 
 // Admin (RBAC) services: user/role/permission management + effective-permission resolution.
 builder.Services.AddScoped<IPermissionService, PermissionService>();

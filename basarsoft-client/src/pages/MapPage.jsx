@@ -9,6 +9,8 @@ import TileLayer from 'ol/layer/Tile'
 import OSM from 'ol/source/OSM'
 import VectorLayer from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
+import ImageLayer from 'ol/layer/Image'
+import ImageWMS from 'ol/source/ImageWMS'
 import Draw from 'ol/interaction/Draw'
 import Modify from 'ol/interaction/Modify'
 import Translate from 'ol/interaction/Translate'
@@ -28,6 +30,7 @@ import ShapePickerModal from '../components/ShapePickerModal'
 import QueryPanel from '../components/QueryPanel'
 import InventoryInfoModal from '../components/InventoryInfoModal'
 import { listAllGeometry, saveGeometry, updateGeometry, deleteGeometry, analyzeArea } from '../api/geometry'
+import client, { getStoredAuth } from '../api/client'
 import './MapPage.css'
 
 // Approximate geographic center of Turkey (lon, lat).
@@ -86,6 +89,9 @@ export default function MapPage() {
   // by the layer-control checkboxes. Keyed by apiType: { point, line, polygon }.
   const sourcesRef = useRef(null)
   const layersRef = useRef(null)
+  // GeoServer WMS display layer + its source (for refresh()); hidden until the user picks WMS mode.
+  const wmsLayerRef = useRef(null)
+  const wmsSourceRef = useRef(null)
   const analysisSourceRef = useRef(null)
   // Geographic authorization boundary: its own source (for display) plus the raw OL geometry in map
   // projection (for the drawend inside-check without re-parsing WKT every draw).
@@ -116,6 +122,9 @@ export default function MapPage() {
   const [analysisResult, setAnalysisResult] = useState(null)
   // Which geometry types are visible on the map (layer-control checkboxes). All shown by default.
   const [layerVisibility, setLayerVisibility] = useState({ point: true, line: true, polygon: true })
+  // Display source: 'vector' = editable WFS-backed vectors (default); 'wms' = flat GeoServer WMS image
+  // (display-only, per the mentor's WMS-for-display / WFS-for-editing split).
+  const [displayMode, setDisplayMode] = useState('vector')
   // Query-panel drawer open/closed.
   const [drawerOpen, setDrawerOpen] = useState(false)
   // Bumped after every successful create/update/move/delete so an open query panel refetches.
@@ -161,10 +170,43 @@ export default function MapPage() {
     const authAreaSource = new VectorSource()
     authAreaSourceRef.current = authAreaSource
 
+    // GeoServer WMS display layer: a single rendered PNG of all the caller's shapes, fetched through
+    // the backend (React -> /api/geometry/wms -> GeoServer). The backend fixes the layers and injects
+    // uid from the JWT, so the browser only sends the viewport. An <img> can't carry the bearer token,
+    // so a custom imageLoadFunction fetches with the Authorization header and hands OL a blob URL.
+    const wmsSource = new ImageWMS({
+      url: `${client.defaults.baseURL}/api/geometry/wms`,
+      // LAYERS is required by OL but ignored server-side; VERSION 1.1.1 makes OL send SRS + x,y bbox.
+      params: { LAYERS: 'basarsoft', FORMAT: 'image/png', TRANSPARENT: true, VERSION: '1.1.1' },
+      ratio: 1,
+      imageLoadFunction: (image, src) => {
+        const token = getStoredAuth()?.token
+        fetch(src, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+          .then((res) => {
+            if (!res.ok) throw new Error(`WMS ${res.status}`)
+            return res.blob()
+          })
+          .then((blob) => {
+            const objectUrl = URL.createObjectURL(blob)
+            const img = image.getImage()
+            img.addEventListener('load', () => URL.revokeObjectURL(objectUrl), { once: true })
+            img.src = objectUrl
+          })
+          .catch(() => {
+            // Leave the image unset (blank) on failure; the vector mode still works.
+          })
+      },
+    })
+    const wmsLayer = new ImageLayer({ source: wmsSource, visible: false })
+    wmsSourceRef.current = wmsSource
+    wmsLayerRef.current = wmsLayer
+
     const map = new Map({
       target: mapElementRef.current,
       layers: [
         new TileLayer({ source: new OSM() }),
+        // GeoServer WMS display layer, above OSM. Hidden until the user switches to WMS mode.
+        wmsLayer,
         // Authorization boundary sits under every shape layer: it's a backdrop, never clickable
         // (its feature carries no apiType/dbId, so select/hover logic skips it anyway).
         new VectorLayer({ source: authAreaSource, style: AUTH_AREA_STYLE }),
@@ -240,6 +282,8 @@ export default function MapPage() {
       mapRef.current = null
       sourcesRef.current = null
       layersRef.current = null
+      wmsLayerRef.current = null
+      wmsSourceRef.current = null
       analysisSourceRef.current = null
       authAreaSourceRef.current = null
       authGeomRef.current = null
@@ -268,16 +312,39 @@ export default function MapPage() {
     }
   }, [authorizedAreaWkt])
 
-  // Apply the layer-control checkboxes: hidden layers keep their features but stop rendering,
-  // and OpenLayers' hit-testing (hover/select) skips invisible layers automatically.
+  // Apply the display mode + layer-control checkboxes. In WMS mode the vector layers are all hidden
+  // (so nothing interactive dangles behind the flat image) and the WMS layer is shown + refreshed to
+  // pull the latest render; in vector mode the WMS layer is hidden and each vector layer follows its
+  // checkbox. Hidden layers keep their features but stop rendering, and OpenLayers' hit-testing skips
+  // invisible layers automatically.
   useEffect(() => {
+    const inWms = displayMode === 'wms'
+    wmsLayerRef.current?.setVisible(inWms)
     for (const [type, layer] of Object.entries(layersRef.current ?? {})) {
-      layer.setVisible(layerVisibility[type])
+      layer.setVisible(!inWms && layerVisibility[type])
     }
-  }, [layerVisibility])
+    if (inWms) wmsSourceRef.current?.refresh()
+  }, [layerVisibility, displayMode])
 
   const toggleLayer = (type) =>
     setLayerVisibility((prev) => ({ ...prev, [type]: !prev[type] }))
+
+  // Switch between the editable vector display and the flat WMS image. Entering WMS drops any in-flight
+  // editing state (active tool, selection, unsaved draw) so nothing is left hanging behind the hidden
+  // vectors — WMS is display-only, exactly the mentor's "you can't operate on WMS" point.
+  const handleDisplayMode = (mode) => {
+    if (mode === 'wms') {
+      setActiveTool('none')
+      setSelectedShape(null)
+      setEditingGeom(false)
+      setConfirmingDelete(false)
+      setPendingDraw((draw) => {
+        if (draw) sourcesRef.current?.[draw.apiType].removeFeature(draw.feature)
+        return null
+      })
+    }
+    setDisplayMode(mode)
+  }
 
   // Picking a draw tool re-enables that type's layer if it was unchecked, so a freshly
   // saved shape doesn't silently vanish into a hidden layer.
@@ -675,8 +742,29 @@ export default function MapPage() {
           </button>
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.1.3</span>
+        <span className="map-title">BasarsoftInternshipTask v0.1.4</span>
         <div className="map-bar-right">
+          <div className="map-mode-toggle" role="group" aria-label="Görüntüleme kaynağı">
+            <button
+              type="button"
+              className={`map-mode-btn${displayMode === 'vector' ? ' active' : ''}`}
+              onClick={() => handleDisplayMode('vector')}
+              aria-pressed={displayMode === 'vector'}
+              title="Düzenlenebilir vektör katmanı (WFS)"
+            >
+              Vektör
+            </button>
+            <button
+              type="button"
+              className={`map-mode-btn${displayMode === 'wms' ? ' active' : ''}`}
+              onClick={() => handleDisplayMode('wms')}
+              aria-pressed={displayMode === 'wms'}
+              title="GeoServer görüntüleme katmanı (WMS)"
+            >
+              WMS
+            </button>
+          </div>
+          <span className="map-bar-divider" aria-hidden="true" />
           <ThemeToggle />
           <span className="map-bar-divider" aria-hidden="true" />
           {isAdmin && (
@@ -708,13 +796,20 @@ export default function MapPage() {
         </div>
       </header>
       <div className="map-body">
-        <DrawToolbar
-          activeTool={activeTool}
-          disabledTools={disabledDrawTools}
-          onSelectTool={handleSelectTool}
-          layerVisibility={layerVisibility}
-          onToggleLayer={toggleLayer}
-        />
+        {displayMode === 'vector' ? (
+          <DrawToolbar
+            activeTool={activeTool}
+            disabledTools={disabledDrawTools}
+            onSelectTool={handleSelectTool}
+            layerVisibility={layerVisibility}
+            onToggleLayer={toggleLayer}
+          />
+        ) : (
+          <div className="map-wms-hint" role="status">
+            WMS görüntüleme modu — çizimler GeoServer tarafından resim olarak sunuluyor. Çizim ve
+            düzenleme için “Vektör”e geçin.
+          </div>
+        )}
         <div ref={mapElementRef} className="map-container" />
         <div ref={tooltipElementRef} className="map-tooltip" hidden />
 

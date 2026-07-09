@@ -22,15 +22,18 @@ public class GeometryController : ControllerBase
         };
 
     private readonly IGeometryService _geometryService;
+    private readonly IGeoServerReadService _geoServerReadService;
     private readonly IUserAdminService _userAdminService;
     private readonly ILogger<GeometryController> _logger;
 
     public GeometryController(
         IGeometryService geometryService,
+        IGeoServerReadService geoServerReadService,
         IUserAdminService userAdminService,
         ILogger<GeometryController> logger)
     {
         _geometryService = geometryService;
+        _geoServerReadService = geoServerReadService;
         _userAdminService = userAdminService;
         _logger = logger;
     }
@@ -50,7 +53,10 @@ public class GeometryController : ControllerBase
             new { message = "An unexpected error occurred." });
     }
 
-    // GET /api/geometry -> every shape the caller owns, grouped by type (one-shot map load).
+    // GET /api/geometry -> every shape the caller owns, grouped by type (one-shot map load). The data
+    // is now pulled from GeoServer's WFS (React -> this API -> GeoServer -> PostGIS), not read from EF
+    // directly. userId comes from the JWT and scopes GeoServer's per-user SQL view, so isolation is
+    // still enforced server-side. A GeoServer outage surfaces as a 500 (no silent EF fallback).
     [HttpGet]
     public async Task<ActionResult<AllGeometryResponse>> GetAll()
     {
@@ -59,11 +65,43 @@ public class GeometryController : ControllerBase
             if (!TryGetUserId(out var userId))
                 return Unauthorized();
 
-            return Ok(await _geometryService.ListAllAsync(userId));
+            return Ok(await _geoServerReadService.GetAllForUserAsync(userId));
         }
         catch (Exception ex)
         {
             return ServerError(ex, nameof(GetAll));
+        }
+    }
+
+    // GET /api/geometry/wms -> a single PNG of the caller's shapes rendered by GeoServer's WMS. This is
+    // the DISPLAY layer (the WFS/vector path above is the editable one). OpenLayers' ImageWMS sends the
+    // current viewport as BBOX/WIDTH/HEIGHT/SRS; the caller only steers the viewport, while the layers
+    // and the per-user uid (from the JWT) are fixed server-side. "wms" is a literal segment so it ranks
+    // above the {type} route, same as "query".
+    [HttpGet("wms")]
+    public async Task<IActionResult> Wms(
+        [FromQuery] string? bbox,
+        [FromQuery] int width,
+        [FromQuery] int height,
+        [FromQuery] string? crs,
+        [FromQuery] string? srs)
+    {
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+
+            // OpenLayers sends CRS (WMS 1.3.0) or SRS (1.1.1) depending on version; accept either.
+            var projection = string.IsNullOrWhiteSpace(crs) ? srs : crs;
+            if (string.IsNullOrWhiteSpace(bbox) || string.IsNullOrWhiteSpace(projection) || width <= 0 || height <= 0)
+                return BadRequest(new { message = "bbox, crs/srs, width and height are required." });
+
+            var image = await _geoServerReadService.GetMapAsync(userId, bbox, width, height, projection);
+            return File(image.Bytes, image.ContentType);
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, nameof(Wms));
         }
     }
 

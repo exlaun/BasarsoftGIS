@@ -14,9 +14,6 @@ public interface IGeometryService
     // Lists the caller's non-deleted shapes of one type as WKT. Empty if the type is unknown.
     Task<IReadOnlyList<GeometryResponse>> ListAsync(string type, int userId);
 
-    // Lists all of the caller's shapes (points + lines + polygons) for a one-shot map load.
-    Task<AllGeometryResponse> ListAllAsync(int userId);
-
     // Updates the caller's own shape: its name/color always, and its geometry when the request
     // carries WKT. Returns Success (with the updated row), NotFound (missing or not theirs), or
     // InvalidGeometry (bad WKT / wrong geometry type for this shape).

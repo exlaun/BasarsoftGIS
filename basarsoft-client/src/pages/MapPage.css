@@ -67,6 +67,57 @@
   background: var(--bar-hover);
 }
 
+/* GeoServer display-source toggle: Vektör (editable WFS vectors) vs WMS (rendered image). */
+.map-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--bar-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.map-mode-btn {
+  padding: 0.45rem 0.8rem;
+  border: none;
+  background: transparent;
+  color: var(--bar-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.map-mode-btn + .map-mode-btn {
+  border-left: 1px solid var(--bar-border);
+}
+
+.map-mode-btn:hover {
+  background: var(--bar-hover);
+}
+
+.map-mode-btn.active {
+  background: var(--accent, #2563eb);
+  color: #fff;
+}
+
+/* Shown in place of the draw toolbar while in WMS (display-only) mode. */
+.map-wms-hint {
+  position: absolute;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: min(90%, 640px);
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--bar-border);
+  border-radius: 8px;
+  background: var(--bar-bg, rgba(17, 17, 27, 0.92));
+  color: var(--bar-text);
+  font-size: 0.85rem;
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
 /* Wrapper that fills the space under the header and anchors the floating toolbar + toast. */
 .map-body {
   position: relative;
