@@ -742,7 +742,7 @@ export default function MapPage() {
           </button>
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.1.4</span>
+        <span className="map-title">BasarsoftInternshipTask v0.1.5</span>
         <div className="map-bar-right">
           <div className="map-mode-toggle" role="group" aria-label="Görüntüleme kaynağı">
             <button
