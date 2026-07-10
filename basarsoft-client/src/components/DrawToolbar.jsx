@@ -58,6 +58,12 @@ const AnalysisIcon = (
     <line x1="6" y1="20" x2="6" y2="14" />
   </svg>
 )
+// Flame — heat map analysis (density of the caller's shapes, rendered by GeoServer).
+const HeatmapIcon = (
+  <svg {...iconProps}>
+    <path d="M12 22c4.4 0 7-2.8 7-6.5 0-2.5-1.2-4.6-2.8-6.3-.4 1-1 1.9-1.9 2.5C14.5 8.6 13.5 4.6 10 2c.3 2.6-.6 4.4-2 6-1.5 1.7-3 3.8-3 7 0 3.7 2.6 7 7 7z" />
+  </svg>
+)
 // Stacked sheets — toggles the layer-visibility menu.
 const LayersIcon = (
   <svg {...iconProps}>
@@ -85,6 +91,7 @@ const TOOLS = [
   { key: 'LineString', label: 'Line', icon: LineIcon },
   { key: 'Polygon', label: 'Polygon', icon: PolygonIcon },
   { key: 'analysis', label: 'Analysis', icon: AnalysisIcon },
+  { key: 'heatmap', label: 'Heat Map', icon: HeatmapIcon },
 ]
 
 // Bottom-left hint per active tool. Kept accurate to each interaction: Pan drags (no click), a Point
@@ -96,6 +103,7 @@ const TOOL_HINTS = {
   LineString: 'Click to add points, then double-click to finish the line.',
   Polygon: 'Click to add corners, then double-click to finish the polygon.',
   analysis: 'Draw a polygon to count the shapes it touches. Nothing is saved.',
+  heatmap: 'Shows your shape density as a GeoServer heat map. Pick another tool to turn it off.',
 }
 
 export default function DrawToolbar({

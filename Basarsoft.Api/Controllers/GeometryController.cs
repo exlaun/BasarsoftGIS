@@ -105,6 +105,36 @@ public class GeometryController : ControllerBase
         }
     }
 
+    // GET /api/geometry/wms/heatmap -> the caller's shape density rendered as a heat map PNG. Same
+    // viewport contract as /wms, but GeoServer renders the vw_heat view (all shapes as points) through
+    // its vec:Heatmap default style. The legend for this image lives in the frontend (MapPage).
+    [HttpGet("wms/heatmap")]
+    public async Task<IActionResult> WmsHeatmap(
+        [FromQuery] string? bbox,
+        [FromQuery] int width,
+        [FromQuery] int height,
+        [FromQuery] string? crs,
+        [FromQuery] string? srs)
+    {
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+
+            // OpenLayers sends CRS (WMS 1.3.0) or SRS (1.1.1) depending on version; accept either.
+            var projection = string.IsNullOrWhiteSpace(crs) ? srs : crs;
+            if (string.IsNullOrWhiteSpace(bbox) || string.IsNullOrWhiteSpace(projection) || width <= 0 || height <= 0)
+                return BadRequest(new { message = "bbox, crs/srs, width and height are required." });
+
+            var image = await _geoServerReadService.GetHeatmapAsync(userId, bbox, width, height, projection);
+            return File(image.Bytes, image.ContentType);
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, nameof(WmsHeatmap));
+        }
+    }
+
     // GET /api/geometry/query -> a flat, paged list of the caller's shapes for the query panel.
     // Filtering (name contains, type), sorting and paging all run in SQL (WHERE / ORDER BY /
     // LIMIT-OFFSET over a UNION ALL of the three tables) — nothing is trimmed client-side.

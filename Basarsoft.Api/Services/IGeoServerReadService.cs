@@ -20,4 +20,9 @@ public interface IGeoServerReadService
     // views in one image). `userId` fills the views' %uid% filter (from the JWT). The client only steers
     // the viewport (bbox/size/crs); the layers are fixed server-side.
     Task<GeoServerImage> GetMapAsync(int userId, string bbox, int width, int height, string crs);
+
+    // Renders the user's shape density as a heat map PNG: same WMS GetMap contract as GetMapAsync but
+    // against the vw_heat SQL view (all shapes collapsed to points), whose default GeoServer style is
+    // the vec:Heatmap rendering transformation.
+    Task<GeoServerImage> GetHeatmapAsync(int userId, string bbox, int width, int height, string crs);
 }

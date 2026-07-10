@@ -37,7 +37,7 @@
   gap: 0.6rem;
 }
 
-/* Separates the theme toggle (a setting) from the page/workspace actions to its left. */
+/* Separates the theme toggle (a setting) from the display and workspace actions. */
 .map-bar-divider {
   width: 1px;
   align-self: stretch;
@@ -67,7 +67,7 @@
   background: var(--bar-hover);
 }
 
-/* GeoServer display-source toggle: Vektör (editable WFS vectors) vs WMS (rendered image). */
+/* GeoServer display-source toggle: WFS (editable vectors) vs WMS (rendered image). */
 .map-mode-toggle {
   display: inline-flex;
   border: 1px solid var(--bar-border);
@@ -299,6 +299,52 @@
     opacity: 1;
     transform: none;
   }
+}
+
+/* Heat map intensity legend, bottom-right; rendered only while the heatmap tool is active. The
+   gradient stops MUST mirror geoserver/styles/vw_heat_heatmap.sld's ColorMap exactly
+   (quantity -> stop %, entry opacity -> rgba alpha) so the legend explains the on-map colors. */
+.map-heat-legend {
+  position: absolute;
+  right: 1rem;
+  bottom: 1.25rem;
+  z-index: 4;
+  width: 220px;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+.map-heat-legend-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+
+.map-heat-legend-bar {
+  height: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--bar-border);
+  background: linear-gradient(
+    to right,
+    rgba(59, 130, 246, 0) 0%,
+    rgba(59, 130, 246, 0.35) 15%,
+    rgba(34, 211, 238, 0.55) 35%,
+    rgba(34, 197, 94, 0.7) 55%,
+    rgba(250, 204, 21, 0.85) 75%,
+    rgba(239, 68, 68, 0.95) 100%
+  );
+}
+
+.map-heat-legend-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  opacity: 0.8;
+  margin-top: 0.3rem;
 }
 
 /* Continue the descent from the login fly-to-Turkey: the map eases in. */

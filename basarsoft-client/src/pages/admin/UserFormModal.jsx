@@ -80,7 +80,7 @@ export default function UserFormModal({ mode, user, roles, onClose, onSuccess })
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. büşra"
+              placeholder="e.g. alex"
               maxLength={50}
             />
           </label>

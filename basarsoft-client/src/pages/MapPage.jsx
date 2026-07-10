@@ -81,6 +81,26 @@ const AUTH_AREA_STYLE = new Style({
   stroke: new Stroke({ color: '#16a34a', width: 2, lineDash: [4, 8] }),
 })
 
+// Loader shared by every ImageWMS source that points at the backend proxy: an <img> can't carry the
+// bearer token, so fetch with the Authorization header and hand OpenLayers a blob URL instead.
+const loadAuthorizedWmsImage = (image, src) => {
+  const token = getStoredAuth()?.token
+  fetch(src, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    .then((res) => {
+      if (!res.ok) throw new Error(`WMS ${res.status}`)
+      return res.blob()
+    })
+    .then((blob) => {
+      const objectUrl = URL.createObjectURL(blob)
+      const img = image.getImage()
+      img.addEventListener('load', () => URL.revokeObjectURL(objectUrl), { once: true })
+      img.src = objectUrl
+    })
+    .catch(() => {
+      // Leave the image unset (blank) on failure; the vector mode still works.
+    })
+}
+
 export default function MapPage() {
   const mapElementRef = useRef(null)
   const tooltipElementRef = useRef(null)
@@ -92,6 +112,10 @@ export default function MapPage() {
   // GeoServer WMS display layer + its source (for refresh()); hidden until the user picks WMS mode.
   const wmsLayerRef = useRef(null)
   const wmsSourceRef = useRef(null)
+  // GeoServer heat map layer (vw_heat + vec:Heatmap style) + its source; visible only while the
+  // 'heatmap' tool is active. Created once, so toggling can never stack duplicate layers.
+  const heatLayerRef = useRef(null)
+  const heatSourceRef = useRef(null)
   const analysisSourceRef = useRef(null)
   // Geographic authorization boundary: its own source (for display) plus the raw OL geometry in map
   // projection (for the drawend inside-check without re-parsing WKT every draw).
@@ -179,27 +203,23 @@ export default function MapPage() {
       // LAYERS is required by OL but ignored server-side; VERSION 1.1.1 makes OL send SRS + x,y bbox.
       params: { LAYERS: 'basarsoft', FORMAT: 'image/png', TRANSPARENT: true, VERSION: '1.1.1' },
       ratio: 1,
-      imageLoadFunction: (image, src) => {
-        const token = getStoredAuth()?.token
-        fetch(src, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-          .then((res) => {
-            if (!res.ok) throw new Error(`WMS ${res.status}`)
-            return res.blob()
-          })
-          .then((blob) => {
-            const objectUrl = URL.createObjectURL(blob)
-            const img = image.getImage()
-            img.addEventListener('load', () => URL.revokeObjectURL(objectUrl), { once: true })
-            img.src = objectUrl
-          })
-          .catch(() => {
-            // Leave the image unset (blank) on failure; the vector mode still works.
-          })
-      },
+      imageLoadFunction: loadAuthorizedWmsImage,
     })
     const wmsLayer = new ImageLayer({ source: wmsSource, visible: false })
     wmsSourceRef.current = wmsSource
     wmsLayerRef.current = wmsLayer
+
+    // GeoServer heat map: same proxy pattern as the WMS display layer, but the backend fixes the
+    // layer to vw_heat, whose default style is the vec:Heatmap rendering transformation.
+    const heatSource = new ImageWMS({
+      url: `${client.defaults.baseURL}/api/geometry/wms/heatmap`,
+      params: { LAYERS: 'basarsoft', FORMAT: 'image/png', TRANSPARENT: true, VERSION: '1.1.1' },
+      ratio: 1,
+      imageLoadFunction: loadAuthorizedWmsImage,
+    })
+    const heatLayer = new ImageLayer({ source: heatSource, visible: false })
+    heatSourceRef.current = heatSource
+    heatLayerRef.current = heatLayer
 
     const map = new Map({
       target: mapElementRef.current,
@@ -214,6 +234,9 @@ export default function MapPage() {
         layers.polygon,
         layers.line,
         layers.point,
+        // Heat map raster above the shapes (its alpha ramp keeps them readable underneath), below the
+        // temporary analysis polygon so that overlay always stays on top.
+        heatLayer,
         // Temporary analysis polygon lives on its own layer so it never mixes with saved shapes.
         new VectorLayer({ source: analysisSource, style: ANALYSIS_STYLE }),
       ],
@@ -284,6 +307,8 @@ export default function MapPage() {
       layersRef.current = null
       wmsLayerRef.current = null
       wmsSourceRef.current = null
+      heatLayerRef.current = null
+      heatSourceRef.current = null
       analysisSourceRef.current = null
       authAreaSourceRef.current = null
       authGeomRef.current = null
@@ -325,6 +350,15 @@ export default function MapPage() {
     }
     if (inWms) wmsSourceRef.current?.refresh()
   }, [layerVisibility, displayMode])
+
+  // Heat map follows its tool: visible only while 'heatmap' is active, so picking any other tool (or
+  // switching to WMS mode, which resets the tool to Pan) turns it off. Refreshed on every activation
+  // so shapes drawn since the last look are counted in the density.
+  useEffect(() => {
+    const active = activeTool === 'heatmap'
+    heatLayerRef.current?.setVisible(active)
+    if (active) heatSourceRef.current?.refresh()
+  }, [activeTool])
 
   const toggleLayer = (type) =>
     setLayerVisibility((prev) => ({ ...prev, [type]: !prev[type] }))
@@ -744,28 +778,28 @@ export default function MapPage() {
         </div>
         <span className="map-title">BasarsoftInternshipTask v0.1.5</span>
         <div className="map-bar-right">
-          <div className="map-mode-toggle" role="group" aria-label="Görüntüleme kaynağı">
+          <ThemeToggle />
+          <span className="map-bar-divider" aria-hidden="true" />
+          <div className="map-mode-toggle" role="group" aria-label="Display source">
             <button
               type="button"
               className={`map-mode-btn${displayMode === 'vector' ? ' active' : ''}`}
               onClick={() => handleDisplayMode('vector')}
               aria-pressed={displayMode === 'vector'}
-              title="Düzenlenebilir vektör katmanı (WFS)"
+              title="Editable WFS vector layer"
             >
-              Vektör
+              WFS
             </button>
             <button
               type="button"
               className={`map-mode-btn${displayMode === 'wms' ? ' active' : ''}`}
               onClick={() => handleDisplayMode('wms')}
               aria-pressed={displayMode === 'wms'}
-              title="GeoServer görüntüleme katmanı (WMS)"
+              title="GeoServer WMS display layer"
             >
               WMS
             </button>
           </div>
-          <span className="map-bar-divider" aria-hidden="true" />
-          <ThemeToggle />
           <span className="map-bar-divider" aria-hidden="true" />
           {isAdmin && (
             <button className="map-logout" type="button" onClick={() => navigate('/admin')}>
@@ -806,8 +840,8 @@ export default function MapPage() {
           />
         ) : (
           <div className="map-wms-hint" role="status">
-            WMS görüntüleme modu — çizimler GeoServer tarafından resim olarak sunuluyor. Çizim ve
-            düzenleme için “Vektör”e geçin.
+            WMS display mode - shapes are served as images by GeoServer. Switch to WFS for drawing and
+            editing.
           </div>
         )}
         <div ref={mapElementRef} className="map-container" />
@@ -857,6 +891,24 @@ export default function MapPage() {
           />
         )}
         {infoItem && <InventoryInfoModal info={infoItem} onClose={() => setInfoItem(null)} />}
+
+        {/* Heat map intensity legend, bottom-right, only while the heat map is shown. The gradient in
+            MapPage.css mirrors the vw_heat_heatmap.sld ColorMap, so 0..1 here means the same thing
+            GeoServer painted. */}
+        {activeTool === 'heatmap' && (
+          <div
+            className="map-heat-legend"
+            role="img"
+            aria-label="Heat map intensity indicator: 0 low, 1 high"
+          >
+            <div className="map-heat-legend-title">Heat Map - Intensity</div>
+            <div className="map-heat-legend-bar" aria-hidden="true" />
+            <div className="map-heat-legend-scale">
+              <span>0 - Low</span>
+              <span>1 - High</span>
+            </div>
+          </div>
+        )}
 
         {/* Shared bottom-center feedback column, anchored just above the toolbar. Analysis panel is the
             most long-lived so it sits furthest up when stacked; the toast is the most transient and

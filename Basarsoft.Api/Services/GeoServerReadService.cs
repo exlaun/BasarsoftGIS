@@ -27,6 +27,10 @@ public class GeoServerReadService : IGeoServerReadService
         ("polygon", "vw_polygon"),
     };
 
+    // SQL view that collapses every live shape to a point (centroids for lines/polygons); its default
+    // GeoServer style is the vec:Heatmap rendering transformation, so a GetMap on it IS the heat map.
+    private const string HeatLayer = "vw_heat";
+
     public GeoServerReadService(HttpClient httpClient, GeoServerSettings settings)
     {
         _httpClient = httpClient;
@@ -46,9 +50,18 @@ public class GeoServerReadService : IGeoServerReadService
         };
     }
 
-    public async Task<GeoServerImage> GetMapAsync(int userId, string bbox, int width, int height, string crs)
+    public Task<GeoServerImage> GetMapAsync(int userId, string bbox, int width, int height, string crs)
     {
-        using var response = await _httpClient.GetAsync(BuildWmsUrl(bbox, width, height, crs, userId));
+        var layers = string.Join(',', Layers.Select(l => $"{_settings.Workspace}:{l.Layer}"));
+        return FetchMapAsync(BuildWmsUrl(layers, bbox, width, height, crs, userId));
+    }
+
+    public Task<GeoServerImage> GetHeatmapAsync(int userId, string bbox, int width, int height, string crs) =>
+        FetchMapAsync(BuildWmsUrl($"{_settings.Workspace}:{HeatLayer}", bbox, width, height, crs, userId));
+
+    private async Task<GeoServerImage> FetchMapAsync(string url)
+    {
+        using var response = await _httpClient.GetAsync(url);
         response.EnsureSuccessStatusCode();
 
         var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/png";
@@ -61,10 +74,9 @@ public class GeoServerReadService : IGeoServerReadService
         return new GeoServerImage(bytes, contentType);
     }
 
-    private string BuildWmsUrl(string bbox, int width, int height, string crs, int userId)
+    private string BuildWmsUrl(string layers, string bbox, int width, int height, string crs, int userId)
     {
         var endpoint = $"{_settings.BaseUrl.TrimEnd('/')}/{_settings.Workspace}/wms";
-        var layers = string.Join(',', Layers.Select(l => $"{_settings.Workspace}:{l.Layer}"));
         var query = new Dictionary<string, string?>
         {
             ["service"] = "WMS",

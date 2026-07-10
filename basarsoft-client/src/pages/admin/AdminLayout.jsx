@@ -29,7 +29,7 @@ export default function AdminLayout() {
           </button>
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.0.8</span>
+        <span className="map-title">BasarsoftInternshipTask v0.1.5</span>
         <div className="map-bar-right">
           <ThemeToggle />
           <span className="map-bar-divider" aria-hidden="true" />
