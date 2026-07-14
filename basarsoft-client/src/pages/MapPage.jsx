@@ -29,7 +29,10 @@ import ConfirmModal from '../components/ConfirmModal'
 import ShapePickerModal from '../components/ShapePickerModal'
 import QueryPanel from '../components/QueryPanel'
 import InventoryInfoModal from '../components/InventoryInfoModal'
+import PoiFormModal from '../components/PoiFormModal'
+import PoiInfoModal from '../components/PoiInfoModal'
 import { listAllGeometry, saveGeometry, updateGeometry, deleteGeometry, analyzeArea } from '../api/geometry'
+import { listPois, createPoi, deletePoi } from '../api/poi'
 import client, { getStoredAuth } from '../api/client'
 import './MapPage.css'
 
@@ -42,10 +45,13 @@ const MAP_PROJ = 'EPSG:3857'
 const DATA_PROJ = 'EPSG:4326'
 
 // tool key -> OpenLayers draw type, backend {type} path segment, and required RBAC permission.
+// 'poi' is not a /api/geometry/{type} — it saves through /api/poi — but sharing the shape keeps the
+// draw-interaction and permission-gating plumbing identical for all four tools.
 const TOOL_CONFIG = {
   Point: { drawType: 'Point', apiType: 'point', permission: 'add_point' },
   LineString: { drawType: 'LineString', apiType: 'line', permission: 'add_line' },
   Polygon: { drawType: 'Polygon', apiType: 'polygon', permission: 'add_polygon' },
+  Poi: { drawType: 'Point', apiType: 'poi', permission: 'add_poi' },
 }
 
 const wkt = new WKT()
@@ -67,6 +73,17 @@ const makeFeatureStyle = (color) => {
     }),
   })
 }
+
+// POIs are shared catalogue markers, not user-colored drawings, so they all render in one fixed
+// rose color that no shape style uses — instantly distinguishable from personal points.
+const POI_COLOR = '#e11d48'
+const POI_STYLE = new Style({
+  image: new CircleStyle({
+    radius: 7,
+    fill: new Fill({ color: POI_COLOR }),
+    stroke: new Stroke({ color: '#ffffff', width: 2 }),
+  }),
+})
 
 // Distinct dashed style for the temporary analysis polygon so it reads as "not a saved shape".
 const ANALYSIS_STYLE = new Style({
@@ -112,6 +129,9 @@ export default function MapPage() {
   // GeoServer WMS display layer + its source (for refresh()); hidden until the user picks WMS mode.
   const wmsLayerRef = useRef(null)
   const wmsSourceRef = useRef(null)
+  // POI layer kept OUT of layersRef on purpose: the display-mode effect hides every layersRef layer
+  // in WMS mode, while POIs (like the auth-area boundary) are a client overlay that stays visible.
+  const poiLayerRef = useRef(null)
   // GeoServer heat map layer (vw_heat + vec:Heatmap style) + its source; visible only while the
   // 'heatmap' tool is active. Created once, so toggling can never stack duplicate layers.
   const heatLayerRef = useRef(null)
@@ -126,7 +146,7 @@ export default function MapPage() {
   const originalGeomRef = useRef(null)
   // Name/color carried from the info popup into geometry-edit mode, saved together with the new location.
   const pendingEditAttrsRef = useRef(null)
-  const { logout, isAdmin, permissions, authorizedAreaWkt } = useAuth()
+  const { logout, isAdmin, permissions, authorizedAreaWkt, userId } = useAuth()
   const navigate = useNavigate()
 
   const [activeTool, setActiveTool] = useState('none')
@@ -138,6 +158,11 @@ export default function MapPage() {
   const [selectedShape, setSelectedShape] = useState(null)
   // True while the delete-confirmation dialog is replacing the info popup for the selected shape.
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // The POI currently opened in its read-only info panel (Select tool): { feature } or null.
+  // Separate from selectedShape so a POI can never wander into the shape edit/update paths.
+  const [selectedPoi, setSelectedPoi] = useState(null)
+  // True while the POI delete-confirmation dialog replaces the POI info panel.
+  const [confirmingPoiDelete, setConfirmingPoiDelete] = useState(false)
   // Features stacked under one Select-tool click (2+): drives the which-shape chooser modal.
   const [overlapChoices, setOverlapChoices] = useState(null)
   // True while the selected shape's geometry is being dragged (Modify/Translate active).
@@ -181,6 +206,9 @@ export default function MapPage() {
       point: new VectorSource(),
       line: new VectorSource(),
       polygon: new VectorSource(),
+      // POIs share the sources map (so the Draw interaction's sources[apiType] lookup covers them)
+      // but their layer deliberately lives outside `layers` — see poiLayerRef.
+      poi: new VectorSource(),
     }
     const layers = {
       point: new VectorLayer({ source: sources.point, style: styleFn }),
@@ -189,6 +217,8 @@ export default function MapPage() {
     }
     sourcesRef.current = sources
     layersRef.current = layers
+    const poiLayer = new VectorLayer({ source: sources.poi, style: POI_STYLE })
+    poiLayerRef.current = poiLayer
     const analysisSource = new VectorSource()
     analysisSourceRef.current = analysisSource
     const authAreaSource = new VectorSource()
@@ -234,6 +264,9 @@ export default function MapPage() {
         layers.polygon,
         layers.line,
         layers.point,
+        // POI markers above the personal shapes: they're the shared catalogue everyone must see,
+        // and (like the auth boundary) they stay visible in WMS mode as a client overlay.
+        poiLayer,
         // Heat map raster above the shapes (its alpha ramp keeps them readable underneath), below the
         // temporary analysis polygon so that overlay always stays on top.
         heatLayer,
@@ -299,12 +332,37 @@ export default function MapPage() {
       })
       .catch(() => flashStatus('error', 'Could not load saved shapes.'))
 
+    // POIs load independently of the shapes: they come from /api/poi (EF/PostGIS, global for every
+    // user), not from the GeoServer-backed /api/geometry, so one source failing doesn't blank the other.
+    listPois()
+      .then((items) => {
+        for (const item of items ?? []) {
+          const feature = wkt.readFeature(item.wkt, {
+            dataProjection: DATA_PROJ,
+            featureProjection: MAP_PROJ,
+          })
+          feature.set('apiType', 'poi')
+          feature.set('dbId', item.id)
+          feature.set('name', item.name)
+          feature.set('color', POI_COLOR) // for the overlap-picker swatch
+          feature.set('categoryPath', item.categoryPath)
+          feature.set('openTime', item.openTime)
+          feature.set('closeTime', item.closeTime)
+          feature.set('createdBy', item.createdBy)
+          feature.set('createdAt', item.createdAt)
+          feature.set('userId', item.userId)
+          sources.poi.addFeature(feature)
+        }
+      })
+      .catch(() => flashStatus('error', 'Could not load POIs.'))
+
     return () => {
       map.un('pointermove', onPointerMove)
       map.setTarget(undefined)
       mapRef.current = null
       sourcesRef.current = null
       layersRef.current = null
+      poiLayerRef.current = null
       wmsLayerRef.current = null
       wmsSourceRef.current = null
       heatLayerRef.current = null
@@ -372,6 +430,8 @@ export default function MapPage() {
       setSelectedShape(null)
       setEditingGeom(false)
       setConfirmingDelete(false)
+      setSelectedPoi(null)
+      setConfirmingPoiDelete(false)
       setPendingDraw((draw) => {
         if (draw) sourcesRef.current?.[draw.apiType].removeFeature(draw.feature)
         return null
@@ -379,6 +439,16 @@ export default function MapPage() {
     }
     setDisplayMode(mode)
   }
+
+  // Route a clicked feature to the right panel: a POI opens its read-only info panel, a personal
+  // shape the editable info popup. Used by both the single-hit click and the overlap picker.
+  const openHit = useCallback((feature) => {
+    if (feature.get('apiType') === 'poi') {
+      setSelectedPoi({ feature })
+    } else {
+      setSelectedShape({ feature })
+    }
+  }, [])
 
   // Picking a draw tool re-enables that type's layer if it was unchecked, so a freshly
   // saved shape doesn't silently vanish into a hidden layer.
@@ -470,7 +540,7 @@ export default function MapPage() {
         })
         if (hits.length === 0) return
         if (hits.length === 1) {
-          setSelectedShape({ feature: hits[0] })
+          openHit(hits[0])
           return
         }
         // Overlapping shapes: let the user pick which one to open.
@@ -508,7 +578,7 @@ export default function MapPage() {
     }
 
     return undefined
-  }, [activeTool, disabledDrawTools, editingGeom, flashStatus])
+  }, [activeTool, disabledDrawTools, editingGeom, flashStatus, openHit])
 
   // Geometry-edit mode: attach Modify (drag individual vertices) + Translate (drag the whole shape)
   // to just the selected feature. Both are removed when editing ends.
@@ -602,6 +672,57 @@ export default function MapPage() {
   const handleModalCancel = () => {
     if (pendingDraw) sourcesRef.current?.[pendingDraw.apiType].removeFeature(pendingDraw.feature)
     setPendingDraw(null)
+  }
+
+  // POI popup — Save: persist the placed point with its name, category, and working hours.
+  // Mirrors handleModalSave (stamp the feature on success, roll the drawing back on failure).
+  const handlePoiSave = async (name, categoryId, openTime, closeTime) => {
+    if (!pendingDraw) return
+    const { feature, geomWkt } = pendingDraw
+    try {
+      const saved = await createPoi(geomWkt, name, categoryId, openTime, closeTime)
+      feature.set('apiType', 'poi')
+      feature.set('dbId', saved.id)
+      feature.set('name', saved.name)
+      feature.set('color', POI_COLOR)
+      feature.set('categoryPath', saved.categoryPath)
+      feature.set('openTime', saved.openTime)
+      feature.set('closeTime', saved.closeTime)
+      feature.set('createdBy', saved.createdBy)
+      feature.set('createdAt', saved.createdAt)
+      feature.set('userId', saved.userId)
+      flashStatus('success', 'POI saved.')
+    } catch (error) {
+      sourcesRef.current?.poi.removeFeature(feature)
+      const data = error.response?.data
+      const message = data?.code === 'outside_authorized_area'
+        ? 'The POI is outside your authorized area.'
+        : data?.code === 'category_not_found'
+          ? 'That category no longer exists. Pick another one.'
+          : error.response?.status === 403
+            ? 'You do not have permission to add POIs.'
+            : 'Could not save the POI.'
+      flashStatus('error', message)
+    } finally {
+      setPendingDraw(null)
+    }
+  }
+
+  // POI confirm dialog — Delete: soft-delete on the server (creator or admin only), then drop the
+  // marker from the map.
+  const handlePoiDelete = async () => {
+    if (!selectedPoi) return
+    const { feature } = selectedPoi
+    try {
+      await deletePoi(feature.get('dbId'))
+      sourcesRef.current?.poi.removeFeature(feature)
+      flashStatus('success', 'POI deleted.')
+      setSelectedPoi(null)
+    } catch {
+      flashStatus('error', 'Could not delete the POI.')
+    } finally {
+      setConfirmingPoiDelete(false)
+    }
   }
 
   // Info popup — Save: persist edited name + color (geometry untouched).
@@ -776,7 +897,7 @@ export default function MapPage() {
           </button>
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.1.5</span>
+        <span className="map-title">BasarsoftInternshipTask v0.2.0</span>
         <div className="map-bar-right">
           <ThemeToggle />
           <span className="map-bar-divider" aria-hidden="true" />
@@ -856,7 +977,11 @@ export default function MapPage() {
         />
 
         {pendingDraw && (
-          <AttributeModal onSave={handleModalSave} onCancel={handleModalCancel} />
+          pendingDraw.apiType === 'poi' ? (
+            <PoiFormModal onSave={handlePoiSave} onCancel={handleModalCancel} />
+          ) : (
+            <AttributeModal onSave={handleModalSave} onCancel={handleModalCancel} />
+          )
         )}
         {selectedShape && !editingGeom && !confirmingDelete && (
           <ShapeInfoModal
@@ -885,9 +1010,33 @@ export default function MapPage() {
             features={overlapChoices}
             onPick={(feature) => {
               setOverlapChoices(null)
-              setSelectedShape({ feature })
+              openHit(feature)
             }}
             onCancel={() => setOverlapChoices(null)}
+          />
+        )}
+        {selectedPoi && !confirmingPoiDelete && (
+          <PoiInfoModal
+            poi={{
+              name: selectedPoi.feature.get('name'),
+              categoryPath: selectedPoi.feature.get('categoryPath'),
+              openTime: selectedPoi.feature.get('openTime'),
+              closeTime: selectedPoi.feature.get('closeTime'),
+              createdBy: selectedPoi.feature.get('createdBy'),
+              createdAt: selectedPoi.feature.get('createdAt'),
+            }}
+            canDelete={isAdmin || (userId != null && selectedPoi.feature.get('userId') === userId)}
+            onDelete={() => setConfirmingPoiDelete(true)}
+            onClose={() => setSelectedPoi(null)}
+          />
+        )}
+        {selectedPoi && confirmingPoiDelete && (
+          <ConfirmModal
+            title="Delete POI"
+            message={`Delete POI "${selectedPoi.feature.get('name') ?? 'this POI'}"? It disappears from the map for everyone (soft delete).`}
+            confirmLabel="Delete"
+            onConfirm={handlePoiDelete}
+            onCancel={() => setConfirmingPoiDelete(false)}
           />
         )}
         {infoItem && <InventoryInfoModal info={infoItem} onClose={() => setInfoItem(null)} />}

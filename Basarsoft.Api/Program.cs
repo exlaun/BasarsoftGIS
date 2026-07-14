@@ -2,6 +2,7 @@ using System.Text;
 using Basarsoft.Api.Data;
 using Basarsoft.Api.Middleware;
 using Basarsoft.Api.Security;
+using Basarsoft.Api.Serialization;
 using Basarsoft.Api.Services;
 using Basarsoft.Api.Settings;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -50,6 +51,10 @@ builder.Services.AddScoped<IUserAdminService, UserAdminService>();
 // Geographic authorization: per-user/per-role drawing areas + enforcement lookup.
 builder.Services.AddScoped<IGeoAuthorizationService, GeoAuthorizationService>();
 
+// POI module: the shared POI catalogue + its parent-child category tree.
+builder.Services.AddScoped<IPoiService, PoiService>();
+builder.Services.AddScoped<IPoiCategoryService, PoiCategoryService>();
+
 // Global exception handling: a final safety net that converts any unhandled exception into a clean
 // 500 JSON response (the controllers also try-catch individually). AddProblemDetails() supplies the
 // standard error body format that UseExceptionHandler() falls back to.
@@ -57,7 +62,10 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
 // Add controller support so [ApiController] classes work.
-builder.Services.AddControllers();
+// The TimeOnly converter lets the POI working-hours fields accept the "HH:mm" that
+// <input type="time"> submits (the built-in converter would reject it as missing seconds).
+builder.Services.AddControllers().AddJsonOptions(options =>
+    options.JsonSerializerOptions.Converters.Add(new FlexibleTimeOnlyConverter()));
 
 // Swagger / OpenAPI, with a Bearer button so protected endpoints can be tested from the browser.
 builder.Services.AddEndpointsApiExplorer();
@@ -125,11 +133,27 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Seed the RBAC baseline (permission catalogue, Admin role, and the demo0 admin grant) idempotently on
-// startup. The migration must already be applied (tables exist); each step is guarded so re-runs no-op.
+// `dotnet run -- seed-demo [--yes]` wipes the database and rebuilds the demo dataset, then exits
+// without ever starting Kestrel — it is a maintenance command, and we want an exit code out of it.
+// A bare argument rather than a config flag on purpose: a switch that wipes the database is one that
+// must not be possible to leave turned on in appsettings. (The CommandLine configuration provider
+// ignores tokens with no -/--/ prefix, so "seed-demo" cannot collide with a config key.)
+var seedDemo = args.Contains("seed-demo", StringComparer.OrdinalIgnoreCase);
+
+// Seed the RBAC baseline (permission catalogue, Admin role, and the bootstrap admin's grant)
+// idempotently on startup. The migration must already be applied (tables exist); each step is guarded
+// so re-runs no-op. In demo mode this is skipped: DemoSeeder runs it itself, AFTER the wipe.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+    if (seedDemo)
+    {
+        var seeded = await DemoSeeder.RunAsync(
+            db, app.Environment, app.Logger, skipConfirmation: args.Contains("--yes"));
+        return seeded ? 0 : 1;
+    }
+
     await AdminSeeder.SeedAsync(db);
 }
 
@@ -154,3 +178,7 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// Only reached when the host shuts down. Explicit because the seed-demo branch above returns an exit
+// code, which makes every path in this file have to produce one.
+return 0;

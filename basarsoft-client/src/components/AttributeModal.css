@@ -36,13 +36,31 @@
   opacity: 0.95;
 }
 
-.attr-modal-field input[type='text'] {
+.attr-modal-field input[type='text'],
+.attr-modal-field input[type='time'],
+.attr-modal-field select {
   padding: 0.5rem 0.6rem;
   border-radius: 6px;
   border: 1px solid var(--bar-border);
   background: rgba(255, 255, 255, 0.08);
   color: var(--bar-text);
   font-size: 0.9rem;
+  font-family: inherit;
+}
+
+/* Native dropdown lists render on the OS default (usually white), so keep option text dark. */
+.attr-modal-field select option {
+  color: #1f2937;
+}
+
+/* Two side-by-side fields (the POI form's open/close working hours). */
+.attr-modal-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.attr-modal-row .attr-modal-field {
+  flex: 1;
 }
 
 .attr-modal-field input[type='text']::placeholder {

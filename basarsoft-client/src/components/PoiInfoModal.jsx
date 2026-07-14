@@ -1,0 +1,62 @@
+import { useEffect } from 'react'
+import './AttributeModal.css'
+import './ShapeInfoModal.css'
+import { formatTime } from '../utils/poiCategories'
+
+// Read-only info panel for a POI on the map (Select tool click), the POI counterpart of the shape
+// info popup. POIs are shared data, so there is no editing here — just the details plus a Delete
+// button when the caller may remove it (creator or admin). `poi` = { name, categoryPath, openTime,
+// closeTime, createdBy, createdAt }.
+export default function PoiInfoModal({ poi, canDelete, onDelete, onClose }) {
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="POI info">
+      <div className="attr-modal">
+        <h2 className="attr-modal-title">POI info</h2>
+
+        <dl className="shape-info-meta">
+          <div>
+            <dt>Name</dt>
+            <dd>{poi.name || 'Unnamed'}</dd>
+          </div>
+          <div>
+            <dt>Category</dt>
+            <dd>{poi.categoryPath || '—'}</dd>
+          </div>
+          <div>
+            <dt>Working hours</dt>
+            <dd>
+              {formatTime(poi.openTime)} – {formatTime(poi.closeTime)}
+            </dd>
+          </div>
+          <div>
+            <dt>Added by</dt>
+            <dd>{poi.createdBy || '—'}</dd>
+          </div>
+          <div>
+            <dt>Added on</dt>
+            <dd>{poi.createdAt ? new Date(poi.createdAt).toLocaleString() : '—'}</dd>
+          </div>
+        </dl>
+
+        <div className="attr-modal-actions">
+          {canDelete && (
+            <button type="button" className="attr-modal-btn attr-modal-danger" onClick={onDelete}>
+              Delete
+            </button>
+          )}
+          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

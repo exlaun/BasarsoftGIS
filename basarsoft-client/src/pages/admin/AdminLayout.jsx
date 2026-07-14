@@ -14,6 +14,12 @@ const NAV = [
   { to: '/admin/permissions', end: false, label: 'Permissions' },
 ]
 
+// The mentor's "POI Yönetimi" menu: its own titled section under the RBAC links.
+const POI_NAV = [
+  { to: '/admin/pois', end: false, label: 'POIs' },
+  { to: '/admin/poi-categories', end: false, label: 'POI Categories' },
+]
+
 export default function AdminLayout() {
   const { logout } = useAuth()
   const navigate = useNavigate()
@@ -29,7 +35,7 @@ export default function AdminLayout() {
           </button>
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.1.5</span>
+        <span className="map-title">BasarsoftInternshipTask v0.2.0</span>
         <div className="map-bar-right">
           <ThemeToggle />
           <span className="map-bar-divider" aria-hidden="true" />
@@ -48,6 +54,18 @@ export default function AdminLayout() {
 
           <div className="admin-nav-links">
             {NAV.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) => `admin-nav-link${isActive ? ' is-active' : ''}`}
+              >
+                {item.label}
+              </NavLink>
+            ))}
+
+            <div className="admin-nav-section">POI Management</div>
+            {POI_NAV.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}

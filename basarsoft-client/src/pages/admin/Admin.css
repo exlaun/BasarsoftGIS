@@ -62,6 +62,30 @@
   gap: 0.25rem;
 }
 
+/* Titled divider between nav groups (e.g. the "POI Management" section). */
+.admin-nav-section {
+  margin-top: 0.9rem;
+  padding: 0.35rem 0.7rem 0.15rem;
+  border-top: 1px solid var(--bar-border);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+/* Indented category-tree rows on the POI Categories page. */
+.admin-tree-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.admin-tree-branch {
+  opacity: 0.45;
+  font-size: 0.8rem;
+}
+
 .admin-nav-link {
   display: flex;
   align-items: center;
@@ -385,6 +409,8 @@
 
 .admin-field input[type='text'],
 .admin-field input[type='password'],
+.admin-field input[type='time'],
+.admin-field select,
 .admin-field textarea {
   padding: 0.5rem 0.6rem;
   border-radius: 7px;

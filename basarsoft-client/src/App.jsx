@@ -7,6 +7,8 @@ import AdminLayout from './pages/admin/AdminLayout'
 import UsersPage from './pages/admin/UsersPage'
 import RolesPage from './pages/admin/RolesPage'
 import PermissionsPage from './pages/admin/PermissionsPage'
+import PoisPage from './pages/admin/PoisPage'
+import PoiCategoriesPage from './pages/admin/PoiCategoriesPage'
 
 export default function App() {
   return (
@@ -22,6 +24,8 @@ export default function App() {
           <Route index element={<UsersPage />} />
           <Route path="roles" element={<RolesPage />} />
           <Route path="permissions" element={<PermissionsPage />} />
+          <Route path="pois" element={<PoisPage />} />
+          <Route path="poi-categories" element={<PoiCategoriesPage />} />
         </Route>
       </Route>
       {/* Anything else funnels to /map, which the guard redirects to /login if needed. */}

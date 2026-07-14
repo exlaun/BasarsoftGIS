@@ -116,6 +116,9 @@ export function AuthProvider({ children }) {
       username: auth?.username ?? null,
       expiresAt: auth?.expiresAt ?? null,
       isAuthenticated: Boolean(auth?.token),
+      // The caller's users.id (from /api/auth/me) — lets the map decide ownership client-side,
+      // e.g. whether a POI's Delete button should show. Null until the profile loads.
+      userId: profile?.id ?? null,
       // RBAC context (from /api/auth/me). isAdmin gates the admin button + /admin route.
       isAdmin: profile?.isAdmin ?? false,
       roles: profile?.roles ?? [],

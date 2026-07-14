@@ -64,6 +64,14 @@ const HeatmapIcon = (
     <path d="M12 22c4.4 0 7-2.8 7-6.5 0-2.5-1.2-4.6-2.8-6.3-.4 1-1 1.9-1.9 2.5C14.5 8.6 13.5 4.6 10 2c.3 2.6-.6 4.4-2 6-1.5 1.7-3 3.8-3 7 0 3.7 2.6 7 7 7z" />
   </svg>
 )
+// Flag — add a point of interest (POI). Distinct from the plain Point pin so operators can tell
+// "draw my own shape" and "register a shared POI" apart at a glance.
+const PoiIcon = (
+  <svg {...iconProps}>
+    <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+    <line x1="4" y1="22" x2="4" y2="15" />
+  </svg>
+)
 // Stacked sheets — toggles the layer-visibility menu.
 const LayersIcon = (
   <svg {...iconProps}>
@@ -90,6 +98,7 @@ const TOOLS = [
   { key: 'Point', label: 'Point', icon: PointIcon },
   { key: 'LineString', label: 'Line', icon: LineIcon },
   { key: 'Polygon', label: 'Polygon', icon: PolygonIcon },
+  { key: 'Poi', label: 'POI', icon: PoiIcon },
   { key: 'analysis', label: 'Analysis', icon: AnalysisIcon },
   { key: 'heatmap', label: 'Heat Map', icon: HeatmapIcon },
 ]
@@ -102,6 +111,7 @@ const TOOL_HINTS = {
   Point: 'Click on the map to place a point.',
   LineString: 'Click to add points, then double-click to finish the line.',
   Polygon: 'Click to add corners, then double-click to finish the polygon.',
+  Poi: 'Click on the map to place a POI, then fill in its details.',
   analysis: 'Draw a polygon to count the shapes it touches. Nothing is saved.',
   heatmap: 'Shows your shape density as a GeoServer heat map. Pick another tool to turn it off.',
 }

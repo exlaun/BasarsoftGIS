@@ -28,6 +28,10 @@ public class AppDbContext : DbContext
     // Geographic authorization areas: one polygon per user or role limiting where they may draw.
     public DbSet<GeoAuthorization> GeoAuthorizations { get; set; }
 
+    // POI module: the shared points-of-interest catalogue and its parent-child category tree.
+    public DbSet<Poi> Pois { get; set; }
+    public DbSet<PoiCategory> PoiCategories { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -44,6 +48,7 @@ public class AppDbContext : DbContext
                      "tbl_point", "tbl_line", "tbl_polygon",
                      "user_roles", "role_permissions", "user_permissions",
                      "tbl_geo_authorization",
+                     "tbl_poi_category", "tbl_poi",
                  })
         {
             modelBuilder.HasSequence<int>($"seq_{table}");
@@ -60,6 +65,33 @@ public class AppDbContext : DbContext
 
         ConfigureRbac(modelBuilder);
         ConfigureGeoAuthorization(modelBuilder);
+        ConfigurePoi(modelBuilder);
+    }
+
+    // POI module tables. The category tree is a self-referencing table (parent_id -> same table);
+    // Restrict FKs are a DB backstop — the real "no orphans" rule lives in PoiCategoryService, which
+    // refuses to delete a category that still has children or POIs (soft deletes never fire the FK).
+    private static void ConfigurePoi(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PoiCategory>(e =>
+        {
+            e.ToTable("tbl_poi_category");
+            e.HasQueryFilter(c => !c.IsDeleted);
+            e.HasOne<PoiCategory>().WithMany().HasForeignKey(c => c.ParentId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<User>().WithMany().HasForeignKey(c => c.UserId);
+            e.HasOne<User>().WithMany().HasForeignKey(c => c.ModifiedUserId);
+            e.HasIndex(c => c.ParentId);
+        });
+        UseSequenceId<PoiCategory>(modelBuilder, "tbl_poi_category");
+
+        // Poi is an IGeoFeature, so the shared geometry mapping applies as-is; only the category FK
+        // and an index on it are extra.
+        ConfigureGeometry<Poi>(modelBuilder, "tbl_poi", "geometry(Point,4326)");
+        modelBuilder.Entity<Poi>(e =>
+        {
+            e.HasOne<PoiCategory>().WithMany().HasForeignKey(p => p.CategoryId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(p => p.CategoryId);
+        });
     }
 
     // Geographic authorization areas: each row belongs to exactly ONE user or ONE
