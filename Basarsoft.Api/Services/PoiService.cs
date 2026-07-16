@@ -22,25 +22,6 @@ public class PoiService : IPoiService
         _geoAuth = geoAuth;
     }
 
-    public async Task<IReadOnlyList<PoiResponse>> ListAsync()
-    {
-        var pois = await _db.Pois.OrderBy(p => p.Id).ToListAsync();
-        if (pois.Count == 0)
-            return Array.Empty<PoiResponse>();
-
-        var categories = await CategoryMapAsync();
-
-        // IgnoreQueryFilters so a POI whose creator was later soft-deleted still shows its
-        // "ekleyen" username instead of a blank (the POI itself stays visible — it's shared data).
-        var creatorIds = pois.Select(p => p.UserId).Distinct().ToList();
-        var usernames = await _db.Users
-            .IgnoreQueryFilters()
-            .Where(u => creatorIds.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => u.Username);
-
-        return pois.Select(p => ToResponse(p, categories, usernames)).ToList();
-    }
-
     public async Task<PoiWriteResult> CreateAsync(PoiCreateRequest request, int userId)
     {
         // Parse the WKT the client drew. Bad text -> InvalidGeometry -> the controller returns 400.
@@ -123,6 +104,7 @@ public class PoiService : IPoiService
             CategoryId = poi.CategoryId,
             CategoryName = category?.Name ?? string.Empty,
             CategoryPath = BuildPath(poi.CategoryId, categories),
+            CategoryColor = EffectiveColor(poi.CategoryId, categories),
             OpenTime = poi.OpenTime,
             CloseTime = poi.CloseTime,
             UserId = poi.UserId,
@@ -148,5 +130,22 @@ public class PoiService : IPoiService
 
         parts.Reverse();
         return string.Join(" > ", parts);
+    }
+
+    // Effective marker color: the category's own color, else the nearest ancestor's. Same walk and
+    // cycle cap as BuildPath; null all the way up means "use the client's default POI color".
+    private static string? EffectiveColor(int categoryId, IReadOnlyDictionary<int, PoiCategory> categories)
+    {
+        var currentId = (int?)categoryId;
+        for (var depth = 0; currentId is not null && depth < 20; depth++)
+        {
+            if (!categories.TryGetValue(currentId.Value, out var category))
+                break;
+            if (category.Color is not null)
+                return category.Color;
+            currentId = category.ParentId;
+        }
+
+        return null;
     }
 }

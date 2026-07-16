@@ -21,14 +21,15 @@ export async function deletePoi(id) {
 }
 
 // ---- Categories ----
-// Flat list { id, name, parentId, poiCount }; the tree is rebuilt client-side from parentId.
+// Flat list { id, name, parentId, color, poiCount }; the tree is rebuilt client-side from parentId.
+// `color` is the category's OWN "#rrggbb" or null (= POIs inherit the nearest ancestor's color).
 export async function listPoiCategories() {
   const { data } = await client.get('/api/poi/categories')
   return data
 }
 
 export async function createPoiCategory(body) {
-  // body = { name, parentId? }
+  // body = { name, parentId?, color? }
   const { data } = await client.post('/api/admin/poi-categories', body)
   return data
 }

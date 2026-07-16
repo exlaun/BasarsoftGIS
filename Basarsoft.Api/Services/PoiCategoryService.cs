@@ -29,6 +29,7 @@ public class PoiCategoryService : IPoiCategoryService
             Id = c.Id,
             Name = c.Name,
             ParentId = c.ParentId,
+            Color = c.Color,
             PoiCount = counts.TryGetValue(c.Id, out var count) ? count : 0,
         }).ToList();
     }
@@ -49,6 +50,7 @@ public class PoiCategoryService : IPoiCategoryService
         {
             Name = name,
             ParentId = request.ParentId,
+            Color = request.Color,
             UserId = userId,
             ModifiedUserId = userId,
         };
@@ -60,6 +62,7 @@ public class PoiCategoryService : IPoiCategoryService
             Id = category.Id,
             Name = category.Name,
             ParentId = category.ParentId,
+            Color = category.Color,
             PoiCount = 0,
         });
     }
@@ -97,6 +100,7 @@ public class PoiCategoryService : IPoiCategoryService
 
         category.Name = name;
         category.ParentId = request.ParentId;
+        category.Color = request.Color;
         category.ModifiedUserId = userId;
         await _db.SaveChangesAsync();
 
@@ -106,6 +110,7 @@ public class PoiCategoryService : IPoiCategoryService
             Id = category.Id,
             Name = category.Name,
             ParentId = category.ParentId,
+            Color = category.Color,
             PoiCount = poiCount,
         });
     }

@@ -2,13 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPoiCategory, updatePoiCategory } from '../../api/poi'
 import { flattenCategoryTree, collectDescendantIds, categoryOptionLabel } from '../../utils/poiCategories'
 
-// Create or edit a POI category: a name plus an optional parent picked from the existing tree.
+// Fallback shown in the picker while the category has no color of its own (matches POI_COLOR on
+// the map). The real value stays null until the admin actually picks something — an
+// <input type="color"> can't express "no color", so null is modeled by the Clear button instead.
+const DEFAULT_POI_COLOR = '#e11d48'
+
+// Create or edit a POI category: a name plus an optional parent picked from the existing tree and
+// an optional marker color (null = POIs in this category inherit the nearest ancestor's color).
 // In edit mode the category itself and its whole subtree are excluded from the parent options —
 // re-parenting into your own descendants would turn the tree into a cycle (server enforces too).
 export default function PoiCategoryFormModal({ mode, category, categories, onClose, onSuccess }) {
   const isEdit = mode === 'edit'
   const [name, setName] = useState(category?.name ?? '')
   const [parentId, setParentId] = useState(category?.parentId ?? null)
+  const [color, setColor] = useState(category?.color ?? null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const firstRef = useRef(null)
@@ -41,7 +48,7 @@ export default function PoiCategoryFormModal({ mode, category, categories, onClo
     setSubmitting(true)
     setError('')
     try {
-      const body = { name: trimmed, parentId }
+      const body = { name: trimmed, parentId, color }
       if (isEdit) {
         await updatePoiCategory(category.id, body)
         onSuccess('Category updated.')
@@ -93,6 +100,29 @@ export default function PoiCategoryFormModal({ mode, category, categories, onClo
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="admin-field">
+            <span>Marker color</span>
+            <div className="admin-color-row">
+              <input
+                type="color"
+                value={color ?? DEFAULT_POI_COLOR}
+                onChange={(e) => setColor(e.target.value)}
+                aria-label="Marker color"
+              />
+              <button
+                type="button"
+                className="admin-btn admin-btn-sm"
+                onClick={() => setColor(null)}
+                disabled={color === null}
+              >
+                Clear
+              </button>
+              <span className="admin-color-hint">
+                {color === null ? 'Inherited from the parent category' : color}
+              </span>
+            </div>
           </label>
 
           {error && <p className="admin-error">{error}</p>}

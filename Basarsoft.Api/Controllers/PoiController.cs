@@ -8,7 +8,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace Basarsoft.Api.Controllers;
 
 // The shared POI catalogue. Reading is open to every authenticated user (POIs are common reference
-// data, unlike the per-user drawing tables); creating requires the add_poi permission; deleting is
+// data, unlike the per-user drawing tables) and flows API -> GeoServer WFS (vw_poi) -> PostGIS, like
+// the geometry reads; creating requires the add_poi permission and stays on EF; deleting is
 // creator-or-admin. Category admin lives in AdminPoiCategoriesController.
 [ApiController]
 [Authorize]
@@ -19,17 +20,20 @@ public class PoiController : ControllerBase
 
     private readonly IPoiService _pois;
     private readonly IPoiCategoryService _categories;
+    private readonly IGeoServerReadService _geoServerReadService;
     private readonly IUserAdminService _userAdminService;
     private readonly ILogger<PoiController> _logger;
 
     public PoiController(
         IPoiService pois,
         IPoiCategoryService categories,
+        IGeoServerReadService geoServerReadService,
         IUserAdminService userAdminService,
         ILogger<PoiController> logger)
     {
         _pois = pois;
         _categories = categories;
+        _geoServerReadService = geoServerReadService;
         _userAdminService = userAdminService;
         _logger = logger;
     }
@@ -46,10 +50,11 @@ public class PoiController : ControllerBase
     }
 
     // GET /api/poi -> every POI in the system (no per-user filter — the catalogue is shared).
+    // Served from GeoServer's vw_poi view; GeoServer down means a clean 500, same as /api/geometry.
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<PoiResponse>>> List()
     {
-        try { return Ok(await _pois.ListAsync()); }
+        try { return Ok(await _geoServerReadService.GetPoisAsync()); }
         catch (Exception ex) { return ServerError(ex, nameof(List)); }
     }
 

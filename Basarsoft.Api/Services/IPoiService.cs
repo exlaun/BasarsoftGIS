@@ -2,11 +2,10 @@ using Basarsoft.Api.DTOs;
 
 namespace Basarsoft.Api.Services;
 
+// POI writes only: listing moved to IGeoServerReadService.GetPoisAsync (API -> GeoServer WFS), the
+// same split the geometry endpoints use.
 public interface IPoiService
 {
-    // Every live POI in the system — the catalogue is shared, so there is no per-user filter here.
-    Task<IReadOnlyList<PoiResponse>> ListAsync();
-
     // Creates a POI owned by userId. Validates the WKT is a point, the category exists, and the
     // point falls inside the caller's authorized area (when one is assigned).
     Task<PoiWriteResult> CreateAsync(PoiCreateRequest request, int userId);

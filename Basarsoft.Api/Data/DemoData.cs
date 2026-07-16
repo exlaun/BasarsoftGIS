@@ -219,20 +219,27 @@ public static class DemoData
     // Three levels deep, so the breadcrumb the POI list renders ("Customer Service > Retail >
     // Flagship Store") actually exercises the path builder. Order matters: a parent must appear
     // before any child that names it.
+    //
+    // Colors drive the per-category marker styling (GeoServer SLD + client style). Null = inherit
+    // the nearest colored ancestor; a chain that is null all the way up falls back to the default
+    // POI rose. The nulls below are deliberate demo material: "Drop-off Point" inherits Technical's
+    // teal, the "Operations > Depot" leaves show the fallback.
 
-    public sealed record DemoCategory(string Name, string? Parent);
+    public sealed record DemoCategory(string Name, string? Parent, string? Color = null);
 
     public static readonly IReadOnlyList<DemoCategory> Categories = new[]
     {
         new DemoCategory("Customer Service", null),
         new DemoCategory("Retail", "Customer Service"),
-        new DemoCategory("Flagship Store", "Retail"),
-        new DemoCategory("Authorized Dealer", "Retail"),
-        new DemoCategory("Technical", "Customer Service"),
-        new DemoCategory("Service Center", "Technical"),
+        new DemoCategory("Flagship Store", "Retail", "#7c3aed"),
+        new DemoCategory("Authorized Dealer", "Retail", "#0ea5e9"),
+        new DemoCategory("Technical", "Customer Service", "#0891b2"),
+        new DemoCategory("Service Center", "Technical", "#f59e0b"),
+        // No color of its own -> inherits Technical's #0891b2 (proves inheritance in the demo).
         new DemoCategory("Drop-off Point", "Technical"),
         new DemoCategory("Operations", null),
         new DemoCategory("Depot", "Operations"),
+        // Colorless chain all the way to the root -> renders in the default POI rose (fallback).
         new DemoCategory("Regional Warehouse", "Depot"),
         // Deliberately left without POIs, so the admin tree's count column isn't uniform — and so
         // there is a category that can actually be deleted during the demo (the service refuses to

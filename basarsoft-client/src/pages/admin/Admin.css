@@ -432,6 +432,44 @@
   gap: 0.5rem;
 }
 
+/* Marker-color picker row: the native swatch button + Clear + current-value hint. */
+.admin-color-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.admin-color-row input[type='color'] {
+  width: 44px;
+  height: 30px;
+  padding: 2px;
+  border-radius: 7px;
+  border: 1px solid var(--bar-border);
+  background: var(--admin-surface);
+  cursor: pointer;
+}
+
+.admin-color-hint {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--admin-muted, var(--bar-text));
+  opacity: 0.75;
+}
+
+/* Category tree: round swatch for the category's own color; hollow = inherits from an ancestor. */
+.admin-color-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+
+.admin-color-swatch-empty {
+  border: 1.5px dashed var(--bar-border);
+}
+
 .admin-error {
   margin: 0;
   color: #f87171;

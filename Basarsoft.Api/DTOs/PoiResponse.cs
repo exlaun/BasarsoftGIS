@@ -19,6 +19,10 @@ public class PoiResponse
     // Root-first breadcrumb of the category tree, e.g. "Yeme İçme > Restoran".
     public string CategoryPath { get; set; } = string.Empty;
 
+    // Effective marker color: the category's own color or the nearest ancestor's ("#rrggbb").
+    // Null when the whole chain is colorless — the client then uses its default POI rose.
+    public string? CategoryColor { get; set; }
+
     // Working hours; serialized by System.Text.Json as "HH:mm:ss" (the client trims to HH:mm).
     public TimeOnly OpenTime { get; set; }
 

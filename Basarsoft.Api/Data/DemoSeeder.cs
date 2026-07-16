@@ -231,6 +231,7 @@ public static class DemoSeeder
             {
                 Name = c.Name,
                 ParentId = c.Parent is null ? null : ids[c.Parent],
+                Color = c.Color,
                 UserId = adminId,
                 ModifiedUserId = adminId,
                 CreatedAt = createdAt,

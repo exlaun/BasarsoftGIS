@@ -11,6 +11,10 @@ public class PoiCategoryResponse
     // Null = top-level category.
     public int? ParentId { get; set; }
 
+    // This category's OWN color ("#rrggbb") — null means "inherits from an ancestor", so the admin
+    // tree can tell an explicit color from an inherited one.
+    public string? Color { get; set; }
+
     // How many live POIs use this category directly (children not included). Shown in the admin
     // tree and the reason a delete may be refused.
     public int PoiCount { get; set; }

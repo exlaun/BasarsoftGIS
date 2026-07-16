@@ -17,7 +17,7 @@ import Translate from 'ol/interaction/Translate'
 import WKT from 'ol/format/WKT'
 import { fromLonLat } from 'ol/proj'
 import { getCenter } from 'ol/extent'
-import { Style, Circle as CircleStyle, Fill, Stroke } from 'ol/style'
+import { Style, Circle as CircleStyle, Fill, Stroke, Text } from 'ol/style'
 import 'ol/ol.css'
 import { useAuth } from '../context/auth-context'
 import SessionTimer from '../components/SessionTimer'
@@ -31,6 +31,7 @@ import QueryPanel from '../components/QueryPanel'
 import InventoryInfoModal from '../components/InventoryInfoModal'
 import PoiFormModal from '../components/PoiFormModal'
 import PoiInfoModal from '../components/PoiInfoModal'
+import PoiSearchBar from '../components/PoiSearchBar'
 import { listAllGeometry, saveGeometry, updateGeometry, deleteGeometry, analyzeArea } from '../api/geometry'
 import { listPois, createPoi, deletePoi } from '../api/poi'
 import client, { getStoredAuth } from '../api/client'
@@ -74,16 +75,54 @@ const makeFeatureStyle = (color) => {
   })
 }
 
-// POIs are shared catalogue markers, not user-colored drawings, so they all render in one fixed
-// rose color that no shape style uses — instantly distinguishable from personal points.
+// POI markers render in their category's color (inherited down the category tree, resolved
+// server-side into categoryColor); a colorless category chain falls back to this rose, which no
+// shape style uses — still instantly distinguishable from personal points.
 const POI_COLOR = '#e11d48'
-const POI_STYLE = new Style({
-  image: new CircleStyle({
-    radius: 7,
-    fill: new Fill({ color: POI_COLOR }),
-    stroke: new Stroke({ color: '#ffffff', width: 2 }),
-  }),
-})
+
+// Labels appear below this view resolution (m/px). Mirrors MaxScaleDenominator 50000 in
+// geoserver/styles/vw_poi_category.sld (50000 × 0.00028 m/px = 14): both display modes flip their
+// POI labels at the same visual zoom (~13.5). Change the SLD and this constant together.
+const POI_LABEL_MAX_RESOLUTION = 14
+
+// One marker style per color, cached: the unlabeled style is reused across features and zooms.
+const poiMarkerStyles = new Map()
+const poiMarkerStyle = (color) => {
+  let style = poiMarkerStyles.get(color)
+  if (!style) {
+    style = new Style({
+      image: new CircleStyle({
+        radius: 7,
+        fill: new Fill({ color }),
+        stroke: new Stroke({ color: '#ffffff', width: 2 }),
+      }),
+    })
+    poiMarkerStyles.set(color, style)
+  }
+  return style
+}
+
+// Category-colored marker; when zoomed in past the label threshold the POI's name renders above it
+// (fresh Style per call there — labeled views show at most a handful of POIs, caching isn't worth it).
+const poiStyleFn = (feature, resolution) => {
+  const color = feature.get('categoryColor') || POI_COLOR
+  const name = feature.get('name')
+  if (resolution >= POI_LABEL_MAX_RESOLUTION || !name) return poiMarkerStyle(color)
+  return new Style({
+    image: new CircleStyle({
+      radius: 7,
+      fill: new Fill({ color }),
+      stroke: new Stroke({ color: '#ffffff', width: 2 }),
+    }),
+    text: new Text({
+      text: name,
+      font: '600 12px sans-serif',
+      offsetY: -14,
+      fill: new Fill({ color: '#111827' }),
+      stroke: new Stroke({ color: '#ffffff', width: 3 }),
+    }),
+  })
+}
 
 // Distinct dashed style for the temporary analysis polygon so it reads as "not a saved shape".
 const ANALYSIS_STYLE = new Style({
@@ -129,8 +168,9 @@ export default function MapPage() {
   // GeoServer WMS display layer + its source (for refresh()); hidden until the user picks WMS mode.
   const wmsLayerRef = useRef(null)
   const wmsSourceRef = useRef(null)
-  // POI layer kept OUT of layersRef on purpose: the display-mode effect hides every layersRef layer
-  // in WMS mode, while POIs (like the auth-area boundary) are a client overlay that stays visible.
+  // POI layer kept OUT of layersRef on purpose: the layer-control checkboxes only drive the three
+  // shape layers. In WMS mode this overlay hides too — the WMS image already contains the POIs
+  // (GeoServer renders vw_poi with its category style), so keeping it would double every marker.
   const poiLayerRef = useRef(null)
   // GeoServer heat map layer (vw_heat + vec:Heatmap style) + its source; visible only while the
   // 'heatmap' tool is active. Created once, so toggling can never stack duplicate layers.
@@ -178,6 +218,9 @@ export default function MapPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   // Bumped after every successful create/update/move/delete so an open query panel refetches.
   const [refreshKey, setRefreshKey] = useState(0)
+  // Saved POI features mirrored from the OL source into React state so an open search query reacts
+  // to the async initial load and to create/delete operations without waiting for another keystroke.
+  const [poiFeatures, setPoiFeatures] = useState([])
   // Read-only inventory info window (opened by the query panel's "i" button); null when closed.
   const [infoItem, setInfoItem] = useState(null)
 
@@ -217,7 +260,8 @@ export default function MapPage() {
     }
     sourcesRef.current = sources
     layersRef.current = layers
-    const poiLayer = new VectorLayer({ source: sources.poi, style: POI_STYLE })
+    // declutter mirrors the SLD's conflictResolution: overlapping labels drop instead of colliding.
+    const poiLayer = new VectorLayer({ source: sources.poi, style: poiStyleFn, declutter: true })
     poiLayerRef.current = poiLayer
     const analysisSource = new VectorSource()
     analysisSourceRef.current = analysisSource
@@ -264,8 +308,8 @@ export default function MapPage() {
         layers.polygon,
         layers.line,
         layers.point,
-        // POI markers above the personal shapes: they're the shared catalogue everyone must see,
-        // and (like the auth boundary) they stay visible in WMS mode as a client overlay.
+        // POI markers above the personal shapes: they're the shared catalogue everyone must see.
+        // Hidden in WMS mode, where GeoServer renders the same POIs inside the flat image.
         poiLayer,
         // Heat map raster above the shapes (its alpha ramp keeps them readable underneath), below the
         // temporary analysis polygon so that overlay always stays on top.
@@ -332,10 +376,11 @@ export default function MapPage() {
       })
       .catch(() => flashStatus('error', 'Could not load saved shapes.'))
 
-    // POIs load independently of the shapes: they come from /api/poi (EF/PostGIS, global for every
-    // user), not from the GeoServer-backed /api/geometry, so one source failing doesn't blank the other.
+    // POIs load independently of the shapes: /api/poi (GeoServer vw_poi, global for every user) is a
+    // separate request from /api/geometry, so one source failing doesn't blank the other.
     listPois()
       .then((items) => {
+        const loadedPois = []
         for (const item of items ?? []) {
           const feature = wkt.readFeature(item.wkt, {
             dataProjection: DATA_PROJ,
@@ -344,15 +389,20 @@ export default function MapPage() {
           feature.set('apiType', 'poi')
           feature.set('dbId', item.id)
           feature.set('name', item.name)
-          feature.set('color', POI_COLOR) // for the overlap-picker swatch
+          feature.set('color', item.categoryColor || POI_COLOR) // for the overlap-picker swatch
+          feature.set('categoryId', item.categoryId)
+          feature.set('categoryName', item.categoryName)
+          feature.set('categoryColor', item.categoryColor)
           feature.set('categoryPath', item.categoryPath)
           feature.set('openTime', item.openTime)
           feature.set('closeTime', item.closeTime)
           feature.set('createdBy', item.createdBy)
           feature.set('createdAt', item.createdAt)
           feature.set('userId', item.userId)
-          sources.poi.addFeature(feature)
+          loadedPois.push(feature)
         }
+        sources.poi.addFeatures(loadedPois)
+        setPoiFeatures(loadedPois)
       })
       .catch(() => flashStatus('error', 'Could not load POIs.'))
 
@@ -406,6 +456,9 @@ export default function MapPage() {
     for (const [type, layer] of Object.entries(layersRef.current ?? {})) {
       layer.setVisible(!inWms && layerVisibility[type])
     }
+    // The WMS image includes the POIs (vw_poi is in the backend's GetMap layer list), so the client
+    // POI overlay hides with the shape layers — otherwise every marker would render twice.
+    poiLayerRef.current?.setVisible(!inWms)
     if (inWms) wmsSourceRef.current?.refresh()
   }, [layerVisibility, displayMode])
 
@@ -439,6 +492,16 @@ export default function MapPage() {
     }
     setDisplayMode(mode)
   }
+
+  // Search-bar pick: fly to the POI and open its read-only info panel. Zoom 16 is deliberately past
+  // the label threshold (~13.5), so the found POI arrives on screen with its name visible.
+  const handlePoiSearchPick = useCallback((feature) => {
+    if (editingGeom) return // don't hijack an in-progress geometry edit
+    const view = mapRef.current?.getView()
+    if (!view) return
+    view.animate({ center: feature.getGeometry().getCoordinates(), zoom: 16, duration: 600 })
+    setSelectedPoi({ feature })
+  }, [editingGeom])
 
   // Route a clicked feature to the right panel: a POI opens its read-only info panel, a personal
   // shape the editable info popup. Used by both the single-hit click and the overlap picker.
@@ -684,13 +747,17 @@ export default function MapPage() {
       feature.set('apiType', 'poi')
       feature.set('dbId', saved.id)
       feature.set('name', saved.name)
-      feature.set('color', POI_COLOR)
+      feature.set('color', saved.categoryColor || POI_COLOR)
+      feature.set('categoryId', saved.categoryId)
+      feature.set('categoryName', saved.categoryName)
+      feature.set('categoryColor', saved.categoryColor)
       feature.set('categoryPath', saved.categoryPath)
       feature.set('openTime', saved.openTime)
       feature.set('closeTime', saved.closeTime)
       feature.set('createdBy', saved.createdBy)
       feature.set('createdAt', saved.createdAt)
       feature.set('userId', saved.userId)
+      setPoiFeatures((current) => current.includes(feature) ? current : [...current, feature])
       flashStatus('success', 'POI saved.')
     } catch (error) {
       sourcesRef.current?.poi.removeFeature(feature)
@@ -716,6 +783,7 @@ export default function MapPage() {
     try {
       await deletePoi(feature.get('dbId'))
       sourcesRef.current?.poi.removeFeature(feature)
+      setPoiFeatures((current) => current.filter((candidate) => candidate !== feature))
       flashStatus('success', 'POI deleted.')
       setSelectedPoi(null)
     } catch {
@@ -897,7 +965,7 @@ export default function MapPage() {
           </button>
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftInternshipTask v0.2.0</span>
+        <span className="map-title">Başarsoft</span>
         <div className="map-bar-right">
           <ThemeToggle />
           <span className="map-bar-divider" aria-hidden="true" />
@@ -967,6 +1035,10 @@ export default function MapPage() {
         )}
         <div ref={mapElementRef} className="map-container" />
         <div ref={tooltipElementRef} className="map-tooltip" hidden />
+
+        {/* POI search: available to every role (the catalogue is shared and read is open) and in
+            both display modes — it searches the loaded features, not the rendered pixels. */}
+        <PoiSearchBar pois={poiFeatures} onPick={handlePoiSearchPick} />
 
         <QueryPanel
           open={drawerOpen}

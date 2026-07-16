@@ -20,8 +20,11 @@ catalogue, and GeoServer-rendered display and analysis layers.
   that is already inherited.
 - **Geographic authorization** — a user or a role can be restricted to a polygon. Drawing outside
   it is refused (`403 outside_authorized_area`). A user's own area **overrides** their role's.
-- **POIs** — a global catalogue with a nested category tree and daily opening hours. Everyone sees
-  every POI; only `add_poi` holders can add one.
+- **POIs** — a global catalogue with a nested category tree and daily opening hours, served through
+  GeoServer (`vw_poi`). Everyone sees every POI; only `add_poi` holders can add one. Markers are
+  colored per category (child categories inherit their ancestor's color), names appear as labels
+  when zoomed in close, and a Google-Maps-style search bar (all roles, both display modes) flies
+  the map to the picked POI.
 - **Analysis** — a throwaway polygon that counts the shapes it touches, and a GeoServer heat map of
   your own shape density.
 
@@ -47,9 +50,16 @@ npm run dev
 ```
 
 GeoServer (workspace `basarsoft`, PostGIS store `pg_basarsoft`) serves the map's WFS/WMS/heat-map
-layers on `http://localhost:8080/geoserver`. Its SQL views and styles are documented in
-[geoserver/README.md](geoserver/README.md). The app degrades gracefully if it is down — the POI
-layer and the admin panel keep working.
+layers **and the POI catalogue** on `http://localhost:8080/geoserver`. Its SQL views and styles are
+documented in [geoserver/README.md](geoserver/README.md). If it is down, shape and POI reads fail
+with a clean 500 (writes and the admin panel keep working).
+
+Focused checks for the GeoServer POI contract and client-side POI search:
+
+```bash
+dotnet run --project Basarsoft.Api.Tests/Basarsoft.Api.Tests.csproj
+cd basarsoft-client && npm test
+```
 
 ## The demo dataset
 

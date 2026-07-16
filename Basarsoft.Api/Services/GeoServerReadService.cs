@@ -31,6 +31,11 @@ public class GeoServerReadService : IGeoServerReadService
     // GeoServer style is the vec:Heatmap rendering transformation, so a GetMap on it IS the heat map.
     private const string HeatLayer = "vw_heat";
 
+    // SQL view over the shared POI catalogue (joined to its category tree for breadcrumb + inherited
+    // color). Deliberately NOT in Layers: that array drives the per-user %uid% WFS loop, while vw_poi
+    // takes no parameters. Its default GeoServer style colors markers by category and labels on zoom.
+    private const string PoiLayer = "vw_poi";
+
     public GeoServerReadService(HttpClient httpClient, GeoServerSettings settings)
     {
         _httpClient = httpClient;
@@ -52,8 +57,18 @@ public class GeoServerReadService : IGeoServerReadService
 
     public Task<GeoServerImage> GetMapAsync(int userId, string bbox, int width, int height, string crs)
     {
-        var layers = string.Join(',', Layers.Select(l => $"{_settings.Workspace}:{l.Layer}"));
+        // POIs go last so their markers/labels draw on top of the shapes. The shared viewparams group
+        // is harmless to vw_poi: GeoServer ignores parameters a virtual table doesn't declare.
+        var layers = string.Join(',', Layers
+            .Select(l => $"{_settings.Workspace}:{l.Layer}")
+            .Append($"{_settings.Workspace}:{PoiLayer}"));
         return FetchMapAsync(BuildWmsUrl(layers, bbox, width, height, crs, userId));
+    }
+
+    public async Task<IReadOnlyList<PoiResponse>> GetPoisAsync()
+    {
+        var json = await _httpClient.GetStringAsync(BuildPoiWfsUrl());
+        return ParsePoiFeatureCollection(json);
     }
 
     public Task<GeoServerImage> GetHeatmapAsync(int userId, string bbox, int width, int height, string crs) =>
@@ -122,6 +137,71 @@ public class GeoServerReadService : IGeoServerReadService
         return QueryHelpers.AddQueryString(endpoint, query);
     }
 
+    private string BuildPoiWfsUrl()
+    {
+        var endpoint = $"{_settings.BaseUrl.TrimEnd('/')}/{_settings.Workspace}/ows";
+        var query = new Dictionary<string, string?>
+        {
+            ["service"] = "WFS",
+            ["version"] = "2.0.0",
+            ["request"] = "GetFeature",
+            ["typeNames"] = $"{_settings.Workspace}:{PoiLayer}",
+            ["outputFormat"] = "application/json",
+            ["srsName"] = "EPSG:4326",
+            // No viewparams: vw_poi has no %uid% placeholder — the POI catalogue is shared.
+        };
+        return QueryHelpers.AddQueryString(endpoint, query);
+    }
+
+    // vw_poi rows -> the same PoiResponse the old EF read produced. The view already resolved the
+    // category breadcrumb, the inherited color and the creator's username in SQL, and casts the two
+    // time columns to 'HH24:MI:SS' text, so this parse stays flat.
+    private static IReadOnlyList<PoiResponse> ParsePoiFeatureCollection(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("features", out var features) ||
+            features.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<PoiResponse>();
+        }
+
+        var rows = new List<PoiResponse>(features.GetArrayLength());
+        foreach (var feature in features.EnumerateArray())
+        {
+            if (!feature.TryGetProperty("geometry", out var geomEl) ||
+                geomEl.ValueKind == JsonValueKind.Null)
+            {
+                continue; // a row with no geometry can't be drawn
+            }
+
+            var geometry = JsonSerializer.Deserialize<Geometry>(geomEl.GetRawText(), GeoJsonOptions);
+            if (geometry is null || geometry.IsEmpty)
+                continue;
+
+            var props = feature.GetProperty("properties");
+            rows.Add(new PoiResponse
+            {
+                Id = ReadInt(props, "id") ?? 0,
+                Wkt = geometry.AsText(),
+                Name = ReadString(props, "name") ?? string.Empty,
+                CategoryId = ReadInt(props, "category_id") ?? 0,
+                CategoryName = ReadString(props, "category_name") ?? string.Empty,
+                CategoryPath = ReadString(props, "category_path") ?? string.Empty,
+                CategoryColor = ReadString(props, "category_color"),
+                OpenTime = ReadTime(props, "open_time"),
+                CloseTime = ReadTime(props, "close_time"),
+                UserId = ReadInt(props, "user_id") ?? 0,
+                CreatedBy = ReadString(props, "created_by") ?? string.Empty,
+                CreatedAt = ReadDate(props, "created_at"),
+                ModifiedDate = ReadDate(props, "modified_date"),
+            });
+        }
+
+        // WFS gives no ordering guarantee; the old EF read ordered by id, so keep that contract.
+        rows.Sort((a, b) => a.Id.CompareTo(b.Id));
+        return rows;
+    }
+
     // Turn a GeoServer GeoJSON FeatureCollection into the map's WKT response rows. Property values are
     // read explicitly by the SQL-view column names so their CLR types stay under our control; only the
     // geometry goes through the NTS GeoJSON reader (then AsText() gives WKT).
@@ -186,6 +266,14 @@ public class GeoServerReadService : IGeoServerReadService
             _ => null,
         };
     }
+
+    // The view emits times as 'HH24:MI:SS' text (to_char), so this is a plain string parse; a missing
+    // or malformed value degrades to 00:00:00 instead of failing the whole catalogue.
+    private static TimeOnly ReadTime(JsonElement props, string name) =>
+        props.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String &&
+        TimeOnly.TryParse(el.GetString(), CultureInfo.InvariantCulture, out var time)
+            ? time
+            : default;
 
     // GeoServer usually encodes timestamps as ISO-8601 strings in GeoJSON, but tolerate epoch millis too.
     private static DateTime ReadDate(JsonElement props, string name)

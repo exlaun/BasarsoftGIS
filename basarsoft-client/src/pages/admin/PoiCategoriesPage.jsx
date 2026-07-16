@@ -92,6 +92,12 @@ export default function PoiCategoriesPage() {
                     <td>
                       <span className="admin-tree-name" style={{ paddingLeft: `${c.depth * 1.25}rem` }}>
                         {c.depth > 0 && <span className="admin-tree-branch" aria-hidden="true">└</span>}
+                        <span
+                          className={`admin-color-swatch${c.color ? '' : ' admin-color-swatch-empty'}`}
+                          style={c.color ? { backgroundColor: c.color } : undefined}
+                          title={c.color ?? 'No color of its own (inherits)'}
+                          aria-hidden="true"
+                        />
                         {c.name}
                       </span>
                     </td>

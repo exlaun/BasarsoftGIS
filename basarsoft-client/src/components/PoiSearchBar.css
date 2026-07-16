@@ -1,0 +1,129 @@
+/* Floating POI search, top-left over the map (Google-Maps style). left: 3.2rem keeps it clear of
+   the OpenLayers zoom control in the corner; z-index 6 floats it above the toolbar (2) and the
+   other overlays (wms hint 5, legend 4). Theme vars match the rest of the map chrome. */
+.poi-search {
+  position: absolute;
+  top: 0.8rem;
+  left: 3.2rem;
+  z-index: 6;
+  width: min(320px, 60vw);
+  font-size: 0.85rem;
+}
+
+.poi-search-box {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 10px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+.poi-search-icon {
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+.poi-search-box input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.85rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.poi-search-box input::placeholder {
+  color: inherit;
+  opacity: 0.55;
+}
+
+.poi-search-clear {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+
+.poi-search-clear:hover {
+  opacity: 1;
+}
+
+.poi-search-results {
+  margin: 0.4rem 0 0;
+  padding: 0.3rem;
+  list-style: none;
+  border-radius: 10px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.poi-search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.poi-search-result:hover {
+  background: var(--bar-hover);
+}
+
+.poi-search-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.poi-search-texts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.poi-search-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.poi-search-path {
+  font-size: 0.72rem;
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.poi-search-empty {
+  padding: 0.5rem 0.55rem;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}

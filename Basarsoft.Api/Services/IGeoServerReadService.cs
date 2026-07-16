@@ -25,4 +25,9 @@ public interface IGeoServerReadService
     // against the vw_heat SQL view (all shapes collapsed to points), whose default GeoServer style is
     // the vec:Heatmap rendering transformation.
     Task<GeoServerImage> GetHeatmapAsync(int userId, string bbox, int width, int height, string crs);
+
+    // The whole POI catalogue from the vw_poi SQL view. No user id: POIs are shared reference data,
+    // so the view takes no %uid% parameter. The view pre-computes the category breadcrumb and the
+    // effective (inherited) category color, so the response matches what PoiService.CreateAsync emits.
+    Task<IReadOnlyList<PoiResponse>> GetPoisAsync();
 }

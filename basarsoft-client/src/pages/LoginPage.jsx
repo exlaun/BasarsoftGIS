@@ -127,7 +127,7 @@ export default function LoginPage() {
         className={`login-card${leaving ? ' login-card--leaving' : ''}`}
         onSubmit={handleSubmit}
       >
-        <h1 className="login-title">Basarsoft Project</h1>
+        <h1 className="login-title">Başarsoft</h1>
         <p className="login-subtitle">{subtitle}</p>
 
         {(isLogin || isRegister || isForgot) && (

@@ -12,4 +12,8 @@ public class PoiCategorySaveRequest
     public string Name { get; set; } = string.Empty;
 
     public int? ParentId { get; set; }
+
+    // Optional "#rrggbb" marker color. Null clears the color so the category inherits its ancestor's.
+    [RegularExpression("^#[0-9a-fA-F]{6}$")]
+    public string? Color { get; set; }
 }

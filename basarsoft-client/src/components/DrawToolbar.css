@@ -1,4 +1,4 @@
-/* Positioning shell only: centered near the top so the tool pill hangs right under the version text,
+/* Positioning shell only: centered near the top so the tool pill hangs right under the title,
    with the active-tool hint stacked directly beneath it (column-reverse puts the pill above the hint).
    The shell is transparent and click-through — `pointer-events: none` keeps the map draggable in the
    empty area; the interactive children opt back in. Centering the hint here (rather than the old

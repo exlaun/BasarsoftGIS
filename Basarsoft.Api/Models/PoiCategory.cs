@@ -13,6 +13,10 @@ public class PoiCategory : IAuditable
     // service-level guard keep a category from disappearing while children still point at it.
     public int? ParentId { get; set; }
 
+    // Marker color for POIs in this category ("#rrggbb"). Null = inherit the nearest ancestor's
+    // color; when the whole chain is null the map falls back to the default POI rose.
+    public string? Color { get; set; }
+
     // FK -> users.id. The admin who created the category. Stamped from the JWT, never from the client.
     public int UserId { get; set; }
 
