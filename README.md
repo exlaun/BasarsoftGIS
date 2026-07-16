@@ -1,6 +1,6 @@
-# Basarsoft Internship Project — Web GIS
+# BasarsoftGIS
 
-A web GIS built over an internship: draw and manage geographic inventory on a map, with
+BasarsoftGIS is a full-stack Web GIS for drawing and managing geographic inventory, with
 role-based access control, per-region geographic authorization, a shared points-of-interest
 catalogue, and GeoServer-rendered display and analysis layers.
 
@@ -30,7 +30,7 @@ catalogue, and GeoServer-rendered display and analysis layers.
 
 ## Running it
 
-Four things need to be up.
+Five things need to be up.
 
 ```bash
 # 1. PostgreSQL (Postgres.app or equivalent) with a `basarsoft_internship` database + PostGIS.
@@ -40,10 +40,16 @@ Four things need to be up.
 cd Basarsoft.Api
 dotnet ef database update
 
-# 3. API -> http://localhost:5032  (Swagger at /swagger)
+# 3. GeoServer -> http://localhost:8080/geoserver
+#    Use the data directory that contains the basarsoft workspace and pg_basarsoft datastore.
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+export PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"
+geoserver ~/geoserver_data
+
+# 4. API -> http://localhost:5032  (Swagger at /swagger)
 dotnet run
 
-# 4. Client -> http://localhost:5173
+# 5. Client -> http://localhost:5173
 cd ../basarsoft-client
 npm install
 npm run dev
