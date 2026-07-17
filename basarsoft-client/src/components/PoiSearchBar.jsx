@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { searchPoiFeatures } from '../utils/poiSearch'
+import PoiIconBadge from './PoiIconBadge'
 import './PoiSearchBar.css'
 
 // Google-Maps-style search over the shared POI catalogue, floating top-left over the map. It
@@ -107,10 +108,11 @@ export default function PoiSearchBar({ pois, onPick }) {
             results.map((feature) => (
               <li key={feature.get('dbId')}>
                 <button type="button" className="poi-search-result" onClick={() => pick(feature)}>
-                  <span
-                    className="poi-search-dot"
-                    style={{ backgroundColor: feature.get('color') }}
-                    aria-hidden="true"
+                  <PoiIconBadge
+                    iconKey={feature.get('categoryIconKey')}
+                    color={feature.get('categoryColor') || feature.get('color')}
+                    size={20}
+                    label={`${feature.get('categoryName') || 'POI'} marker`}
                   />
                   <span className="poi-search-texts">
                     <span className="poi-search-name">{feature.get('name')}</span>

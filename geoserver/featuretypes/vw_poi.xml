@@ -15,19 +15,26 @@
       <virtualTable>
         <name>vw_poi</name>
         <sql><![CDATA[WITH RECURSIVE cat_walk AS (
-    SELECT c.id AS category_id, c.parent_id, c.name::text AS path, c.color AS color, 1 AS depth
+    SELECT c.id AS category_id,
+           c.parent_id,
+           c.name::text AS path,
+           c.color AS color,
+           c.icon_key AS icon_key,
+           1 AS depth
     FROM tbl_poi_category c
     WHERE c.is_deleted = false AND c.is_active = true
   UNION ALL
     SELECT w.category_id, p.parent_id, p.name || ' > ' || w.path,
-           COALESCE(w.color, p.color), w.depth + 1
+           COALESCE(w.color, p.color),
+           COALESCE(w.icon_key, p.icon_key),
+           w.depth + 1
     FROM cat_walk w
     JOIN tbl_poi_category p
       ON p.id = w.parent_id AND p.is_deleted = false AND p.is_active = true
     WHERE w.depth < 20
 ),
 cat AS (
-    SELECT DISTINCT ON (category_id) category_id, path, color
+    SELECT DISTINCT ON (category_id) category_id, path, color, icon_key
     FROM cat_walk
     ORDER BY category_id, depth DESC
 )
@@ -38,6 +45,7 @@ SELECT p.id,
        c.name AS category_name,
        COALESCE(cat.path, '') AS category_path,
        cat.color AS category_color,
+       COALESCE(cat.icon_key, 'pin') AS category_icon_key,
        to_char(p.open_time, 'HH24:MI:SS') AS open_time,
        to_char(p.close_time, 'HH24:MI:SS') AS close_time,
        p.user_id,

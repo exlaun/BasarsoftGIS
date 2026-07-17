@@ -4,17 +4,16 @@ import './ShapeInfoModal.css'
 
 const DEFAULT_COLOR = '#2563eb'
 
-// Popup shown when an existing shape is clicked (Select tool). Displays the shape's type + last-edited
-// time/user, lets the user edit its Name and Color, and offers "Edit location on map" to reposition the
-// geometry. Save persists name+color; Edit location hands the current field values up and switches the
-// map into geometry-drag mode; Delete asks the parent to confirm a soft delete; Cancel closes without
-// changes.
+// Popup shown when an existing shape is clicked (Select tool). Everyone can inspect the details.
+// Callers that still hold the matching geometry permission also get the name/color, move, and delete
+// controls; Viewer and users whose permission was removed get a genuinely read-only detail view.
 export default function ShapeInfoModal({
   type,
   initialName,
   initialColor,
   modifiedDate,
   modifiedUserId,
+  canEdit,
   onSave,
   onEditLocation,
   onDelete,
@@ -25,8 +24,8 @@ export default function ShapeInfoModal({
   const nameInputRef = useRef(null)
 
   useEffect(() => {
-    nameInputRef.current?.focus()
-  }, [])
+    if (canEdit) nameInputRef.current?.focus()
+  }, [canEdit])
 
   // Escape closes the popup (same as Cancel).
   useEffect(() => {
@@ -41,12 +40,12 @@ export default function ShapeInfoModal({
 
   const handleSubmit = (event) => {
     event.preventDefault()
-    if (!trimmedName) return
+    if (!canEdit || !trimmedName) return
     onSave(trimmedName, color)
   }
 
   const handleEditLocation = () => {
-    if (!trimmedName) return
+    if (!canEdit || !trimmedName) return
     onEditLocation(trimmedName, color)
   }
 
@@ -59,13 +58,32 @@ export default function ShapeInfoModal({
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Shape details">
       <form className="attr-modal" onSubmit={handleSubmit}>
-        <h2 className="attr-modal-title">Edit shape</h2>
+        <h2 className="attr-modal-title">{canEdit ? 'Edit shape' : 'Shape details'}</h2>
 
         <dl className="shape-info-meta">
           <div>
             <dt>Type</dt>
             <dd className="shape-info-type">{type}</dd>
           </div>
+          {!canEdit && (
+            <>
+              <div className="shape-info-name">
+                <dt>Name</dt>
+                <dd>{initialName || 'Unnamed shape'}</dd>
+              </div>
+              <div>
+                <dt>Color</dt>
+                <dd className="shape-info-color">
+                  <span
+                    className="shape-info-color-swatch"
+                    style={{ backgroundColor: color }}
+                    aria-hidden="true"
+                  />
+                  {color}
+                </dd>
+              </div>
+            </>
+          )}
           {modifiedText && (
             <div>
               <dt>Last edited</dt>
@@ -74,68 +92,76 @@ export default function ShapeInfoModal({
           )}
         </dl>
 
-        <label className="attr-modal-field">
-          <span>Name *</span>
-          <input
-            ref={nameInputRef}
-            type="text"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="e.g. Warehouse A"
-            maxLength={80}
-          />
-        </label>
+        {canEdit && (
+          <>
+            <label className="attr-modal-field">
+              <span>Name *</span>
+              <input
+                ref={nameInputRef}
+                type="text"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="e.g. Favorite Map Feature"
+                maxLength={80}
+              />
+            </label>
 
-        <label className="attr-modal-field attr-modal-color">
-          <span>Color</span>
-          <input
-            type="color"
-            value={color}
-            onChange={(event) => setColor(event.target.value)}
-          />
-        </label>
+            <label className="attr-modal-field attr-modal-color">
+              <span>Color</span>
+              <input
+                type="color"
+                value={color}
+                onChange={(event) => setColor(event.target.value)}
+              />
+            </label>
 
-        <button
-          type="button"
-          className="attr-modal-btn shape-info-edit-location"
-          onClick={handleEditLocation}
-          disabled={!trimmedName}
-        >
-          Edit location on map
-        </button>
+            <button
+              type="button"
+              className="attr-modal-btn shape-info-edit-location"
+              onClick={handleEditLocation}
+              disabled={!trimmedName}
+            >
+              Edit location on map
+            </button>
+          </>
+        )}
 
         <div className="attr-modal-actions">
-          <button
-            type="button"
-            className="attr-modal-btn attr-modal-danger shape-info-delete"
-            onClick={onDelete}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+          {canEdit && (
+            <button
+              type="button"
+              className="attr-modal-btn attr-modal-danger shape-info-delete"
+              onClick={onDelete}
             >
-              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-              <path d="M10 11v6M14 11v6" />
-            </svg>
-            Delete
-          </button>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                <path d="M10 11v6M14 11v6" />
+              </svg>
+              Delete
+            </button>
+          )}
           <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onCancel}>
-            Cancel
+            {canEdit ? 'Cancel' : 'Close'}
           </button>
-          <button
-            type="submit"
-            className="attr-modal-btn attr-modal-save"
-            disabled={!trimmedName}
-          >
-            Save
-          </button>
+          {canEdit && (
+            <button
+              type="submit"
+              className="attr-modal-btn attr-modal-save"
+              disabled={!trimmedName}
+            >
+              Save
+            </button>
+          )}
         </div>
       </form>
     </div>

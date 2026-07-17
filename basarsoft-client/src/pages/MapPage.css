@@ -347,6 +347,36 @@
   margin-top: 0.3rem;
 }
 
+/* Konum Analizi legend extension: the run's criteria listed under the shared intensity gradient,
+   each row = category color dot + name + weight. */
+.map-konum-legend-criteria {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--bar-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.map-konum-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.76rem;
+}
+
+.map-konum-legend-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-konum-legend-weight {
+  font-weight: 700;
+}
+
 /* Continue the descent from the login fly-to-Turkey: the map eases in. */
 @media (prefers-reduced-motion: no-preference) {
   .map-container {

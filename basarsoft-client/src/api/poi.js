@@ -21,15 +21,21 @@ export async function deletePoi(id) {
 }
 
 // ---- Categories ----
-// Flat list { id, name, parentId, color, poiCount }; the tree is rebuilt client-side from parentId.
-// `color` is the category's OWN "#rrggbb" or null (= POIs inherit the nearest ancestor's color).
+// Flat list { id, name, parentId, color, iconKey, poiCount }; the tree is rebuilt client-side from
+// parentId. `color` and `iconKey` are the category's OWN values or null (= inherit from an ancestor).
 export async function listPoiCategories() {
   const { data } = await client.get('/api/poi/categories')
   return data
 }
 
+// Authoritative marker-icon allowlist and admin-facing labels: [{ key, label }].
+export async function listPoiIcons() {
+  const { data } = await client.get('/api/poi/icons')
+  return data
+}
+
 export async function createPoiCategory(body) {
-  // body = { name, parentId?, color? }
+  // body = { name, parentId?, color?, iconKey? }
   const { data } = await client.post('/api/admin/poi-categories', body)
   return data
 }

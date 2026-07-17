@@ -2,11 +2,12 @@ import { useEffect } from 'react'
 import './AttributeModal.css'
 import './ShapeInfoModal.css'
 import { formatTime } from '../utils/poiCategories'
+import PoiIconBadge from './PoiIconBadge'
 
 // Read-only info panel for a POI on the map (Select tool click), the POI counterpart of the shape
 // info popup. POIs are shared data, so there is no editing here — just the details plus a Delete
 // button when the caller may remove it (creator or admin). `poi` = { name, categoryPath, openTime,
-// closeTime, createdBy, createdAt }.
+// closeTime, createdBy, createdAt, categoryColor, categoryIconKey }.
 export default function PoiInfoModal({ poi, canDelete, onDelete, onClose }) {
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -28,7 +29,15 @@ export default function PoiInfoModal({ poi, canDelete, onDelete, onClose }) {
           </div>
           <div>
             <dt>Category</dt>
-            <dd>{poi.categoryPath || '—'}</dd>
+            <dd className="poi-info-category">
+              <PoiIconBadge
+                iconKey={poi.categoryIconKey}
+                color={poi.categoryColor}
+                size={22}
+                label={`${poi.categoryPath || 'POI'} marker`}
+              />
+              <span>{poi.categoryPath || '—'}</span>
+            </dd>
           </div>
           <div>
             <dt>Working hours</dt>

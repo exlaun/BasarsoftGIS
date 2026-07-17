@@ -22,4 +22,9 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Province boundaries for ProvinceSeeder: read at runtime from <output>/Data/provinces.geojson. -->
+    <Content Include="Data\provinces.geojson" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

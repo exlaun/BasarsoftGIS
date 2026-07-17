@@ -35,7 +35,7 @@ export default function AdminLayout() {
           </button>
           <SessionTimer />
         </div>
-        <span className="map-title">BasarsoftGIS</span>
+        <span className="map-title">BasarsoftGIS · Turkey Explorer</span>
         <div className="map-bar-right">
           <ThemeToggle />
           <span className="map-bar-divider" aria-hidden="true" />

@@ -91,15 +91,6 @@
   background: var(--bar-hover);
 }
 
-.poi-search-dot {
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 1.5px solid #ffffff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
-}
-
 .poi-search-texts {
   display: flex;
   flex-direction: column;

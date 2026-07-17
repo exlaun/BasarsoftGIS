@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Basarsoft.Api.DTOs;
+using Basarsoft.Api.Security;
 using Basarsoft.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,14 +14,6 @@ namespace Basarsoft.Api.Controllers;
 [Route("api/geometry")]
 public class GeometryController : ControllerBase
 {
-    private static readonly IReadOnlyDictionary<string, string> CreatePermissionsByType =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["point"] = "add_point",
-            ["line"] = "add_line",
-            ["polygon"] = "add_polygon",
-        };
-
     private readonly IGeometryService _geometryService;
     private readonly IGeoServerReadService _geoServerReadService;
     private readonly IUserAdminService _userAdminService;
@@ -191,7 +184,8 @@ public class GeometryController : ControllerBase
             if (!TryGetUserId(out var userId))
                 return Unauthorized();
 
-            if (!CreatePermissionsByType.TryGetValue(type, out var permissionName))
+            var permissionName = GeometryWritePermissions.ForType(type);
+            if (permissionName is null)
                 return BadRequest(new { message = "Unknown geometry type or invalid WKT for this type." });
 
             if (!await _userAdminService.HasPermissionAsync(userId, permissionName))
@@ -215,8 +209,8 @@ public class GeometryController : ControllerBase
         }
     }
 
-    // PUT /api/geometry/{type}/{id} -> update the caller's own shape: its name/color and, optionally,
-    // its geometry (location). Returns the updated row.
+    // PUT /api/geometry/{type}/{id} -> update the caller's own shape when they still hold the matching
+    // geometry permission: its name/color and, optionally, its geometry (location). Returns the row.
     [HttpPut("{type}/{id:int}")]
     public async Task<ActionResult<GeometryResponse>> Update(string type, int id, GeometryUpdateRequest request)
     {
@@ -224,6 +218,13 @@ public class GeometryController : ControllerBase
         {
             if (!TryGetUserId(out var userId))
                 return Unauthorized();
+
+            var permissionName = GeometryWritePermissions.ForType(type);
+            if (permissionName is null)
+                return BadRequest(new { message = "Unknown geometry type or invalid WKT for this type." });
+
+            if (!await _userAdminService.HasPermissionAsync(userId, permissionName))
+                return Forbid();
 
             var result = await _geometryService.UpdateAsync(type, id, request, userId);
             return result.Status switch
@@ -242,7 +243,8 @@ public class GeometryController : ControllerBase
         }
     }
 
-    // DELETE /api/geometry/{type}/{id} -> soft-delete the caller's own shape.
+    // DELETE /api/geometry/{type}/{id} -> soft-delete the caller's own shape when they still hold the
+    // matching geometry permission.
     [HttpDelete("{type}/{id:int}")]
     public async Task<ActionResult> Delete(string type, int id)
     {
@@ -250,6 +252,13 @@ public class GeometryController : ControllerBase
         {
             if (!TryGetUserId(out var userId))
                 return Unauthorized();
+
+            var permissionName = GeometryWritePermissions.ForType(type);
+            if (permissionName is null)
+                return BadRequest(new { message = "Unknown geometry type." });
+
+            if (!await _userAdminService.HasPermissionAsync(userId, permissionName))
+                return Forbid();
 
             if (!await _geometryService.DeleteAsync(type, id, userId))
                 return NotFound(new { message = "Shape not found." });

@@ -45,6 +45,8 @@ public class AdminPoiCategoriesController : ControllerBase
                 Conflict(new { message = "A category with that name already exists under the same parent." }),
             PoiCategoryWriteStatus.InvalidParent =>
                 BadRequest(new { message = "Parent category not found, or it would create a cycle." }),
+            PoiCategoryWriteStatus.InvalidIcon =>
+                BadRequest(new { message = "Unknown POI icon key.", code = "invalid_icon_key" }),
             _ => Ok(result.Response),
         };
 

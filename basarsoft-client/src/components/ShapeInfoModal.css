@@ -34,6 +34,35 @@
   text-transform: capitalize;
 }
 
+.shape-info-name {
+  min-width: 0;
+  flex: 1 1 100%;
+}
+
+.shape-info-name dd {
+  overflow-wrap: anywhere;
+}
+
+.shape-info-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: monospace;
+}
+
+.shape-info-color-swatch {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 50%;
+}
+
+.poi-info-category {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
 /* Full-width secondary action that switches the map into geometry-drag mode. */
 .shape-info-edit-location {
   width: 100%;

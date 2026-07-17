@@ -16,4 +16,9 @@ public class PoiCategorySaveRequest
     // Optional "#rrggbb" marker color. Null clears the color so the category inherits its ancestor's.
     [RegularExpression("^#[0-9a-fA-F]{6}$")]
     public string? Color { get; set; }
+
+    // Optional key from GET /api/poi/icons. Null/blank clears the icon so the category inherits it.
+    // Catalog validation stays in the service so every unknown value receives the stable
+    // `invalid_icon_key` response instead of the framework's generic model-validation payload.
+    public string? IconKey { get; set; }
 }

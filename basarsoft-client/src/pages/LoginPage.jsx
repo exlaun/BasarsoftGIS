@@ -128,7 +128,7 @@ export default function LoginPage() {
         onSubmit={handleSubmit}
       >
         <h1 className="login-title">BasarsoftGIS</h1>
-        <p className="login-subtitle">{subtitle}</p>
+        <p className="login-subtitle">Turkey Explorer demo · {subtitle}</p>
 
         {(isLogin || isRegister || isForgot) && (
           <label className="login-label">

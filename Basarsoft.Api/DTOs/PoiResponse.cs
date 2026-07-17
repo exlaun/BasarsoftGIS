@@ -23,6 +23,10 @@ public class PoiResponse
     // Null when the whole chain is colorless — the client then uses its default POI rose.
     public string? CategoryColor { get; set; }
 
+    // Effective marker glyph: the category's own icon, the nearest ancestor's, or "pin". Unlike
+    // CategoryColor this is always non-null so every renderer can select an asset deterministically.
+    public string CategoryIconKey { get; set; } = "pin";
+
     // Working hours; serialized by System.Text.Json as "HH:mm:ss" (the client trims to HH:mm).
     public TimeOnly OpenTime { get; set; }
 

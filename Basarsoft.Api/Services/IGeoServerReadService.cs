@@ -30,4 +30,10 @@ public interface IGeoServerReadService
     // so the view takes no %uid% parameter. The view pre-computes the category breadcrumb and the
     // effective (inherited) category color, so the response matches what PoiService.CreateAsync emits.
     Task<IReadOnlyList<PoiResponse>> GetPoisAsync();
+
+    // Renders one location-analysis run as a weighted heat map PNG: same WMS GetMap contract as the
+    // other map methods but against the vw_konum SQL view, whose %aid% parameter selects the stored
+    // run (region clip + per-criterion weights). Ownership is checked by the caller BEFORE this —
+    // the id is trusted here the same way userId is in the methods above.
+    Task<GeoServerImage> GetLocationHeatmapAsync(int analysisId, string bbox, int width, int height, string crs);
 }

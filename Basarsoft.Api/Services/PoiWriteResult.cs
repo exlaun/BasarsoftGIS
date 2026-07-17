@@ -29,6 +29,7 @@ public enum PoiCategoryWriteStatus
     NotFound,
     Conflict,
     InvalidParent,
+    InvalidIcon,
     InUse,
 }
 
@@ -37,6 +38,7 @@ public record PoiCategoryWriteResult(PoiCategoryWriteStatus Status, PoiCategoryR
     public static readonly PoiCategoryWriteResult NotFound = new(PoiCategoryWriteStatus.NotFound, null);
     public static readonly PoiCategoryWriteResult Conflict = new(PoiCategoryWriteStatus.Conflict, null);
     public static readonly PoiCategoryWriteResult InvalidParent = new(PoiCategoryWriteStatus.InvalidParent, null);
+    public static readonly PoiCategoryWriteResult InvalidIcon = new(PoiCategoryWriteStatus.InvalidIcon, null);
     public static readonly PoiCategoryWriteResult InUse = new(PoiCategoryWriteStatus.InUse, null);
     public static PoiCategoryWriteResult Ok(PoiCategoryResponse response) => new(PoiCategoryWriteStatus.Ok, response);
 }

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- POI markers colored by category. category_color comes from the vw_poi SQL view (the category's
-     own color or the nearest ancestor's); when the whole chain is null the fallback #e11d48 matches
-     POI_COLOR in basarsoft-client/src/pages/MapPage.jsx. Marker mirrors the client POI style:
-     radius 7 => Size 14, white outline 2.
-     Labels only when zoomed in: MaxScaleDenominator 50000 = ~zoom 13.5 at EPSG:3857
-     (scale denominator = resolution / 0.00028). Client mirror: POI_LABEL_MAX_RESOLUTION = 14 m/px
-     (= 50000 x 0.00028) in MapPage.jsx — change both together. -->
+<!-- POI markers colored and iconized by category. category_color and category_icon_key come from
+     the vw_poi SQL view (the category's own values or the nearest ancestor's). A null color falls
+     back to #e11d48; icon_key always falls back to pin. The packaged poi-icons SVGs use white
+     strokes/fills so the 16 px glyph remains legible over the 26 px category-colored badge.
+     Labels only when zoomed in: MaxScaleDenominator 100000 = ~zoom 12.5 at EPSG:3857
+     (scale denominator = resolution / 0.00028). Client mirror: POI_LABEL_MAX_RESOLUTION = 28 m/px
+     (= 100000 x 0.00028) in MapPage.jsx — change both together. -->
 <StyledLayerDescriptor version="1.0.0"
     xmlns="http://www.opengis.net/sld"
     xmlns:ogc="http://www.opengis.net/ogc"
@@ -15,10 +15,10 @@
   <NamedLayer>
     <Name>vw_poi_category</Name>
     <UserStyle>
-      <Title>POIs colored by category, labeled when zoomed in</Title>
+      <Title>POIs colored and iconized by category, labeled when zoomed in</Title>
       <FeatureTypeStyle>
         <Rule>
-          <Title>Category-colored marker</Title>
+          <Title>Category-colored badge</Title>
           <PointSymbolizer>
             <Graphic>
               <Mark>
@@ -39,13 +39,24 @@
                   <CssParameter name="stroke-width">2</CssParameter>
                 </Stroke>
               </Mark>
-              <Size>14</Size>
+              <Size>26</Size>
+            </Graphic>
+          </PointSymbolizer>
+          <PointSymbolizer>
+            <Graphic>
+              <ExternalGraphic>
+                <OnlineResource
+                    xlink:type="simple"
+                    xlink:href="poi-icons/${category_icon_key}.svg" />
+                <Format>image/svg+xml</Format>
+              </ExternalGraphic>
+              <Size>16</Size>
             </Graphic>
           </PointSymbolizer>
         </Rule>
         <Rule>
           <Title>Name label at close zoom</Title>
-          <MaxScaleDenominator>50000</MaxScaleDenominator>
+          <MaxScaleDenominator>100000</MaxScaleDenominator>
           <TextSymbolizer>
             <Label>
               <ogc:PropertyName>name</ogc:PropertyName>
@@ -63,7 +74,7 @@
                 </AnchorPoint>
                 <Displacement>
                   <DisplacementX>0</DisplacementX>
-                  <DisplacementY>10</DisplacementY>
+                  <DisplacementY>18</DisplacementY>
                 </Displacement>
               </PointPlacement>
             </LabelPlacement>

@@ -1,0 +1,213 @@
+/* Konum Analizi panel: floating card top-left under the POI search bar. Same overlay stack as the
+   other map chrome (PoiSearchBar.css documents it: toolbar 2, legend 4, wms hint 5, search 6) and
+   the same --bar-* theme variables, so it follows light/dark automatically. */
+.konum-panel {
+  position: absolute;
+  top: 4rem;
+  left: 3.2rem;
+  z-index: 6;
+  width: min(340px, 80vw);
+  max-height: calc(100% - 5.5rem);
+  overflow-y: auto;
+  padding: 0.85rem 0.95rem;
+  border-radius: 10px;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.konum-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.konum-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.konum-step-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+/* Province / draw switch — visually mirrors the header's WFS/WMS mode toggle. */
+.konum-mode-toggle {
+  display: flex;
+  border: 1px solid var(--bar-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.konum-mode-btn {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+  background: transparent;
+  color: inherit;
+  border: none;
+  cursor: pointer;
+}
+
+.konum-mode-btn.active {
+  background: var(--bar-hover);
+  font-weight: 600;
+}
+
+.konum-select,
+.konum-weight {
+  padding: 0.4rem 0.5rem;
+  font-size: 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--bar-border);
+  background: var(--bar-bg);
+  color: inherit;
+}
+
+.konum-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+
+/* Chosen region chip: name + a clear (×) button. */
+.konum-region-chip {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid #6366f1; /* matches the region outline on the map (KONUM_REGION_STYLE) */
+  border-radius: 999px;
+  font-size: 0.8rem;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.konum-region-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.konum-region-clear,
+.konum-row-remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+  opacity: 0.7;
+}
+
+.konum-region-clear:hover,
+.konum-row-remove:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.konum-row-remove:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+/* One criterion row: category select grows, weight input stays narrow. */
+.konum-criterion {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.konum-criterion-category {
+  flex: 1;
+  min-width: 0;
+}
+
+.konum-weight {
+  width: 4.2rem;
+  text-align: right;
+}
+
+.konum-criteria-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+/* Running weight total: red until it is exactly 100 (the mentor's must-not-start rule made visible). */
+.konum-total {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #dc2626;
+}
+
+.konum-total.is-valid {
+  color: #16a34a;
+}
+
+.konum-btn {
+  padding: 0.45rem 0.7rem;
+  font-size: 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--bar-border);
+  background: var(--bar-bg);
+  color: inherit;
+  cursor: pointer;
+}
+
+.konum-btn:hover:not(:disabled) {
+  background: var(--bar-hover);
+}
+
+.konum-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.konum-btn-start {
+  font-weight: 700;
+  border-color: #6366f1;
+}
+
+/* Post-start summary list: category name left, weight right. */
+.konum-summary-region,
+.konum-summary-count {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.konum-summary-criteria {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.konum-summary-criteria li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.82rem;
+}
+
+.konum-summary-category {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.4rem;
+}

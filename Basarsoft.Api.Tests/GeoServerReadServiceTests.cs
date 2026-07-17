@@ -35,20 +35,22 @@ public class GeoServerReadServiceTests
         Assert.Equal([1, 2], rows.Select(row => row.Id));
 
         var first = rows[0];
-        Assert.Equal("Flagship Store — İstanbul Nişantaşı", first.Name);
-        Assert.Equal("POINT (28.995 41.048)", first.Wkt);
-        Assert.Equal(3, first.CategoryId);
-        Assert.Equal("Flagship Store", first.CategoryName);
-        Assert.Equal("Customer Service > Retail > Flagship Store", first.CategoryPath);
-        Assert.Equal("#7c3aed", first.CategoryColor);
-        Assert.Equal(new TimeOnly(9, 30), first.OpenTime);
-        Assert.Equal(new TimeOnly(18, 45), first.CloseTime);
-        Assert.Equal(6, first.UserId);
-        Assert.Equal("viewer", first.CreatedBy);
+        Assert.Equal("Hafız Mustafa 1864", first.Name);
+        Assert.Equal("POINT (28.974 41.016)", first.Wkt);
+        Assert.Equal(12, first.CategoryId);
+        Assert.Equal("Bakery", first.CategoryName);
+        Assert.Equal("Food & Drink > Bakery", first.CategoryPath);
+        Assert.Equal("#f97316", first.CategoryColor);
+        Assert.Equal("bakery", first.CategoryIconKey);
+        Assert.Equal(new TimeOnly(7, 0), first.OpenTime);
+        Assert.Equal(new TimeOnly(23, 0), first.CloseTime);
+        Assert.Equal(13, first.UserId);
+        Assert.Equal("istanbul_operator", first.CreatedBy);
         Assert.Equal(DateTimeKind.Utc, first.CreatedAt.Kind);
 
         var second = rows[1];
         Assert.Null(second.CategoryColor);
+        Assert.Equal(PoiIconCatalog.DefaultIconKey, second.CategoryIconKey);
         Assert.Equal(default, second.OpenTime); // malformed WFS time degrades without losing the row
     }
 
@@ -84,13 +86,14 @@ public class GeoServerReadServiceTests
               "geometry": { "type": "Point", "coordinates": [32.854, 39.92] },
               "properties": {
                 "id": 2,
-                "name": "Fallback POI",
-                "category_id": 11,
-                "category_name": "Regional Warehouse",
-                "category_path": "Operations > Depot > Regional Warehouse",
+                "name": "Ankara Explorer Hub",
+                "category_id": 21,
+                "category_name": "Visitor Center",
+                "category_path": "Culture & Tourism > Visitor Center",
                 "category_color": null,
+                "category_icon_key": "../not-an-asset",
                 "open_time": "not-a-time",
-                "close_time": "17:00:00",
+                "close_time": "18:00:00",
                 "user_id": 1,
                 "created_by": "admin",
                 "created_at": 1784192400000,
@@ -99,18 +102,19 @@ public class GeoServerReadServiceTests
             },
             {
               "type": "Feature",
-              "geometry": { "type": "Point", "coordinates": [28.995, 41.048] },
+              "geometry": { "type": "Point", "coordinates": [28.974, 41.016] },
               "properties": {
                 "id": "1",
-                "name": "Flagship Store — İstanbul Nişantaşı",
-                "category_id": "3",
-                "category_name": "Flagship Store",
-                "category_path": "Customer Service > Retail > Flagship Store",
-                "category_color": "#7c3aed",
-                "open_time": "09:30:00",
-                "close_time": "18:45:00",
-                "user_id": "6",
-                "created_by": "viewer",
+                "name": "Hafız Mustafa 1864",
+                "category_id": "12",
+                "category_name": "Bakery",
+                "category_path": "Food & Drink > Bakery",
+                "category_color": "#f97316",
+                "category_icon_key": "bakery",
+                "open_time": "07:00:00",
+                "close_time": "23:00:00",
+                "user_id": "13",
+                "created_by": "istanbul_operator",
                 "created_at": "2026-07-16T09:00:00Z",
                 "modified_date": "2026-07-16T10:00:00Z"
               }

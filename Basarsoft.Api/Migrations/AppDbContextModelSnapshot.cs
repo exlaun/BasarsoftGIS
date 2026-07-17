@@ -34,6 +34,10 @@ namespace Basarsoft.Api.Migrations
 
             modelBuilder.HasSequence<int>("seq_tbl_line");
 
+            modelBuilder.HasSequence<int>("seq_tbl_location_analysis");
+
+            modelBuilder.HasSequence<int>("seq_tbl_location_analysis_criterion");
+
             modelBuilder.HasSequence<int>("seq_tbl_poi");
 
             modelBuilder.HasSequence<int>("seq_tbl_poi_category");
@@ -41,6 +45,8 @@ namespace Basarsoft.Api.Migrations
             modelBuilder.HasSequence<int>("seq_tbl_point");
 
             modelBuilder.HasSequence<int>("seq_tbl_polygon");
+
+            modelBuilder.HasSequence<int>("seq_tbl_province");
 
             modelBuilder.HasSequence<int>("seq_user_permissions");
 
@@ -161,6 +167,123 @@ namespace Basarsoft.Api.Migrations
                         .HasDatabaseName("ix_tbl_line_user_id");
 
                     b.ToTable("tbl_line", (string)null);
+                });
+
+            modelBuilder.Entity("Basarsoft.Api.Models.LocationAnalysis", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("nextval('seq_tbl_location_analysis')")
+                        .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.None);
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Geometry>("Geom")
+                        .IsRequired()
+                        .HasColumnType("geometry(MultiPolygon,4326)")
+                        .HasColumnName("geom");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime>("ModifiedDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("modified_date");
+
+                    b.Property<int?>("ModifiedUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("modified_user_id");
+
+                    b.Property<int?>("ProvinceId")
+                        .HasColumnType("integer")
+                        .HasColumnName("province_id");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_location_analysis");
+
+                    b.HasIndex("ModifiedUserId")
+                        .HasDatabaseName("ix_tbl_location_analysis_modified_user_id");
+
+                    b.HasIndex("ProvinceId")
+                        .HasDatabaseName("ix_tbl_location_analysis_province_id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_tbl_location_analysis_user_id");
+
+                    b.ToTable("tbl_location_analysis", (string)null);
+                });
+
+            modelBuilder.Entity("Basarsoft.Api.Models.LocationAnalysisCriterion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("nextval('seq_tbl_location_analysis_criterion')")
+                        .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.None);
+
+                    b.Property<int>("AnalysisId")
+                        .HasColumnType("integer")
+                        .HasColumnName("analysis_id");
+
+                    b.Property<int>("CategoryId")
+                        .HasColumnType("integer")
+                        .HasColumnName("category_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime>("ModifiedDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("modified_date");
+
+                    b.Property<int?>("ModifiedUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("modified_user_id");
+
+                    b.Property<int>("Weight")
+                        .HasColumnType("integer")
+                        .HasColumnName("weight");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_location_analysis_criterion");
+
+                    b.HasIndex("CategoryId")
+                        .HasDatabaseName("ix_tbl_location_analysis_criterion_category_id");
+
+                    b.HasIndex("ModifiedUserId")
+                        .HasDatabaseName("ix_tbl_location_analysis_criterion_modified_user_id");
+
+                    b.HasIndex("AnalysisId", "CategoryId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_location_analysis_criterion_analysis_id_category_id");
+
+                    b.ToTable("tbl_location_analysis_criterion", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_tbl_location_analysis_criterion_weight", "weight BETWEEN 1 AND 100");
+                        });
                 });
 
             modelBuilder.Entity("Basarsoft.Api.Models.Permission", b =>
@@ -296,6 +419,11 @@ namespace Basarsoft.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<string>("IconKey")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("icon_key");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
@@ -455,6 +583,43 @@ namespace Basarsoft.Api.Migrations
                         .HasDatabaseName("ix_tbl_polygon_user_id");
 
                     b.ToTable("tbl_polygon", (string)null);
+                });
+
+            modelBuilder.Entity("Basarsoft.Api.Models.Province", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("nextval('seq_tbl_province')")
+                        .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.None);
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Geometry>("Geom")
+                        .IsRequired()
+                        .HasColumnType("geometry(MultiPolygon,4326)")
+                        .HasColumnName("geom");
+
+                    b.Property<DateTime>("ModifiedDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("modified_date");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_province");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_province_name");
+
+                    b.ToTable("tbl_province", (string)null);
                 });
 
             modelBuilder.Entity("Basarsoft.Api.Models.Role", b =>
@@ -708,6 +873,49 @@ namespace Basarsoft.Api.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_tbl_line_users_user_id");
+                });
+
+            modelBuilder.Entity("Basarsoft.Api.Models.LocationAnalysis", b =>
+                {
+                    b.HasOne("Basarsoft.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("ModifiedUserId")
+                        .HasConstraintName("fk_tbl_location_analysis_users_modified_user_id");
+
+                    b.HasOne("Basarsoft.Api.Models.Province", null)
+                        .WithMany()
+                        .HasForeignKey("ProvinceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_location_analysis_tbl_province_province_id");
+
+                    b.HasOne("Basarsoft.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_location_analysis_users_user_id");
+                });
+
+            modelBuilder.Entity("Basarsoft.Api.Models.LocationAnalysisCriterion", b =>
+                {
+                    b.HasOne("Basarsoft.Api.Models.LocationAnalysis", null)
+                        .WithMany()
+                        .HasForeignKey("AnalysisId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_location_analysis_criterion_tbl_location_analysis_analy");
+
+                    b.HasOne("Basarsoft.Api.Models.PoiCategory", null)
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_location_analysis_criterion_tbl_poi_category_category_id");
+
+                    b.HasOne("Basarsoft.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("ModifiedUserId")
+                        .HasConstraintName("fk_tbl_location_analysis_criterion_users_modified_user_id");
                 });
 
             modelBuilder.Entity("Basarsoft.Api.Models.Poi", b =>

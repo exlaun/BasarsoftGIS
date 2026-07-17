@@ -55,6 +55,10 @@ builder.Services.AddScoped<IGeoAuthorizationService, GeoAuthorizationService>();
 builder.Services.AddScoped<IPoiService, PoiService>();
 builder.Services.AddScoped<IPoiCategoryService, PoiCategoryService>();
 
+// Location analysis (Konum Analizi): stores weighted-criteria runs that GeoServer's vw_konum view
+// renders back as heat maps.
+builder.Services.AddScoped<ILocationAnalysisService, LocationAnalysisService>();
+
 // Global exception handling: a final safety net that converts any unhandled exception into a clean
 // 500 JSON response (the controllers also try-catch individually). AddProblemDetails() supplies the
 // standard error body format that UseExceptionHandler() falls back to.
@@ -155,6 +159,10 @@ using (var scope = app.Services.CreateScope())
     }
 
     await AdminSeeder.SeedAsync(db);
+
+    // Turkey's 81 provinces for the location-analysis dropdown: loaded once from Data/provinces.geojson,
+    // no-ops when the table is already filled.
+    await ProvinceSeeder.SeedAsync(db);
 }
 
 // Catch unhandled exceptions first so nothing downstream can leak a stack trace. Delegates to

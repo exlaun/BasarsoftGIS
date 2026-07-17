@@ -30,6 +30,7 @@ public class PoiCategoryService : IPoiCategoryService
             Name = c.Name,
             ParentId = c.ParentId,
             Color = c.Color,
+            IconKey = c.IconKey,
             PoiCount = counts.TryGetValue(c.Id, out var count) ? count : 0,
         }).ToList();
     }
@@ -37,6 +38,9 @@ public class PoiCategoryService : IPoiCategoryService
     public async Task<PoiCategoryWriteResult> CreateAsync(PoiCategorySaveRequest request, int userId)
     {
         var name = request.Name.Trim();
+
+        if (!PoiIconCatalog.TryNormalize(request.IconKey, out var iconKey))
+            return PoiCategoryWriteResult.InvalidIcon;
 
         if (request.ParentId is int parentId && !await _db.PoiCategories.AnyAsync(c => c.Id == parentId))
             return PoiCategoryWriteResult.InvalidParent;
@@ -51,6 +55,7 @@ public class PoiCategoryService : IPoiCategoryService
             Name = name,
             ParentId = request.ParentId,
             Color = request.Color,
+            IconKey = iconKey,
             UserId = userId,
             ModifiedUserId = userId,
         };
@@ -63,6 +68,7 @@ public class PoiCategoryService : IPoiCategoryService
             Name = category.Name,
             ParentId = category.ParentId,
             Color = category.Color,
+            IconKey = category.IconKey,
             PoiCount = 0,
         });
     }
@@ -72,6 +78,9 @@ public class PoiCategoryService : IPoiCategoryService
         var category = await _db.PoiCategories.FirstOrDefaultAsync(c => c.Id == id);
         if (category is null)
             return PoiCategoryWriteResult.NotFound;
+
+        if (!PoiIconCatalog.TryNormalize(request.IconKey, out var iconKey))
+            return PoiCategoryWriteResult.InvalidIcon;
 
         if (request.ParentId is int parentId)
         {
@@ -101,6 +110,7 @@ public class PoiCategoryService : IPoiCategoryService
         category.Name = name;
         category.ParentId = request.ParentId;
         category.Color = request.Color;
+        category.IconKey = iconKey;
         category.ModifiedUserId = userId;
         await _db.SaveChangesAsync();
 
@@ -111,6 +121,7 @@ public class PoiCategoryService : IPoiCategoryService
             Name = category.Name,
             ParentId = category.ParentId,
             Color = category.Color,
+            IconKey = category.IconKey,
             PoiCount = poiCount,
         });
     }

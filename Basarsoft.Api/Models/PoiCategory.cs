@@ -17,6 +17,10 @@ public class PoiCategory : IAuditable
     // color; when the whole chain is null the map falls back to the default POI rose.
     public string? Color { get; set; }
 
+    // Marker glyph selected from PoiIconCatalog. Null = inherit the nearest ancestor's icon; when
+    // the whole chain is null POI responses resolve it to the stable "pin" fallback.
+    public string? IconKey { get; set; }
+
     // FK -> users.id. The admin who created the category. Stamped from the JWT, never from the client.
     public int UserId { get; set; }
 

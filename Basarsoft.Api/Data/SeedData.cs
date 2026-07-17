@@ -26,9 +26,9 @@ public static class SeedData
     // plus the management permissions that gate the admin panel itself.
     public static readonly IReadOnlyList<(string Name, string Description)> Permissions = new[]
     {
-        ("add_point",          "Add points to the map"),
-        ("add_line",           "Add lines to the map"),
-        ("add_polygon",        "Add polygons to the map"),
+        ("add_point",          "Create and manage your own point shapes"),
+        ("add_line",           "Create and manage your own line shapes"),
+        ("add_polygon",        "Create and manage your own polygon shapes"),
         ("manage_users",       "Create, update, and delete users"),
         ("manage_roles",       "Create, update, and delete roles"),
         ("manage_permissions", "Manage permissions"),

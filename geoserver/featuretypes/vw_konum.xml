@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Portable GeoServer REST definition for the location-analysis (Konum Analizi) virtual table.
+     Parameterized by %aid% = tbl_location_analysis.id: the API stores each run's region + weighted
+     criteria and passes ONLY that integer here (fails closed on the -1 default, regex-guarded like
+     vw_heat's %uid%). Each output row is one live POI inside the run's region carrying the weight of
+     its best-matching criterion; the layer's default style (vw_konum_heatmap) turns that weight
+     column into heat via vec:Heatmap's weightAttr.
+
+     The bounding boxes are DECLARED (all of Turkey) instead of recalculated: with the default
+     aid=-1 the view is empty, so setup-time recalculation would produce a degenerate bbox. -->
+<featureType>
+  <name>vw_konum</name>
+  <nativeName>vw_konum</nativeName>
+  <title>Location analysis weighted POIs</title>
+  <srs>EPSG:4326</srs>
+  <projectionPolicy>FORCE_DECLARED</projectionPolicy>
+  <enabled>true</enabled>
+  <advertised>false</advertised>
+  <nativeBoundingBox>
+    <minx>25.5</minx>
+    <maxx>45.0</maxx>
+    <miny>35.8</miny>
+    <maxy>42.3</maxy>
+    <crs>EPSG:4326</crs>
+  </nativeBoundingBox>
+  <latLonBoundingBox>
+    <minx>25.5</minx>
+    <maxx>45.0</maxx>
+    <miny>35.8</miny>
+    <maxy>42.3</maxy>
+    <crs>EPSG:4326</crs>
+  </latLonBoundingBox>
+  <metadata>
+    <entry key="JDBC_VIRTUAL_TABLE">
+      <virtualTable>
+        <name>vw_konum</name>
+        <sql><![CDATA[WITH RECURSIVE ana AS (
+    SELECT a.geom
+    FROM tbl_location_analysis a
+    WHERE a.id = %aid% AND a.is_deleted = false AND a.is_active = true
+),
+crit AS (
+    SELECT c.category_id, c.weight
+    FROM tbl_location_analysis_criterion c
+    WHERE c.analysis_id = %aid% AND c.is_deleted = false AND c.is_active = true
+),
+cat_up AS (
+    SELECT c.id AS category_id, c.id AS ancestor_id, c.parent_id AS next_parent, 0 AS dist
+    FROM tbl_poi_category c
+    WHERE c.is_deleted = false AND c.is_active = true
+  UNION ALL
+    SELECT u.category_id, p.id, p.parent_id, u.dist + 1
+    FROM cat_up u
+    JOIN tbl_poi_category p
+      ON p.id = u.next_parent AND p.is_deleted = false AND p.is_active = true
+    WHERE u.dist < 20
+),
+matched AS (
+    SELECT DISTINCT ON (p.id) p.id, p.geom, cr.weight
+    FROM tbl_poi p
+    JOIN ana ON ST_Intersects(p.geom, ana.geom)
+    JOIN cat_up u ON u.category_id = p.category_id
+    JOIN crit cr ON cr.category_id = u.ancestor_id
+    WHERE p.is_deleted = false AND p.is_active = true
+    ORDER BY p.id, u.dist ASC
+)
+SELECT id,
+       geom::geometry(Point,4326) AS geom,
+       weight::float8 AS weight
+FROM matched
+]]></sql>
+        <escapeSql>false</escapeSql>
+        <keyColumn>id</keyColumn>
+        <geometry>
+          <name>geom</name>
+          <type>Point</type>
+          <srid>4326</srid>
+        </geometry>
+        <parameter>
+          <name>aid</name>
+          <defaultValue>-1</defaultValue>
+          <regexpValidator>^-?[0-9]+$</regexpValidator>
+        </parameter>
+      </virtualTable>
+    </entry>
+  </metadata>
+</featureType>

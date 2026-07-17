@@ -1,0 +1,22 @@
+.poi-icon-badge {
+  display: inline-flex;
+  width: var(--poi-badge-size, 20px);
+  height: var(--poi-badge-size, 20px);
+  flex: 0 0 var(--poi-badge-size, 20px);
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: max(1px, calc(var(--poi-badge-size, 20px) * 0.08)) solid #ffffff;
+  background: var(--poi-badge-color, #e11d48);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.2);
+}
+
+.poi-icon-badge img {
+  display: block;
+  width: 62%;
+  height: 62%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}

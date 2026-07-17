@@ -36,6 +36,11 @@ public class GeoServerReadService : IGeoServerReadService
     // takes no parameters. Its default GeoServer style colors markers by category and labels on zoom.
     private const string PoiLayer = "vw_poi";
 
+    // SQL view behind the location-analysis heat map: POIs inside the stored run's region, each
+    // carrying its matching criterion's weight. Parameterized by %aid% (the run id) alone; its default
+    // style is the weighted vec:Heatmap rendering transformation (weightAttr = weight).
+    private const string KonumLayer = "vw_konum";
+
     public GeoServerReadService(HttpClient httpClient, GeoServerSettings settings)
     {
         _httpClient = httpClient;
@@ -62,7 +67,7 @@ public class GeoServerReadService : IGeoServerReadService
         var layers = string.Join(',', Layers
             .Select(l => $"{_settings.Workspace}:{l.Layer}")
             .Append($"{_settings.Workspace}:{PoiLayer}"));
-        return FetchMapAsync(BuildWmsUrl(layers, bbox, width, height, crs, userId));
+        return FetchMapAsync(BuildWmsUrl(layers, bbox, width, height, crs, $"uid:{userId}"));
     }
 
     public async Task<IReadOnlyList<PoiResponse>> GetPoisAsync()
@@ -72,7 +77,10 @@ public class GeoServerReadService : IGeoServerReadService
     }
 
     public Task<GeoServerImage> GetHeatmapAsync(int userId, string bbox, int width, int height, string crs) =>
-        FetchMapAsync(BuildWmsUrl($"{_settings.Workspace}:{HeatLayer}", bbox, width, height, crs, userId));
+        FetchMapAsync(BuildWmsUrl($"{_settings.Workspace}:{HeatLayer}", bbox, width, height, crs, $"uid:{userId}"));
+
+    public Task<GeoServerImage> GetLocationHeatmapAsync(int analysisId, string bbox, int width, int height, string crs) =>
+        FetchMapAsync(BuildWmsUrl($"{_settings.Workspace}:{KonumLayer}", bbox, width, height, crs, $"aid:{analysisId}"));
 
     private async Task<GeoServerImage> FetchMapAsync(string url)
     {
@@ -89,7 +97,7 @@ public class GeoServerReadService : IGeoServerReadService
         return new GeoServerImage(bytes, contentType);
     }
 
-    private string BuildWmsUrl(string layers, string bbox, int width, int height, string crs, int userId)
+    private string BuildWmsUrl(string layers, string bbox, int width, int height, string crs, string viewparams)
     {
         var endpoint = $"{_settings.BaseUrl.TrimEnd('/')}/{_settings.Workspace}/wms";
         var query = new Dictionary<string, string?>
@@ -106,8 +114,9 @@ public class GeoServerReadService : IGeoServerReadService
             ["bbox"] = bbox,
             ["width"] = width.ToString(CultureInfo.InvariantCulture),
             ["height"] = height.ToString(CultureInfo.InvariantCulture),
-            // One group applies to all three layers (GeoServer-verified). uid comes from the JWT.
-            ["viewparams"] = $"uid:{userId}",
+            // One group applies to every requested layer (GeoServer-verified); layers without the
+            // parameter ignore it. The value is always server-built ("uid:<jwt id>" / "aid:<run id>").
+            ["viewparams"] = viewparams,
         };
         return QueryHelpers.AddQueryString(endpoint, query);
     }
@@ -188,6 +197,8 @@ public class GeoServerReadService : IGeoServerReadService
                 CategoryName = ReadString(props, "category_name") ?? string.Empty,
                 CategoryPath = ReadString(props, "category_path") ?? string.Empty,
                 CategoryColor = ReadString(props, "category_color"),
+                CategoryIconKey = PoiIconCatalog.NormalizeOrDefault(
+                    ReadString(props, "category_icon_key")),
                 OpenTime = ReadTime(props, "open_time"),
                 CloseTime = ReadTime(props, "close_time"),
                 UserId = ReadInt(props, "user_id") ?? 0,

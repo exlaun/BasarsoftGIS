@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPoiCategory, updatePoiCategory } from '../../api/poi'
-import { flattenCategoryTree, collectDescendantIds, categoryOptionLabel } from '../../utils/poiCategories'
+import { createPoiCategory, listPoiIcons, updatePoiCategory } from '../../api/poi'
+import {
+  DEFAULT_POI_COLOR,
+  POI_ICON_CATALOG,
+  categoryBadgeAppearance,
+  flattenCategoryTree,
+  collectDescendantIds,
+  categoryOptionLabel,
+} from '../../utils/poiCategories'
+import PoiIconBadge from '../../components/PoiIconBadge'
 
-// Fallback shown in the picker while the category has no color of its own (matches POI_COLOR on
-// the map). The real value stays null until the admin actually picks something — an
-// <input type="color"> can't express "no color", so null is modeled by the Clear button instead.
-const DEFAULT_POI_COLOR = '#e11d48'
-
-// Create or edit a POI category: a name plus an optional parent picked from the existing tree and
-// an optional marker color (null = POIs in this category inherit the nearest ancestor's color).
+// Create or edit a POI category: a name plus an optional parent, marker color and marker icon.
+// Null appearance values inherit the nearest ancestor. The color input cannot express null, so the
+// Clear button restores inheritance while still previewing DEFAULT_POI_COLOR when no ancestor sets it.
 // In edit mode the category itself and its whole subtree are excluded from the parent options —
 // re-parenting into your own descendants would turn the tree into a cycle (server enforces too).
 export default function PoiCategoryFormModal({ mode, category, categories, onClose, onSuccess }) {
@@ -16,12 +20,34 @@ export default function PoiCategoryFormModal({ mode, category, categories, onClo
   const [name, setName] = useState(category?.name ?? '')
   const [parentId, setParentId] = useState(category?.parentId ?? null)
   const [color, setColor] = useState(category?.color ?? null)
+  const [iconKey, setIconKey] = useState(category?.iconKey ?? null)
+  const [icons, setIcons] = useState(POI_ICON_CATALOG)
+  const [iconsFromApi, setIconsFromApi] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const firstRef = useRef(null)
 
   useEffect(() => {
     firstRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    listPoiIcons()
+      .then((items) => {
+        if (!cancelled && Array.isArray(items) && items.length > 0) {
+          setIcons(items)
+          setIconsFromApi(true)
+        }
+      })
+      .catch(() => {
+        // The static allowlist exactly mirrors the endpoint, so category editing remains available
+        // during a transient catalogue-read failure without ever offering an arbitrary icon key.
+        if (!cancelled) setIconsFromApi(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -41,6 +67,9 @@ export default function PoiCategoryFormModal({ mode, category, categories, onClo
 
   const trimmed = name.trim()
   const canSubmit = trimmed.length > 0 && !submitting
+  const parentAppearance = categoryBadgeAppearance(categories, parentId)
+  const previewColor = color ?? parentAppearance.color
+  const previewIconKey = iconKey ?? parentAppearance.iconKey
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -48,7 +77,7 @@ export default function PoiCategoryFormModal({ mode, category, categories, onClo
     setSubmitting(true)
     setError('')
     try {
-      const body = { name: trimmed, parentId, color }
+      const body = { name: trimmed, parentId, color, iconKey }
       if (isEdit) {
         await updatePoiCategory(category.id, body)
         onSuccess('Category updated.')
@@ -124,6 +153,43 @@ export default function PoiCategoryFormModal({ mode, category, categories, onClo
               </span>
             </div>
           </label>
+
+          <label className="admin-field">
+            <span>Marker icon</span>
+            <select
+              value={iconKey ?? ''}
+              onChange={(event) => setIconKey(event.target.value === '' ? null : event.target.value)}
+            >
+              <option value="">Inherit from parent</option>
+              {icons.map((icon) => (
+                <option key={icon.key} value={icon.key}>
+                  {icon.label}
+                </option>
+              ))}
+            </select>
+            {!iconsFromApi && (
+              <span className="admin-color-hint">
+                Using the built-in icon catalogue while the server catalogue is unavailable.
+              </span>
+            )}
+          </label>
+
+          <div className="admin-marker-preview" aria-label="Effective marker preview">
+            <PoiIconBadge
+              iconKey={previewIconKey}
+              color={previewColor}
+              size={32}
+              label={`${trimmed || 'Category'} marker preview`}
+            />
+            <span>
+              <strong>Effective marker</strong>
+              <small>
+                {color === null ? 'Inherited color' : color}
+                {' · '}
+                {iconKey === null ? 'Inherited icon' : icons.find((icon) => icon.key === iconKey)?.label ?? iconKey}
+              </small>
+            </span>
+          </div>
 
           {error && <p className="admin-error">{error}</p>}
         </div>

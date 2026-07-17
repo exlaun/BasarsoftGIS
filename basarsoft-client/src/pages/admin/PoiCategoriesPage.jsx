@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listPoiCategories, deletePoiCategory } from '../../api/poi'
-import { flattenCategoryTree } from '../../utils/poiCategories'
+import { categoryBadgeAppearance, flattenCategoryTree } from '../../utils/poiCategories'
+import PoiIconBadge from '../../components/PoiIconBadge'
 import PoiCategoryFormModal from './PoiCategoryFormModal'
 import AdminConfirm from './AdminConfirm'
 
@@ -92,11 +93,10 @@ export default function PoiCategoriesPage() {
                     <td>
                       <span className="admin-tree-name" style={{ paddingLeft: `${c.depth * 1.25}rem` }}>
                         {c.depth > 0 && <span className="admin-tree-branch" aria-hidden="true">└</span>}
-                        <span
-                          className={`admin-color-swatch${c.color ? '' : ' admin-color-swatch-empty'}`}
-                          style={c.color ? { backgroundColor: c.color } : undefined}
-                          title={c.color ?? 'No color of its own (inherits)'}
-                          aria-hidden="true"
+                        <PoiIconBadge
+                          {...categoryBadgeAppearance(categories, c.id)}
+                          size={20}
+                          label={`${c.name} effective marker${c.color == null || c.iconKey == null ? ' (partly inherited)' : ''}`}
                         />
                         {c.name}
                       </span>

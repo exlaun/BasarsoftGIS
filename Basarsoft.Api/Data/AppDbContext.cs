@@ -32,6 +32,12 @@ public class AppDbContext : DbContext
     public DbSet<Poi> Pois { get; set; }
     public DbSet<PoiCategory> PoiCategories { get; set; }
 
+    // Location analysis (Konum Analizi): Turkey's provinces as region presets, plus the stored runs
+    // (region + weighted criteria) that GeoServer's vw_konum view reads back by run id.
+    public DbSet<Province> Provinces { get; set; }
+    public DbSet<LocationAnalysis> LocationAnalyses { get; set; }
+    public DbSet<LocationAnalysisCriterion> LocationAnalysisCriteria { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -49,6 +55,7 @@ public class AppDbContext : DbContext
                      "user_roles", "role_permissions", "user_permissions",
                      "tbl_geo_authorization",
                      "tbl_poi_category", "tbl_poi",
+                     "tbl_province", "tbl_location_analysis", "tbl_location_analysis_criterion",
                  })
         {
             modelBuilder.HasSequence<int>($"seq_{table}");
@@ -66,6 +73,48 @@ public class AppDbContext : DbContext
         ConfigureRbac(modelBuilder);
         ConfigureGeoAuthorization(modelBuilder);
         ConfigurePoi(modelBuilder);
+        ConfigureLocationAnalysis(modelBuilder);
+    }
+
+    // Location-analysis tables. tbl_province is seeded reference data (no owner, no soft delete);
+    // the run + criterion tables carry the full audit set and the same !IsDeleted && IsActive filter
+    // as the drawing tables, so GeoServer's vw_konum and EF agree on what "live" means.
+    private static void ConfigureLocationAnalysis(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Province>(e =>
+        {
+            e.ToTable("tbl_province");
+            e.Property(x => x.Geom).HasColumnType("geometry(MultiPolygon,4326)");
+            e.HasIndex(x => x.Name).IsUnique();
+        });
+        UseSequenceId<Province>(modelBuilder, "tbl_province");
+
+        modelBuilder.Entity<LocationAnalysis>(e =>
+        {
+            e.ToTable("tbl_location_analysis");
+            e.Property(x => x.Geom).HasColumnType("geometry(MultiPolygon,4326)");
+            e.HasQueryFilter(x => !x.IsDeleted && x.IsActive);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.ModifiedUserId);
+            e.HasOne<Province>().WithMany().HasForeignKey(x => x.ProvinceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.UserId);
+        });
+        UseSequenceId<LocationAnalysis>(modelBuilder, "tbl_location_analysis");
+
+        modelBuilder.Entity<LocationAnalysisCriterion>(e =>
+        {
+            // The DB backs up the service's weight rule (1..100 per criterion; the sum-to-100 rule
+            // spans rows, so it stays service-only).
+            e.ToTable("tbl_location_analysis_criterion", t =>
+                t.HasCheckConstraint("ck_tbl_location_analysis_criterion_weight", "weight BETWEEN 1 AND 100"));
+            e.HasQueryFilter(x => !x.IsDeleted && x.IsActive);
+            e.HasOne<LocationAnalysis>().WithMany().HasForeignKey(x => x.AnalysisId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<PoiCategory>().WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.ModifiedUserId);
+            // One category per run at most — the "duplicate criterion" rule, enforced twice like weight.
+            e.HasIndex(x => new { x.AnalysisId, x.CategoryId }).IsUnique();
+        });
+        UseSequenceId<LocationAnalysisCriterion>(modelBuilder, "tbl_location_analysis_criterion");
     }
 
     // POI module tables. The category tree is a self-referencing table (parent_id -> same table);
@@ -77,6 +126,7 @@ public class AppDbContext : DbContext
         {
             e.ToTable("tbl_poi_category");
             e.HasQueryFilter(c => !c.IsDeleted);
+            e.Property(c => c.IconKey).HasMaxLength(32);
             e.HasOne<PoiCategory>().WithMany().HasForeignKey(c => c.ParentId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<User>().WithMany().HasForeignKey(c => c.UserId);
             e.HasOne<User>().WithMany().HasForeignKey(c => c.ModifiedUserId);

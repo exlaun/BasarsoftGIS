@@ -45,7 +45,7 @@ export default function AttributeModal({ onSave, onCancel }) {
             type="text"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="e.g. Warehouse A"
+            placeholder="e.g. Favorite Map Feature"
             maxLength={80}
           />
         </label>

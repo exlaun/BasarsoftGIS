@@ -67,6 +67,10 @@ public class PoiController : ControllerBase
         catch (Exception ex) { return ServerError(ex, nameof(Categories)); }
     }
 
+    // GET /api/poi/icons -> stable storage keys plus labels for the category-admin icon picker.
+    [HttpGet("icons")]
+    public ActionResult<IReadOnlyList<PoiIconResponse>> Icons() => Ok(PoiIconCatalog.All);
+
     // POST /api/poi -> add a POI at the drawn point (owner = caller). Requires add_poi.
     [HttpPost]
     public async Task<ActionResult<PoiResponse>> Create(PoiCreateRequest request)

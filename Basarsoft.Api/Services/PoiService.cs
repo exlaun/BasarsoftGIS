@@ -105,6 +105,7 @@ public class PoiService : IPoiService
             CategoryName = category?.Name ?? string.Empty,
             CategoryPath = BuildPath(poi.CategoryId, categories),
             CategoryColor = EffectiveColor(poi.CategoryId, categories),
+            CategoryIconKey = EffectiveIcon(poi.CategoryId, categories),
             OpenTime = poi.OpenTime,
             CloseTime = poi.CloseTime,
             UserId = poi.UserId,
@@ -147,5 +148,23 @@ public class PoiService : IPoiService
         }
 
         return null;
+    }
+
+    // Effective marker glyph follows the same nearest-ancestor rule as color, but it has a stable
+    // non-null fallback so API, WFS and client renderers always agree on a drawable asset.
+    private static string EffectiveIcon(
+        int categoryId, IReadOnlyDictionary<int, PoiCategory> categories)
+    {
+        var currentId = (int?)categoryId;
+        for (var depth = 0; currentId is not null && depth < 20; depth++)
+        {
+            if (!categories.TryGetValue(currentId.Value, out var category))
+                break;
+            if (category.IconKey is not null)
+                return PoiIconCatalog.NormalizeOrDefault(category.IconKey);
+            currentId = category.ParentId;
+        }
+
+        return PoiIconCatalog.DefaultIconKey;
     }
 }

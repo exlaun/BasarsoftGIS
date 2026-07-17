@@ -72,6 +72,17 @@ const PoiIcon = (
     <line x1="4" y1="22" x2="4" y2="15" />
   </svg>
 )
+// Crosshair — Konum Analizi (weighted location analysis over POIs in a chosen region).
+const KonumIcon = (
+  <svg {...iconProps}>
+    <circle cx="12" cy="12" r="8" />
+    <line x1="12" y1="1.5" x2="12" y2="5" />
+    <line x1="12" y1="19" x2="12" y2="22.5" />
+    <line x1="1.5" y1="12" x2="5" y2="12" />
+    <line x1="19" y1="12" x2="22.5" y2="12" />
+    <circle cx="12" cy="12" r="2.5" />
+  </svg>
+)
 // Stacked sheets — toggles the layer-visibility menu.
 const LayersIcon = (
   <svg {...iconProps}>
@@ -101,19 +112,23 @@ const TOOLS = [
   { key: 'Poi', label: 'POI', icon: PoiIcon },
   { key: 'analysis', label: 'Analysis', icon: AnalysisIcon },
   { key: 'heatmap', label: 'Heat Map', icon: HeatmapIcon },
+  // Named "Konum Analizi" per the assignment. No permission gate: like Analysis/Heat Map it is a
+  // read-only tool, so the permission-free User (Viewer) role sees and uses it too.
+  { key: 'konum', label: 'Konum Analizi', icon: KonumIcon },
 ]
 
 // Bottom-left hint per active tool. Kept accurate to each interaction: Pan drags (no click), a Point
 // finishes on a single click (no double-click), and only Line/Polygon need a double-click to finish.
 const TOOL_HINTS = {
   none: 'Drag to move the map.',
-  select: 'Click a shape to view, edit, or delete it.',
+  select: 'Click a shape to view its details.',
   Point: 'Click on the map to place a point.',
   LineString: 'Click to add points, then double-click to finish the line.',
   Polygon: 'Click to add corners, then double-click to finish the polygon.',
   Poi: 'Click on the map to place a POI, then fill in its details.',
   analysis: 'Draw a polygon to count the shapes it touches. Nothing is saved.',
   heatmap: 'Shows your shape density as a GeoServer heat map. Pick another tool to turn it off.',
+  konum: 'Pick a province or draw a region, weight 2-5 POI categories, then start the analysis.',
 }
 
 export default function DrawToolbar({

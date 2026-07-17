@@ -456,6 +456,28 @@
   opacity: 0.75;
 }
 
+.admin-marker-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--bar-border);
+  border-radius: 9px;
+  background: var(--admin-surface);
+}
+
+.admin-marker-preview > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.12rem;
+  font-size: 0.78rem;
+}
+
+.admin-marker-preview small {
+  opacity: 0.65;
+}
+
 /* Category tree: round swatch for the category's own color; hollow = inherits from an ancestor. */
 .admin-color-swatch {
   display: inline-block;
