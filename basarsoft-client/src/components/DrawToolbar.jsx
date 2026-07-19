@@ -112,9 +112,9 @@ const TOOLS = [
   { key: 'Poi', label: 'POI', icon: PoiIcon },
   { key: 'analysis', label: 'Analysis', icon: AnalysisIcon },
   { key: 'heatmap', label: 'Heat Map', icon: HeatmapIcon },
-  // Named "Konum Analizi" per the assignment. No permission gate: like Analysis/Heat Map it is a
+  // Weighted location analysis over POIs. No permission gate: like Analysis/Heat Map it is a
   // read-only tool, so the permission-free User (Viewer) role sees and uses it too.
-  { key: 'konum', label: 'Konum Analizi', icon: KonumIcon },
+  { key: 'konum', label: 'Location Analysis', icon: KonumIcon },
 ]
 
 // Bottom-left hint per active tool. Kept accurate to each interaction: Pan drags (no click), a Point

@@ -155,7 +155,7 @@ WHERE p.is_deleted = false AND p.is_active = true
    `if_then_else(isNull(category_color), '#e11d48', category_color)`, overlaid with a
    centered Size 16 white SVG loaded from the dynamic relative path
    `poi-icons/${category_icon_key}.svg`.
-2. **Label** (`MaxScaleDenominator 100000`): a bold halo'd `TextSymbolizer` on `name`, so
+2. **Label** (`MaxScaleDenominator 550000`): a bold halo'd `TextSymbolizer` on `name`, so
    POI names appear only when zoomed in close. `conflictResolution` drops colliding labels
    in dense clusters (the client mirrors this with `declutter: true`). Its vertical
    displacement is 18 px so it clears the larger badge.
@@ -170,8 +170,8 @@ badge.
 
 Zoom ↔ scale at EPSG:3857: GeoServer computes the scale denominator as
 `resolution / 0.00028` (OGC 0.28 mm pixel), and `res(z) = 156543.03 / 2^z`, so
-`SD(z) ≈ 559 082 264 / 2^z` — `100000` ≈ zoom 12.5. The client-side mirror is
-`POI_LABEL_MAX_RESOLUTION = 28` m/px (= 100000 × 0.00028) in `MapPage.jsx`; change the SLD
+`SD(z) ≈ 559 082 264 / 2^z` — `550000` ≈ zoom 10. The client-side mirror is
+`POI_LABEL_MAX_RESOLUTION = 154` m/px (= 550000 × 0.00028) in `MapPage.jsx`; change the SLD
 and that constant together so both display modes flip labels at the same zoom.
 
 ### Reproducible registration

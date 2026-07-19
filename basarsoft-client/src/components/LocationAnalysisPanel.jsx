@@ -75,7 +75,7 @@ export default function LocationAnalysisPanel({
   if (analysis) {
     return (
       <section className="konum-panel" aria-label="Location analysis">
-        <h2 className="konum-title">Konum Analizi</h2>
+        <h2 className="konum-title">Location Analysis</h2>
         <p className="konum-summary-region">
           Region: <strong>{analysis.provinceName ?? 'Drawn region'}</strong>
         </p>
@@ -106,7 +106,7 @@ export default function LocationAnalysisPanel({
 
   return (
     <section className="konum-panel" aria-label="Location analysis">
-      <h2 className="konum-title">Konum Analizi</h2>
+      <h2 className="konum-title">Location Analysis</h2>
 
       <div className="konum-step">
         <span className="konum-step-label">1. Target region</span>

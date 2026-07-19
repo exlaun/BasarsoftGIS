@@ -95,10 +95,10 @@ const makeFeatureStyle = (color) => {
 // shape style uses — still instantly distinguishable from personal points.
 const POI_COLOR = DEFAULT_POI_COLOR
 
-// Labels appear below this view resolution (m/px). Mirrors MaxScaleDenominator 100000 in
-// geoserver/styles/vw_poi_category.sld (100000 × 0.00028 m/px = 28): both display modes flip their
-// POI labels at the same visual zoom (~12.5). Change the SLD and this constant together.
-const POI_LABEL_MAX_RESOLUTION = 28
+// Labels appear below this view resolution (m/px). Mirrors MaxScaleDenominator 550000 in
+// geoserver/styles/vw_poi_category.sld (550000 × 0.00028 m/px = 154): both display modes flip their
+// POI labels at the same visual zoom (~10). Change the SLD and this constant together.
+const POI_LABEL_MAX_RESOLUTION = 154
 
 // One two-layer marker per color+icon pair, cached: a 26px category-colored circle underneath the
 // fixed-white canonical SVG glyph. GeoServer packages the same SVGs for visually matched WMS output.
@@ -1428,7 +1428,7 @@ export default function MapPage() {
             "coloring per the given criteria" the assignment asks to see on screen. */}
         {activeTool === 'konum' && konumAnalysis && (
           <div className="map-heat-legend" role="group" aria-label="Location analysis legend">
-            <div className="map-heat-legend-title">Konum Analizi - Weighted intensity</div>
+            <div className="map-heat-legend-title">Location Analysis - Weighted intensity</div>
             <div className="map-heat-legend-bar" aria-hidden="true" />
             <div className="map-heat-legend-scale">
               <span>0 - Low</span>

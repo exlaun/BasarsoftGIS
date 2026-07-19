@@ -3,9 +3,9 @@
      the vw_poi SQL view (the category's own values or the nearest ancestor's). A null color falls
      back to #e11d48; icon_key always falls back to pin. The packaged poi-icons SVGs use white
      strokes/fills so the 16 px glyph remains legible over the 26 px category-colored badge.
-     Labels only when zoomed in: MaxScaleDenominator 100000 = ~zoom 12.5 at EPSG:3857
-     (scale denominator = resolution / 0.00028). Client mirror: POI_LABEL_MAX_RESOLUTION = 28 m/px
-     (= 100000 x 0.00028) in MapPage.jsx — change both together. -->
+     Labels only when zoomed in: MaxScaleDenominator 550000 = ~zoom 10 at EPSG:3857
+     (scale denominator = resolution / 0.00028). Client mirror: POI_LABEL_MAX_RESOLUTION = 154 m/px
+     (= 550000 x 0.00028) in MapPage.jsx — change both together. -->
 <StyledLayerDescriptor version="1.0.0"
     xmlns="http://www.opengis.net/sld"
     xmlns:ogc="http://www.opengis.net/ogc"
@@ -56,7 +56,7 @@
         </Rule>
         <Rule>
           <Title>Name label at close zoom</Title>
-          <MaxScaleDenominator>100000</MaxScaleDenominator>
+          <MaxScaleDenominator>550000</MaxScaleDenominator>
           <TextSymbolizer>
             <Label>
               <ogc:PropertyName>name</ogc:PropertyName>
