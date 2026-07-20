@@ -51,9 +51,10 @@ export default function RolesPage() {
     try {
       await deleteRole(modal.role.id)
       closeAnd('Role deleted.')
-    } catch {
+    } catch (err) {
       setModal(null)
-      flash('error', 'Could not delete role.')
+      // The API refuses deleting a role whose loss would leave no active admin — show its reason.
+      flash('error', err.response?.data?.message ?? 'Could not delete role.')
     }
   }
 

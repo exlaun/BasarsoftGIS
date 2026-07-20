@@ -8,7 +8,7 @@ import AdminConfirm from './AdminConfirm'
 import { useAuth } from '../../context/auth-context'
 
 export default function UsersPage() {
-  const { refreshProfile } = useAuth()
+  const { refreshProfile, userId } = useAuth()
   const [users, setUsers] = useState([])
   const [roles, setRoles] = useState([])
   const [loading, setLoading] = useState(true)
@@ -52,9 +52,10 @@ export default function UsersPage() {
     try {
       await deleteUser(modal.user.id)
       closeAnd('User deleted.')
-    } catch {
+    } catch (err) {
       setModal(null)
-      flash('error', 'Could not delete user.')
+      // The API refuses some deletes with a reason (own account, last active admin) — show it.
+      flash('error', err.response?.data?.message ?? 'Could not delete user.')
     }
   }
 
@@ -129,7 +130,13 @@ export default function UsersPage() {
                         <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'geo', user: u })}>
                           Geographic Access
                         </button>
-                        <button type="button" className="admin-btn admin-btn-sm admin-btn-danger" onClick={() => setModal({ type: 'delete', user: u })}>
+                        <button
+                          type="button"
+                          className="admin-btn admin-btn-sm admin-btn-danger"
+                          disabled={u.id === userId}
+                          title={u.id === userId ? 'You cannot delete your own account.' : undefined}
+                          onClick={() => setModal({ type: 'delete', user: u })}
+                        >
                           Delete
                         </button>
                       </div>

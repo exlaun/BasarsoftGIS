@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using Basarsoft.Api.Data;
 using Basarsoft.Api.Middleware;
 using Basarsoft.Api.Security;
@@ -25,6 +26,15 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Bind the "Jwt" config section once and share it (TokenService reads Key/ExpiresMinutes from it).
 var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
     ?? throw new InvalidOperationException("Missing 'Jwt' configuration section.");
+// The signing key is never committed for non-dev use: Development gets one from
+// appsettings.Development.json, everything else must inject Jwt__Key (user-secrets/env).
+// Failing here beats issuing tokens an attacker can forge from a key found in git history.
+if (string.IsNullOrWhiteSpace(jwtSettings.Key))
+    throw new InvalidOperationException(
+        "Jwt:Key is not configured. Set it via user-secrets or the Jwt__Key environment variable.");
+if (jwtSettings.Key == "dev-only-super-secret-jwt-signing-key-change-me-32chars+")
+    throw new InvalidOperationException(
+        "Jwt:Key is the old committed development key, which is public in git history. Rotate it.");
 builder.Services.AddSingleton(jwtSettings);
 
 // Bind the "GeoServer" config section and share it with the WFS reader below.
@@ -40,8 +50,19 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IGeometryService, GeometryService>();
 
 // Reads the drawn geometry back through GeoServer's WFS (the map's one-shot load). A typed HttpClient
-// so it gets connection pooling and can be configured/tested independently.
-builder.Services.AddHttpClient<IGeoServerReadService, GeoServerReadService>();
+// so it gets connection pooling and can be configured/tested independently. When GeoServer credentials
+// are configured (locked-down GeoServer), every request carries them as Basic auth; without them the
+// client stays anonymous, which only works while GeoServer still allows anonymous read.
+builder.Services.AddHttpClient<IGeoServerReadService, GeoServerReadService>(client =>
+{
+    if (geoServerSettings.HasCredentials)
+    {
+        var basic = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes($"{geoServerSettings.Username}:{geoServerSettings.Password}"));
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", basic);
+    }
+});
 
 // Admin (RBAC) services: user/role/permission management + effective-permission resolution.
 builder.Services.AddScoped<IPermissionService, PermissionService>();
@@ -113,8 +134,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Key))
         };
     });
-// Authorization with a DB-backed "AdminAccess" policy: AdminAccessHandler checks the caller's effective
-// permissions, so only users holding a management permission can reach the admin controllers.
+// Authorization with DB-backed policies. "AdminAccess" (any management permission) still answers
+// "may this user open the admin panel at all"; the per-resource policies below are what the admin
+// controllers actually demand, so holding manage_pois alone no longer unlocks user/role management.
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(AdminAccessRequirement.PolicyName, policy =>
@@ -122,15 +144,61 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAuthenticatedUser();
         policy.AddRequirements(new AdminAccessRequirement());
     });
+
+    // One policy per management permission, 1:1 with the SeedData names.
+    foreach (var (policyName, permissionName) in new[]
+             {
+                 (PermissionRequirement.ManageUsers, SeedData.ManageUsersPermission),
+                 (PermissionRequirement.ManageRoles, SeedData.ManageRolesPermission),
+                 (PermissionRequirement.ManagePermissions, SeedData.ManagePermissionsPermission),
+                 (PermissionRequirement.ManagePois, SeedData.ManagePoisPermission),
+             })
+    {
+        options.AddPolicy(policyName, policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.AddRequirements(new PermissionRequirement(permissionName));
+        });
+    }
 });
 builder.Services.AddScoped<IAuthorizationHandler, AdminAccessHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
 
-// CORS policy so the React (Vite) dev server is allowed to call this API.
+// Brute-force / CPU-DoS guard for the anonymous auth endpoints (login/register/forgot/reset —
+// they carry [EnableRateLimiting("auth")]): every attempt costs a BCrypt verify, so cap attempts
+// per client IP. Endpoints without the attribute are untouched.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    // Keep the API's uniform {message} error body on rejection.
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsync(
+            "{\"message\":\"Too many attempts. Try again in a minute.\"}", cancellationToken);
+    };
+    options.AddPolicy("auth", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+});
+
+// CORS policy so the React client is allowed to call this API. Origins come from config
+// (Cors:AllowedOrigins) so a deployment can add its real origin without a code change; the
+// fallback keeps the local Vite dev server working out of the box.
 const string AllowReactApp = "AllowReactApp";
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+if (allowedOrigins is null || allowedOrigins.Length == 0)
+    allowedOrigins = new[] { "http://localhost:5173" };
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(AllowReactApp, policy =>
-        policy.WithOrigins("http://localhost:5173") // React dev server URL
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod());
 });
@@ -178,8 +246,10 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// Order matters: CORS, then authentication, then authorization, then endpoints.
+// Order matters: CORS, then rate limiting (rejects flooders before any BCrypt/DB work), then
+// authentication, then authorization, then endpoints.
 app.UseCors(AllowReactApp);
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 

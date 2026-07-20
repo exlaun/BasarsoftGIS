@@ -12,9 +12,10 @@ export function getStoredAuth() {
   }
 }
 
-// Backend runs on the http profile (no HTTPS-redirect friction in dev).
+// Backend base URL: overridable per environment (.env / .env.local -> VITE_API_BASE_URL);
+// defaults to the dev http profile (no HTTPS-redirect friction in dev).
 const client = axios.create({
-  baseURL: 'http://localhost:5032',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5032',
 })
 
 // Attach the bearer token to every request when we have one.

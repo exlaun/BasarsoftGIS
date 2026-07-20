@@ -173,7 +173,7 @@ public class GeometryAuthorizationTests
             AdminUserUpdateRequest request) =>
             throw new NotSupportedException();
 
-        public Task<bool> DeleteAsync(int id) =>
+        public Task<AdminWriteStatus> DeleteAsync(int id) =>
             throw new NotSupportedException();
 
         public Task<bool> SetRolesAsync(int userId, IReadOnlyList<int> roleIds) =>
@@ -196,7 +196,7 @@ public class GeometryAuthorizationTests
 
     private sealed class UnusedGeoServerReadService : IGeoServerReadService
     {
-        public Task<AllGeometryResponse> GetAllForUserAsync(int userId) =>
+        public Task<AllGeometryResponse> GetAllForUserAsync(int userId, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
         public Task<GeoServerImage> GetMapAsync(
@@ -204,7 +204,8 @@ public class GeometryAuthorizationTests
             string bbox,
             int width,
             int height,
-            string crs) =>
+            string crs,
+            CancellationToken ct = default) =>
             throw new NotSupportedException();
 
         public Task<GeoServerImage> GetHeatmapAsync(
@@ -212,10 +213,11 @@ public class GeometryAuthorizationTests
             string bbox,
             int width,
             int height,
-            string crs) =>
+            string crs,
+            CancellationToken ct = default) =>
             throw new NotSupportedException();
 
-        public Task<IReadOnlyList<PoiResponse>> GetPoisAsync() =>
+        public Task<IReadOnlyList<PoiResponse>> GetPoisAsync(CancellationToken ct = default) =>
             throw new NotSupportedException();
 
         public Task<GeoServerImage> GetLocationHeatmapAsync(
@@ -223,7 +225,8 @@ public class GeometryAuthorizationTests
             string bbox,
             int width,
             int height,
-            string crs) =>
+            string crs,
+            CancellationToken ct = default) =>
             throw new NotSupportedException();
     }
 }

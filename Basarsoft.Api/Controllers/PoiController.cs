@@ -52,9 +52,10 @@ public class PoiController : ControllerBase
     // GET /api/poi -> every POI in the system (no per-user filter — the catalogue is shared).
     // Served from GeoServer's vw_poi view; GeoServer down means a clean 500, same as /api/geometry.
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<PoiResponse>>> List()
+    public async Task<ActionResult<IReadOnlyList<PoiResponse>>> List(CancellationToken ct)
     {
-        try { return Ok(await _geoServerReadService.GetPoisAsync()); }
+        try { return Ok(await _geoServerReadService.GetPoisAsync(ct)); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return new EmptyResult(); }
         catch (Exception ex) { return ServerError(ex, nameof(List)); }
     }
 
@@ -102,7 +103,8 @@ public class PoiController : ControllerBase
         }
     }
 
-    // DELETE /api/poi/{id} -> soft-delete. Creators may remove their own POIs; admins may remove any.
+    // DELETE /api/poi/{id} -> soft-delete. Creators may remove their own POIs; holders of
+    // manage_pois (not just any admin permission) may remove anyone's.
     [HttpDelete("{id:int}")]
     public async Task<ActionResult> Delete(int id)
     {
@@ -111,8 +113,9 @@ public class PoiController : ControllerBase
             if (!TryGetUserId(out var userId))
                 return Unauthorized();
 
-            var isAdmin = await _userAdminService.IsAdminAsync(userId);
-            if (!await _pois.DeleteAsync(id, userId, isAdmin))
+            var canManagePois = await _userAdminService.HasPermissionAsync(
+                userId, Data.SeedData.ManagePoisPermission);
+            if (!await _pois.DeleteAsync(id, userId, canManagePois))
                 return NotFound(new { message = "POI not found." });
 
             return NoContent();

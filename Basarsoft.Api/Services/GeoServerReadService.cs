@@ -47,10 +47,10 @@ public class GeoServerReadService : IGeoServerReadService
         _settings = settings;
     }
 
-    public async Task<AllGeometryResponse> GetAllForUserAsync(int userId)
+    public async Task<AllGeometryResponse> GetAllForUserAsync(int userId, CancellationToken ct = default)
     {
         // HttpClient is thread-safe, so the three layer fetches run concurrently (unlike EF's DbContext).
-        var results = await Task.WhenAll(Layers.Select(l => FetchLayerAsync(l.Layer, userId)));
+        var results = await Task.WhenAll(Layers.Select(l => FetchLayerAsync(l.Layer, userId, ct)));
 
         return new AllGeometryResponse
         {
@@ -60,31 +60,34 @@ public class GeoServerReadService : IGeoServerReadService
         };
     }
 
-    public Task<GeoServerImage> GetMapAsync(int userId, string bbox, int width, int height, string crs)
+    public Task<GeoServerImage> GetMapAsync(
+        int userId, string bbox, int width, int height, string crs, CancellationToken ct = default)
     {
         // POIs go last so their markers/labels draw on top of the shapes. The shared viewparams group
         // is harmless to vw_poi: GeoServer ignores parameters a virtual table doesn't declare.
         var layers = string.Join(',', Layers
             .Select(l => $"{_settings.Workspace}:{l.Layer}")
             .Append($"{_settings.Workspace}:{PoiLayer}"));
-        return FetchMapAsync(BuildWmsUrl(layers, bbox, width, height, crs, $"uid:{userId}"));
+        return FetchMapAsync(BuildWmsUrl(layers, bbox, width, height, crs, $"uid:{userId}"), ct);
     }
 
-    public async Task<IReadOnlyList<PoiResponse>> GetPoisAsync()
+    public async Task<IReadOnlyList<PoiResponse>> GetPoisAsync(CancellationToken ct = default)
     {
-        var json = await _httpClient.GetStringAsync(BuildPoiWfsUrl());
+        var json = await _httpClient.GetStringAsync(BuildPoiWfsUrl(), ct);
         return ParsePoiFeatureCollection(json);
     }
 
-    public Task<GeoServerImage> GetHeatmapAsync(int userId, string bbox, int width, int height, string crs) =>
-        FetchMapAsync(BuildWmsUrl($"{_settings.Workspace}:{HeatLayer}", bbox, width, height, crs, $"uid:{userId}"));
+    public Task<GeoServerImage> GetHeatmapAsync(
+        int userId, string bbox, int width, int height, string crs, CancellationToken ct = default) =>
+        FetchMapAsync(BuildWmsUrl($"{_settings.Workspace}:{HeatLayer}", bbox, width, height, crs, $"uid:{userId}"), ct);
 
-    public Task<GeoServerImage> GetLocationHeatmapAsync(int analysisId, string bbox, int width, int height, string crs) =>
-        FetchMapAsync(BuildWmsUrl($"{_settings.Workspace}:{KonumLayer}", bbox, width, height, crs, $"aid:{analysisId}"));
+    public Task<GeoServerImage> GetLocationHeatmapAsync(
+        int analysisId, string bbox, int width, int height, string crs, CancellationToken ct = default) =>
+        FetchMapAsync(BuildWmsUrl($"{_settings.Workspace}:{KonumLayer}", bbox, width, height, crs, $"aid:{analysisId}"), ct);
 
-    private async Task<GeoServerImage> FetchMapAsync(string url)
+    private async Task<GeoServerImage> FetchMapAsync(string url, CancellationToken ct)
     {
-        using var response = await _httpClient.GetAsync(url);
+        using var response = await _httpClient.GetAsync(url, ct);
         response.EnsureSuccessStatusCode();
 
         var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/png";
@@ -93,7 +96,7 @@ public class GeoServerReadService : IGeoServerReadService
         if (!contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"GeoServer WMS returned '{contentType}', not an image.");
 
-        var bytes = await response.Content.ReadAsByteArrayAsync();
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
         return new GeoServerImage(bytes, contentType);
     }
 
@@ -121,9 +124,10 @@ public class GeoServerReadService : IGeoServerReadService
         return QueryHelpers.AddQueryString(endpoint, query);
     }
 
-    private async Task<IReadOnlyList<GeometryResponse>> FetchLayerAsync(string layer, int userId)
+    private async Task<IReadOnlyList<GeometryResponse>> FetchLayerAsync(
+        string layer, int userId, CancellationToken ct)
     {
-        var json = await _httpClient.GetStringAsync(BuildWfsUrl(layer, userId));
+        var json = await _httpClient.GetStringAsync(BuildWfsUrl(layer, userId), ct);
         return ParseFeatureCollection(json);
     }
 
@@ -158,6 +162,9 @@ public class GeoServerReadService : IGeoServerReadService
             ["outputFormat"] = "application/json",
             ["srsName"] = "EPSG:4326",
             // No viewparams: vw_poi has no %uid% placeholder — the POI catalogue is shared.
+            // Guardrail, not paging: the catalogue is unbounded and this endpoint returns all of it;
+            // cap the payload well above today's ~139 rows so growth can't OOM the parse.
+            ["count"] = "5000",
         };
         return QueryHelpers.AddQueryString(endpoint, query);
     }

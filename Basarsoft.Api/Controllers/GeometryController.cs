@@ -51,14 +51,19 @@ public class GeometryController : ControllerBase
     // directly. userId comes from the JWT and scopes GeoServer's per-user SQL view, so isolation is
     // still enforced server-side. A GeoServer outage surfaces as a 500 (no silent EF fallback).
     [HttpGet]
-    public async Task<ActionResult<AllGeometryResponse>> GetAll()
+    public async Task<ActionResult<AllGeometryResponse>> GetAll(CancellationToken ct)
     {
         try
         {
             if (!TryGetUserId(out var userId))
                 return Unauthorized();
 
-            return Ok(await _geoServerReadService.GetAllForUserAsync(userId));
+            return Ok(await _geoServerReadService.GetAllForUserAsync(userId, ct));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The client abandoned the request; there is nobody to answer and nothing to log.
+            return new EmptyResult();
         }
         catch (Exception ex)
         {
@@ -77,7 +82,8 @@ public class GeometryController : ControllerBase
         [FromQuery] int width,
         [FromQuery] int height,
         [FromQuery] string? crs,
-        [FromQuery] string? srs)
+        [FromQuery] string? srs,
+        CancellationToken ct)
     {
         try
         {
@@ -89,8 +95,13 @@ public class GeometryController : ControllerBase
             if (string.IsNullOrWhiteSpace(bbox) || string.IsNullOrWhiteSpace(projection) || width <= 0 || height <= 0)
                 return BadRequest(new { message = "bbox, crs/srs, width and height are required." });
 
-            var image = await _geoServerReadService.GetMapAsync(userId, bbox, width, height, projection);
+            var image = await _geoServerReadService.GetMapAsync(userId, bbox, width, height, projection, ct);
             return File(image.Bytes, image.ContentType);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Panning abandons viewport renders constantly; a cancelled frame is not an error.
+            return new EmptyResult();
         }
         catch (Exception ex)
         {
@@ -107,7 +118,8 @@ public class GeometryController : ControllerBase
         [FromQuery] int width,
         [FromQuery] int height,
         [FromQuery] string? crs,
-        [FromQuery] string? srs)
+        [FromQuery] string? srs,
+        CancellationToken ct)
     {
         try
         {
@@ -119,8 +131,12 @@ public class GeometryController : ControllerBase
             if (string.IsNullOrWhiteSpace(bbox) || string.IsNullOrWhiteSpace(projection) || width <= 0 || height <= 0)
                 return BadRequest(new { message = "bbox, crs/srs, width and height are required." });
 
-            var image = await _geoServerReadService.GetHeatmapAsync(userId, bbox, width, height, projection);
+            var image = await _geoServerReadService.GetHeatmapAsync(userId, bbox, width, height, projection, ct);
             return File(image.Bytes, image.ContentType);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return new EmptyResult();
         }
         catch (Exception ex)
         {

@@ -32,7 +32,16 @@ public class AuthService : IAuthService
         };
 
         _db.Users.Add(user);
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (DbErrors.IsUniqueViolation(ex))
+        {
+            // Lost a race with a concurrent registration of the same name; the unique index caught
+            // what the pre-check above could not. Same answer as "username taken".
+            return null;
+        }
 
         // Auto-login: hand back a token right after registering.
         return _tokenService.CreateToken(user);

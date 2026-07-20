@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Portable GeoServer REST definition for the caller's point shapes (per-user isolation via the %uid% parameter).
+     The datastore is selected by the REST endpoint, so this file intentionally contains no
+     installation-specific GeoServer ids or store references. -->
+<featureType>
+  <name>vw_point</name>
+  <nativeName>vw_point</nativeName>
+  <title>vw_point</title>
+  <srs>EPSG:4326</srs>
+  <projectionPolicy>FORCE_DECLARED</projectionPolicy>
+  <enabled>true</enabled>
+  <advertised>true</advertised>
+  <metadata>
+    <entry key="JDBC_VIRTUAL_TABLE">
+      <virtualTable>
+        <name>vw_point</name>
+        <sql><![CDATA[SELECT id, name, color, geom, created_at, modified_date, modified_user_id FROM tbl_point WHERE is_deleted = false AND is_active = true AND user_id = %uid%]]></sql>
+        <escapeSql>false</escapeSql>
+        <geometry>
+          <name>geom</name>
+          <type>Point</type>
+          <srid>4326</srid>
+        </geometry>
+        <parameter>
+          <name>uid</name>
+          <defaultValue>-1</defaultValue>
+          <regexpValidator>^-?[0-9]+$</regexpValidator>
+        </parameter>
+      </virtualTable>
+    </entry>
+  </metadata>
+</featureType>

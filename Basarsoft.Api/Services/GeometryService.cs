@@ -38,7 +38,9 @@ public class GeometryService : IGeometryService
             return GeometryUpdateResult.InvalidGeometry;
         }
 
-        if (geom is null || geom.IsEmpty)
+        // !IsValid rejects e.g. self-intersecting ("bow-tie") polygons: PostGIS would store them but
+        // later ST_Within/ST_Intersects over them miscounts or throws. Same guard as GeoAuthorization.
+        if (geom is null || geom.IsEmpty || !geom.IsValid)
             return GeometryUpdateResult.InvalidGeometry;
 
         // The DB columns are typed (geometry(Point,4326) etc.), so the WKT must match the endpoint.
@@ -188,7 +190,7 @@ public class GeometryService : IGeometryService
                 return GeometryUpdateResult.InvalidGeometry;
             }
 
-            if (geom is null || geom.IsEmpty || geom.OgcGeometryType != expectedType)
+            if (geom is null || geom.IsEmpty || !geom.IsValid || geom.OgcGeometryType != expectedType)
                 return GeometryUpdateResult.InvalidGeometry;
 
             geom.SRID = Srid;
@@ -227,7 +229,7 @@ public class GeometryService : IGeometryService
             return null;
         }
 
-        if (area is null || area.IsEmpty || area.OgcGeometryType != OgcGeometryType.Polygon)
+        if (area is null || area.IsEmpty || !area.IsValid || area.OgcGeometryType != OgcGeometryType.Polygon)
             return null;
 
         area.SRID = Srid;

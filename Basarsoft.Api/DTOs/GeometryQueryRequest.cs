@@ -15,7 +15,7 @@ public class GeometryQueryRequest
     // CSV of geometry types to include, e.g. "point,polygon". Blank = all three.
     public string? Types { get; set; }
 
-    // Whitelist: name | createdAt.
+    // Whitelist: name | type | createdAt.
     public string SortBy { get; set; } = "createdAt";
 
     // Whitelist: asc | desc.

@@ -63,6 +63,10 @@ public class AppDbContext : DbContext
 
         // Soft-deleted users disappear from every query automatically (no need to add WHERE clauses).
         modelBuilder.Entity<User>().HasQueryFilter(u => !u.IsDeleted);
+        // DB backstop for the service-level "username taken" pre-checks, which can race under
+        // concurrent registration. Partial (like the GeoAuthorization indexes below) so a
+        // soft-deleted user's name can be taken again.
+        modelBuilder.Entity<User>().HasIndex(u => u.Username).IsUnique().HasFilter("NOT is_deleted");
         UseSequenceId<User>(modelBuilder, "users");
 
         // The three drawing tables share the same shape; only the table name + geometry type differ.

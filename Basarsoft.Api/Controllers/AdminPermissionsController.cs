@@ -7,8 +7,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace Basarsoft.Api.Controllers;
 
 // The shared permission catalogue. Mostly seeded; the admin can add or remove entries.
+// Gated by manage_permissions specifically.
 [ApiController]
-[Authorize(Policy = AdminAccessRequirement.PolicyName)]
+[Authorize(Policy = PermissionRequirement.ManagePermissions)]
 [Route("api/admin/permissions")]
 public class AdminPermissionsController : ControllerBase
 {

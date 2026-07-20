@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Basarsoft.Api.DTOs;
 using Basarsoft.Api.Security;
 using Basarsoft.Api.Services;
@@ -6,10 +8,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Basarsoft.Api.Controllers;
 
-// Admin user management. The AdminAccess policy gates every action (caller must hold a management
-// permission). Each action wraps its work in try/catch → ServerError, mirroring the other controllers.
+// Admin user management. The ManageUsers policy gates every action (caller must hold manage_users
+// specifically). Each action wraps its work in try/catch → ServerError, mirroring the other controllers.
 [ApiController]
-[Authorize(Policy = AdminAccessRequirement.PolicyName)]
+[Authorize(Policy = PermissionRequirement.ManageUsers)]
 [Route("api/admin/users")]
 public class AdminUsersController : ControllerBase
 {
@@ -33,6 +35,11 @@ public class AdminUsersController : ControllerBase
         return StatusCode(StatusCodes.Status500InternalServerError,
             new { message = "An unexpected error occurred." });
     }
+
+    // The caller's own id from the JWT "sub" claim (same idiom as GeometryController) — used to
+    // refuse self-deletion.
+    private bool TryGetUserId(out int userId) =>
+        int.TryParse(User.FindFirstValue(JwtRegisteredClaimNames.Sub), out userId);
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<AdminUserResponse>>> List()
@@ -75,6 +82,8 @@ public class AdminUsersController : ControllerBase
             {
                 AdminWriteStatus.NotFound => NotFound(new { message = "User not found." }),
                 AdminWriteStatus.Conflict => Conflict(new { message = "Username is already taken." }),
+                AdminWriteStatus.LastAdmin => Conflict(new
+                    { message = "This is the last active admin account; it cannot be disabled." }),
                 _ => Ok(user),
             };
         }
@@ -86,9 +95,18 @@ public class AdminUsersController : ControllerBase
     {
         try
         {
-            return await _users.DeleteAsync(id)
-                ? NoContent()
-                : NotFound(new { message = "User not found." });
+            // Deleting the account you are logged in with would strand you mid-session (and, if
+            // you're the only admin, lock the panel for good) — refuse it outright.
+            if (TryGetUserId(out var callerId) && callerId == id)
+                return Conflict(new { message = "You cannot delete your own account." });
+
+            return await _users.DeleteAsync(id) switch
+            {
+                AdminWriteStatus.NotFound => NotFound(new { message = "User not found." }),
+                AdminWriteStatus.LastAdmin => Conflict(new
+                    { message = "This is the last active admin account; it cannot be deleted." }),
+                _ => NoContent(),
+            };
         }
         catch (Exception ex) { return ServerError(ex, nameof(Delete)); }
     }

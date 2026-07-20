@@ -4,6 +4,7 @@ using Basarsoft.Api.DTOs;
 using Basarsoft.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Basarsoft.Api.Controllers;
 
@@ -37,8 +38,10 @@ public class AuthController : ControllerBase
             new { message = "An unexpected error occurred." });
     }
 
-    // Creates the first/new user and logs them in.
+    // Creates the first/new user and logs them in. The "auth" limiter caps attempts per IP on all
+    // four anonymous actions ("/me" stays unlimited — the client re-reads it after every admin edit).
     [HttpPost("register")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request)
     {
         try
@@ -57,6 +60,7 @@ public class AuthController : ControllerBase
 
     // Validates credentials and returns a JWT.
     [HttpPost("login")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
     {
         try
@@ -77,6 +81,7 @@ public class AuthController : ControllerBase
     // the "set a new password" screen. Returns 404 (not 401) on miss so the client's 401 logout
     // interceptor doesn't kick in.
     [HttpPost("forgot-password")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult> ForgotPassword(ForgotPasswordRequest request)
     {
         try
@@ -94,6 +99,7 @@ public class AuthController : ControllerBase
 
     // Step 2: set the new password for a known username.
     [HttpPost("reset-password")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult> ResetPassword(ResetPasswordRequest request)
     {
         try

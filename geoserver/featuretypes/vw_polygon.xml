@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Portable GeoServer REST definition for the caller's polygon shapes (per-user isolation via the %uid% parameter).
+     The datastore is selected by the REST endpoint, so this file intentionally contains no
+     installation-specific GeoServer ids or store references. -->
+<featureType>
+  <name>vw_polygon</name>
+  <nativeName>vw_polygon</nativeName>
+  <title>vw_polygon</title>
+  <srs>EPSG:4326</srs>
+  <projectionPolicy>FORCE_DECLARED</projectionPolicy>
+  <enabled>true</enabled>
+  <advertised>true</advertised>
+  <metadata>
+    <entry key="JDBC_VIRTUAL_TABLE">
+      <virtualTable>
+        <name>vw_polygon</name>
+        <sql><![CDATA[SELECT id, name, color, geom, created_at, modified_date, modified_user_id FROM tbl_polygon WHERE is_deleted = false AND is_active = true AND user_id = %uid%]]></sql>
+        <escapeSql>false</escapeSql>
+        <geometry>
+          <name>geom</name>
+          <type>Polygon</type>
+          <srid>4326</srid>
+        </geometry>
+        <parameter>
+          <name>uid</name>
+          <defaultValue>-1</defaultValue>
+          <regexpValidator>^-?[0-9]+$</regexpValidator>
+        </parameter>
+      </virtualTable>
+    </entry>
+  </metadata>
+</featureType>

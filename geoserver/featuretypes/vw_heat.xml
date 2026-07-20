@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Portable GeoServer REST definition for the caller's shapes collapsed to points/centroids for the vec:Heatmap style (per-user isolation via the %uid% parameter).
+     The datastore is selected by the REST endpoint, so this file intentionally contains no
+     installation-specific GeoServer ids or store references. -->
+<featureType>
+  <name>vw_heat</name>
+  <nativeName>vw_heat</nativeName>
+  <title>Per-user heat map source points</title>
+  <srs>EPSG:4326</srs>
+  <projectionPolicy>FORCE_DECLARED</projectionPolicy>
+  <enabled>true</enabled>
+  <advertised>true</advertised>
+  <metadata>
+    <entry key="JDBC_VIRTUAL_TABLE">
+      <virtualTable>
+        <name>vw_heat</name>
+        <sql><![CDATA[
+SELECT 'point-' || p.id AS fid, p.geom::geometry(Point,4326) AS geom
+FROM tbl_point p
+WHERE p.is_deleted = false AND p.is_active = true AND p.user_id = %uid%
+UNION ALL
+SELECT 'line-' || l.id AS fid, ST_Centroid(l.geom)::geometry(Point,4326) AS geom
+FROM tbl_line l
+WHERE l.is_deleted = false AND l.is_active = true AND l.user_id = %uid%
+UNION ALL
+SELECT 'polygon-' || g.id AS fid, ST_PointOnSurface(g.geom)::geometry(Point,4326) AS geom
+FROM tbl_polygon g
+WHERE g.is_deleted = false AND g.is_active = true AND g.user_id = %uid%]]></sql>
+        <escapeSql>false</escapeSql>
+        <keyColumn>fid</keyColumn>
+        <geometry>
+          <name>geom</name>
+          <type>Point</type>
+          <srid>4326</srid>
+        </geometry>
+        <parameter>
+          <name>uid</name>
+          <defaultValue>-1</defaultValue>
+          <regexpValidator>^-?[0-9]+$</regexpValidator>
+        </parameter>
+      </virtualTable>
+    </entry>
+  </metadata>
+</featureType>

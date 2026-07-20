@@ -73,7 +73,7 @@ public class LocationAnalysisService : ILocationAnalysisService
                 return LocationAnalysisWriteResult.InvalidGeometry;
             }
 
-            if (parsed is null || parsed.IsEmpty ||
+            if (parsed is null || parsed.IsEmpty || !parsed.IsValid ||
                 parsed.OgcGeometryType is not (OgcGeometryType.Polygon or OgcGeometryType.MultiPolygon))
             {
                 return LocationAnalysisWriteResult.InvalidGeometry;

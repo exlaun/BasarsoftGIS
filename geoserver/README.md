@@ -4,7 +4,54 @@ The map's WMS display mode is rendered by GeoServer (workspace `basarsoft`, Post
 `pg_basarsoft`, SQL-view layers `vw_point` / `vw_line` / `vw_polygon` / `vw_heat` with a
 `%uid%` view parameter, plus the parameterless `vw_poi` for the shared POI catalogue).
 That configuration lives in the GeoServer data directory (`~/geoserver_data`), not in
-this repo.
+this repo — except the virtual-table definitions, which are versioned in `featuretypes/`
+(see below) because they are the per-user isolation boundary.
+
+## Locking down GeoServer (required outside local dev)
+
+The API enforces per-user isolation by filling the `%uid%` view parameter from the caller's JWT.
+That only holds if **nobody but the API can talk to GeoServer**: anyone who can reach port 8080
+can send `viewparams=uid:<any id>` and read any user's shapes. Local dev on a laptop can accept
+that; anything shared cannot. To close it:
+
+1. **Create a read-only account for the API** — web UI: Security → Users, Groups, Roles →
+   add role `ROLE_API`, add user `api_reader` (strong password), assign it `ROLE_API`.
+2. **Deny anonymous read on the workspace** — Security → Data → Add rule:
+   workspace `basarsoft`, layer `*`, access mode *Read*, grant to `ROLE_API` only.
+   (Rule `basarsoft.*.r = ROLE_API` in `security/layers.properties` terms.)
+3. **Give the API the credentials** (never committed):
+
+   ```bash
+   cd Basarsoft.Api
+   dotnet user-secrets set "GeoServer:Username" "api_reader"
+   dotnet user-secrets set "GeoServer:Password" "<password>"
+   ```
+
+   With credentials configured the API sends Basic auth on every WFS/WMS request; with none it
+   stays anonymous (the local-dev default).
+4. **Defense in depth**: bind GeoServer to `127.0.0.1` (or firewall 8080) so only the API host
+   reaches it at all, and keep the layers unadvertised if the capabilities document shouldn't
+   list them.
+
+Verify the lockdown: an anonymous
+`curl "http://localhost:8080/geoserver/basarsoft/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=basarsoft:vw_point&viewparams=uid:1&outputFormat=application/json"`
+must return an exception/401 — while the app's map (through the API) still renders.
+
+## featuretypes/
+
+The five SQL-view definitions the security model depends on, exported verbatim from the GeoServer
+REST API. If GeoServer is ever rebuilt, re-apply each with:
+
+```bash
+curl -u <admin>:<password> -X PUT -H "Content-Type: application/xml" \
+  --data-binary @geoserver/featuretypes/vw_point.xml \
+  "http://localhost:8080/geoserver/rest/workspaces/basarsoft/datastores/pg_basarsoft/featuretypes/vw_point"
+```
+
+(or POST to `.../featuretypes` without the trailing layer name to create it fresh, then publish the
+layer and attach its default style per the sections below). After any edit in the GeoServer admin
+UI, re-export with `curl -u <admin>:<password> ".../featuretypes/vw_point.xml"` and commit, so the
+`%uid%`-parameterized SQL and its `^[\d]+$` regex validator stay reviewable in git history.
 
 ## styles/
 

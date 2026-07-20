@@ -104,7 +104,8 @@ public class LocationAnalysisController : ControllerBase
         [FromQuery] int width,
         [FromQuery] int height,
         [FromQuery] string? crs,
-        [FromQuery] string? srs)
+        [FromQuery] string? srs,
+        CancellationToken ct)
     {
         try
         {
@@ -114,13 +115,19 @@ public class LocationAnalysisController : ControllerBase
             if (!await _analyses.IsOwnedAsync(id, userId))
                 return NotFound(new { message = "Analysis not found." });
 
-            // Accept CRS (WMS 1.3.0 vocabulary) or SRS (1.1.1) like the geometry WMS proxies.
-            var projection = crs ?? srs;
+            // Accept CRS (WMS 1.3.0 vocabulary) or SRS (1.1.1) like the geometry WMS proxies
+            // (same idiom: an empty crs= must fall through to srs, not win as "").
+            var projection = string.IsNullOrWhiteSpace(crs) ? srs : crs;
             if (string.IsNullOrWhiteSpace(bbox) || string.IsNullOrWhiteSpace(projection) || width <= 0 || height <= 0)
                 return BadRequest(new { message = "bbox, crs/srs, width and height are required." });
 
-            var image = await _geoServerReadService.GetLocationHeatmapAsync(id, bbox, width, height, projection);
+            var image = await _geoServerReadService.GetLocationHeatmapAsync(id, bbox, width, height, projection, ct);
             return File(image.Bytes, image.ContentType);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Panning abandons viewport renders constantly; a cancelled frame is not an error.
+            return new EmptyResult();
         }
         catch (Exception ex)
         {

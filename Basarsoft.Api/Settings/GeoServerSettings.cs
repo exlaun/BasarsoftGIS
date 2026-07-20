@@ -10,4 +10,14 @@ public class GeoServerSettings
 
     // The workspace the point/line/polygon layers are published under (e.g. "basarsoft").
     public string Workspace { get; set; } = string.Empty;
+
+    // Optional Basic-Auth account the API uses toward GeoServer. Empty = anonymous (local-dev
+    // default). Once GeoServer's workspace denies anonymous read (see geoserver/README.md), these
+    // MUST be set (user-secrets / GeoServer__Username / GeoServer__Password) — the per-user data
+    // isolation of the vw_* views is only real when GeoServer answers nobody but this API.
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+
+    public bool HasCredentials =>
+        !string.IsNullOrWhiteSpace(Username) && !string.IsNullOrWhiteSpace(Password);
 }

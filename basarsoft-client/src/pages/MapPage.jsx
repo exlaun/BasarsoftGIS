@@ -190,7 +190,9 @@ const loadAuthorizedWmsImage = (image, src) => {
     .then((blob) => {
       const objectUrl = URL.createObjectURL(blob)
       const img = image.getImage()
+      // Revoke on error too — a failed decode would otherwise leak the blob URL for the page's life.
       img.addEventListener('load', () => URL.revokeObjectURL(objectUrl), { once: true })
+      img.addEventListener('error', () => URL.revokeObjectURL(objectUrl), { once: true })
       img.src = objectUrl
     })
     .catch(() => {
@@ -308,6 +310,10 @@ export default function MapPage() {
     window.clearTimeout(statusTimerRef.current)
     statusTimerRef.current = window.setTimeout(() => setStatus(null), duration)
   }, [])
+
+  // Clear any pending toast timer on unmount so it can't fire setStatus into an unmounted page
+  // (same idiom as the admin pages' toast cleanup).
+  useEffect(() => () => window.clearTimeout(statusTimerRef.current), [])
 
   // A permission can be revoked while the details or move UI is already open. Immediately return to
   // read-only details and restore any unsaved movement; the API independently enforces the same rule.

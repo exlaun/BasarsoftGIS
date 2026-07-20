@@ -16,8 +16,9 @@ public interface IRoleService
     // Updates a role's name/description. NotFound if missing, Conflict on a duplicate name.
     Task<(AdminWriteStatus Status, RoleResponse? Role)> UpdateAsync(int id, RoleUpdateRequest request);
 
-    // Soft-deletes a role and removes its permission + user-assignment links. False if missing.
-    Task<bool> DeleteAsync(int id);
+    // Soft-deletes a role and removes its permission + user-assignment links. NotFound if missing;
+    // LastAdmin if losing this role's grants would leave no active admin-permission holder.
+    Task<AdminWriteStatus> DeleteAsync(int id);
 
     // Replaces the role's permission set with the given ids (unknown ids are ignored). False if missing.
     Task<bool> SetPermissionsAsync(int roleId, IReadOnlyList<int> permissionIds);

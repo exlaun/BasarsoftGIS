@@ -194,6 +194,29 @@ npm run dev                       # client: http://localhost:5173
 GeoServer is expected at `http://localhost:8080/geoserver`, with workspace `basarsoft` and PostGIS
 store `pg_basarsoft`. See [geoserver/README.md](geoserver/README.md).
 
+## Security notes
+
+- **JWT signing key.** The key is not in `appsettings.json`. Development reads a dev-only key from
+  `appsettings.Development.json`; any other environment must provide one (the API refuses to start
+  otherwise):
+
+  ```bash
+  cd Basarsoft.Api
+  dotnet user-secrets set "Jwt:Key" "<your-32+-char-secret>"   # or export Jwt__Key=...
+  ```
+
+- **GeoServer credentials.** When GeoServer is locked down (see
+  [geoserver/README.md](geoserver/README.md)), give the API its read account the same way:
+  `dotnet user-secrets set "GeoServer:Username" ...` / `"GeoServer:Password" ...`. With no
+  credentials configured the API talks to GeoServer anonymously (local dev default).
+- **Tokens in localStorage.** The client keeps its bearer token in `localStorage` — accepted for
+  this project's scope (no XSS sinks; 10-minute expiry bounds the damage). A production deployment
+  should move sessions to httpOnly cookies.
+- **Mirrored constants.** The POI icon catalogue, category colors, and label zoom thresholds are
+  intentionally duplicated across the API (`PoiIconCatalog.cs`), the client
+  (`src/utils/poiCategories.js`), and the SLDs; comments cross-reference the copies and tests pin
+  them so drift fails the build.
+
 ## Safe verification
 
 These checks do not seed the database or provision GeoServer:

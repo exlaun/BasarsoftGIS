@@ -56,7 +56,16 @@ public class UserAdminService : IUserAdminService
             IsActive = true,
         };
         _db.Users.Add(user);
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (DbErrors.IsUniqueViolation(ex))
+        {
+            // Concurrent create with the same username slipped past the pre-check; the unique
+            // index is the backstop.
+            return (AdminWriteStatus.Conflict, null);
+        }
 
         if (request.RoleIds.Count > 0)
             await SetRolesAsync(user.Id, request.RoleIds);
@@ -74,26 +83,46 @@ public class UserAdminService : IUserAdminService
         if (await _db.Users.AnyAsync(u => u.Id != id && u.Username == username))
             return (AdminWriteStatus.Conflict, null);
 
+        // Deactivating the last active admin is the same lockout as deleting them (an admin CAN
+        // deactivate their own account from the edit dialog) — refuse it.
+        if (user.IsActive && !request.IsActive &&
+            await HasAnyPermissionAsync(id, SeedData.AdminPermissions) && !await OtherAdminExistsAsync(id))
+        {
+            return (AdminWriteStatus.LastAdmin, null);
+        }
+
         user.Username = username;
         user.IsActive = request.IsActive;
         if (!string.IsNullOrWhiteSpace(request.NewPassword))
             user.PasswordHash = BC.HashPassword(request.NewPassword);
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (DbErrors.IsUniqueViolation(ex))
+        {
+            return (AdminWriteStatus.Conflict, null);
+        }
 
         return (AdminWriteStatus.Ok, await GetAsync(id));
     }
 
-    public async Task<bool> DeleteAsync(int id)
+    public async Task<AdminWriteStatus> DeleteAsync(int id)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id);
         if (user is null)
-            return false;
+            return AdminWriteStatus.NotFound;
+
+        // Never delete the last active holder of a management permission: with them gone nobody
+        // could open the admin panel again short of direct DB surgery.
+        if (await HasAnyPermissionAsync(id, SeedData.AdminPermissions) && !await OtherAdminExistsAsync(id))
+            return AdminWriteStatus.LastAdmin;
 
         _db.UserRoles.RemoveRange(_db.UserRoles.Where(ur => ur.UserId == id));
         _db.UserPermissions.RemoveRange(_db.UserPermissions.Where(up => up.UserId == id));
         user.IsDeleted = true;
         await _db.SaveChangesAsync();
-        return true;
+        return AdminWriteStatus.Ok;
     }
 
     public async Task<bool> SetRolesAsync(int userId, IReadOnlyList<int> roleIds)
@@ -140,25 +169,19 @@ public class UserAdminService : IUserAdminService
         return data?.Permissions;
     }
 
-    public async Task<bool> IsAdminAsync(int userId)
-    {
-        var data = await ResolveAsync(userId);
-        if (data is null)
-            return false;
+    public Task<bool> IsAdminAsync(int userId) =>
+        HasAnyPermissionAsync(userId, SeedData.AdminPermissions);
 
-        return data.Permissions.Any(p => p.Source != "none" && SeedData.AdminPermissions.Contains(p.Name));
-    }
-
-    public async Task<bool> HasPermissionAsync(int userId, string permissionName)
-    {
-        var data = await ResolveAsync(userId);
-        return data?.Permissions.Any(p => p.Source != "none" && p.Name == permissionName) ?? false;
-    }
+    public Task<bool> HasPermissionAsync(int userId, string permissionName) =>
+        HasAnyPermissionAsync(userId, new[] { permissionName });
 
     public async Task<MeResponse?> GetMeAsync(int userId)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
-        if (user is null)
+        // A deactivated account answers like a deleted one (401 -> the client logs out), so
+        // flipping "Disabled" in the admin panel cuts the session off at the next /me instead of
+        // silently waiting out the token.
+        if (user is null || !user.IsActive)
             return null;
 
         var data = await ResolveAsync(userId);
@@ -192,6 +215,54 @@ public class UserAdminService : IUserAdminService
          where ur.UserId == userId
          orderby r.Name
          select new RoleSummary { Id = r.Id, Name = r.Name }).ToListAsync();
+
+    // The hot-path boolean behind IsAdminAsync/HasPermissionAsync (called on every geometry write
+    // and admin request): ONE round-trip of correlated EXISTS subqueries instead of ResolveAsync's
+    // five queries. "Role wins over direct" only affects the source LABEL, never boolean
+    // possession, so the role/direct union is equivalent to ResolveAsync's answer. The user must be
+    // active (a disabled account keeps its rows but loses its powers immediately); joining through
+    // the filtered Roles/Permissions sets drops soft-deleted rows exactly like ResolveAsync.
+    private Task<bool> HasAnyPermissionAsync(int userId, IReadOnlyCollection<string> permissionNames)
+    {
+        // Statically typed string[]: EF/Npgsql translates Contains over an array into IN (...), but
+        // refuses it on interface-typed collections (IReadOnlySet.Contains fails at runtime).
+        var names = permissionNames as string[] ?? permissionNames.ToArray();
+
+        var viaRole =
+            from ur in _db.UserRoles
+            join r in _db.Roles on ur.RoleId equals r.Id
+            join rp in _db.RolePermissions on ur.RoleId equals rp.RoleId
+            join p in _db.Permissions on rp.PermissionId equals p.Id
+            where ur.UserId == userId && names.Contains(p.Name)
+            select ur.Id;
+
+        var direct =
+            from up in _db.UserPermissions
+            join p in _db.Permissions on up.PermissionId equals p.Id
+            where up.UserId == userId && names.Contains(p.Name)
+            select up.Id;
+
+        return _db.Users.AnyAsync(u => u.Id == userId && u.IsActive && (viaRole.Any() || direct.Any()));
+    }
+
+    // True when at least one active user OTHER than excludedUserId still holds any management
+    // permission. Backs the last-admin guards in DeleteAsync/UpdateAsync.
+    private Task<bool> OtherAdminExistsAsync(int excludedUserId)
+    {
+        // Array-typed for the same EF translation reason as in HasAnyPermissionAsync.
+        var adminNames = SeedData.AdminPermissions.ToArray();
+
+        return _db.Users.AnyAsync(u =>
+            u.Id != excludedUserId && u.IsActive &&
+            (_db.UserRoles.Any(ur => ur.UserId == u.Id
+                 && _db.Roles.Any(r => r.Id == ur.RoleId)
+                 && _db.RolePermissions.Any(rp => rp.RoleId == ur.RoleId
+                     && _db.Permissions.Any(p => p.Id == rp.PermissionId
+                         && adminNames.Contains(p.Name))))
+             || _db.UserPermissions.Any(up => up.UserId == u.Id
+                 && _db.Permissions.Any(p => p.Id == up.PermissionId
+                     && adminNames.Contains(p.Name)))));
+    }
 
     // Builds the effective-permission view for a user in one pass. Returns null if the user is missing.
     // All queries run sequentially on the single DbContext (never Task.WhenAll — one context isn't

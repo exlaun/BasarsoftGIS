@@ -112,7 +112,22 @@ public class PoiCategoryService : IPoiCategoryService
         category.Color = request.Color;
         category.IconKey = iconKey;
         category.ModifiedUserId = userId;
-        await _db.SaveChangesAsync();
+
+        // The ancestor walk above is check-then-write: two concurrent re-parents (A under B, B under
+        // A) can each pass their check and still commit a cycle. Save inside a transaction and
+        // re-walk from the DB state; if a cycle appeared, roll back instead of persisting it.
+        await using (var transaction = await _db.Database.BeginTransactionAsync())
+        {
+            await _db.SaveChangesAsync();
+
+            if (request.ParentId is not null && await IsInCycleAsync(id))
+            {
+                await transaction.RollbackAsync();
+                return PoiCategoryWriteResult.InvalidParent;
+            }
+
+            await transaction.CommitAsync();
+        }
 
         var poiCount = await _db.Pois.CountAsync(p => p.CategoryId == id);
         return PoiCategoryWriteResult.Ok(new PoiCategoryResponse
@@ -124,6 +139,25 @@ public class PoiCategoryService : IPoiCategoryService
             IconKey = category.IconKey,
             PoiCount = poiCount,
         });
+    }
+
+    // Walks the parent chain of `id` from FRESH database state (AsNoTracking — a tracked query
+    // would hand back this request's already-loaded instances instead of what a concurrent writer
+    // committed) and reports whether the chain leads back to `id`. Depth-capped like every other
+    // tree walk over this table.
+    private async Task<bool> IsInCycleAsync(int id)
+    {
+        var parents = await _db.PoiCategories.AsNoTracking()
+            .ToDictionaryAsync(c => c.Id, c => c.ParentId);
+
+        var current = parents.GetValueOrDefault(id);
+        for (var depth = 0; current is not null && depth < 20; depth++)
+        {
+            if (current.Value == id)
+                return true;
+            current = parents.GetValueOrDefault(current.Value);
+        }
+        return false;
     }
 
     public async Task<PoiCategoryWriteStatus> DeleteAsync(int id, int userId)

@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/auth-context'
 import ThemeToggle from '../../components/ThemeToggle'
 import SessionTimer from '../../components/SessionTimer'
@@ -8,21 +8,39 @@ import './Admin.css'
 // Standalone full-screen admin shell: the same top bar as the map page (Logout + session timer on the
 // left, title centered, theme toggle + "Return to map page" on the right), a left vertical navbar, and a
 // content area that renders the active admin page via <Outlet />.
+// Each section names the manage_* permission its API demands; links the caller lacks are hidden
+// (the API enforces the same rule with per-resource policies, this just spares them the 403s).
 const NAV = [
-  { to: '/admin', end: true, label: 'Users' },
-  { to: '/admin/roles', end: false, label: 'Roles' },
-  { to: '/admin/permissions', end: false, label: 'Permissions' },
+  { to: '/admin', end: true, label: 'Users', permission: 'manage_users' },
+  { to: '/admin/roles', end: false, label: 'Roles', permission: 'manage_roles' },
+  { to: '/admin/permissions', end: false, label: 'Permissions', permission: 'manage_permissions' },
 ]
 
 // The mentor's "POI Yönetimi" menu: its own titled section under the RBAC links.
 const POI_NAV = [
-  { to: '/admin/pois', end: false, label: 'POIs' },
-  { to: '/admin/poi-categories', end: false, label: 'POI Categories' },
+  { to: '/admin/pois', end: false, label: 'POIs', permission: 'manage_pois' },
+  { to: '/admin/poi-categories', end: false, label: 'POI Categories', permission: 'manage_pois' },
 ]
 
 export default function AdminLayout() {
-  const { logout } = useAuth()
+  const { logout, permissions } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  const granted = new Set(permissions)
+  const nav = NAV.filter((item) => granted.has(item.permission))
+  const poiNav = POI_NAV.filter((item) => granted.has(item.permission))
+
+  // The /admin index is Users, so e.g. a manage_pois-only admin would land on a section they can't
+  // use. Bounce them to their first permitted section instead. (AdminRoute already guarantees the
+  // profile is loaded and that at least one manage_* permission exists.)
+  const allowed = [...nav, ...poiNav]
+  const current = [...NAV, ...POI_NAV].find((item) =>
+    item.end ? location.pathname === item.to : location.pathname.startsWith(item.to),
+  )
+  if (allowed.length > 0 && current && !granted.has(current.permission)) {
+    return <Navigate to={allowed[0].to} replace />
+  }
 
   return (
     <div className="admin">
@@ -53,7 +71,7 @@ export default function AdminLayout() {
           </div>
 
           <div className="admin-nav-links">
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -64,8 +82,8 @@ export default function AdminLayout() {
               </NavLink>
             ))}
 
-            <div className="admin-nav-section">POI Management</div>
-            {POI_NAV.map((item) => (
+            {poiNav.length > 0 && <div className="admin-nav-section">POI Management</div>}
+            {poiNav.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}

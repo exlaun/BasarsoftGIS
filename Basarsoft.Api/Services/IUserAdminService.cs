@@ -14,11 +14,12 @@ public interface IUserAdminService
     Task<(AdminWriteStatus Status, AdminUserResponse? User)> CreateAsync(AdminUserCreateRequest request);
 
     // Updates username/active flag and, when NewPassword is supplied, resets the password. NotFound if
-    // missing, Conflict on a duplicate name.
+    // missing, Conflict on a duplicate name, LastAdmin when deactivating the last active admin.
     Task<(AdminWriteStatus Status, AdminUserResponse? User)> UpdateAsync(int id, AdminUserUpdateRequest request);
 
-    // Soft-deletes a user and removes their role + direct-permission links. False if missing.
-    Task<bool> DeleteAsync(int id);
+    // Soft-deletes a user and removes their role + direct-permission links. NotFound if missing;
+    // LastAdmin if this would remove the last active holder of a management permission.
+    Task<AdminWriteStatus> DeleteAsync(int id);
 
     // Replaces the user's role set with the given ids (unknown ids ignored). False if missing.
     Task<bool> SetRolesAsync(int userId, IReadOnlyList<int> roleIds);
@@ -32,13 +33,14 @@ public interface IUserAdminService
     // permissions are unaffected. False if the user is missing.
     Task<bool> SetDirectPermissionsAsync(int userId, IReadOnlyList<int> permissionIds);
 
-    // True if the user holds any management permission (may open the admin panel). False if missing.
+    // True if the user holds any management permission (may open the admin panel). False if missing
+    // or deactivated.
     Task<bool> IsAdminAsync(int userId);
 
     // True if the user effectively holds one specific permission, whether inherited from a role or
-    // granted directly. False if missing.
+    // granted directly. False if missing or deactivated.
     Task<bool> HasPermissionAsync(int userId, string permissionName);
 
-    // Identity + RBAC context for GET /api/auth/me. Null if the user is missing.
+    // Identity + RBAC context for GET /api/auth/me. Null if the user is missing or deactivated.
     Task<MeResponse?> GetMeAsync(int userId);
 }

@@ -6,10 +6,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- xUnit1051 wants TestContext.Current.CancellationToken threaded into every awaited call
+         that accepts a token; these tests are sub-second and in-memory, so the ceremony buys
+         nothing — suppressed project-wide instead of per call site. -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <!-- In-memory EF provider for service-level tests (permission resolution, category tree rules).
+         Same major as the API's EF Core; relational-only features (sequences, check constraints,
+         partial indexes) become no-ops there, so those stay covered by the curl/e2e checks. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>

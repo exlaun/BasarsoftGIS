@@ -22,26 +22,34 @@ public static class SeedData
     // the role's permission set (same hands-off rule as the Admin role).
     public static readonly IReadOnlyList<string> OperatorPermissions = new[] { "add_poi" };
 
+    // The four management permission names, as constants so the per-resource authorization policies
+    // (Program.cs / PermissionRequirement) and controllers reference the same spelling as the seed.
+    public const string ManageUsersPermission = "manage_users";
+    public const string ManageRolesPermission = "manage_roles";
+    public const string ManagePermissionsPermission = "manage_permissions";
+    public const string ManagePoisPermission = "manage_pois";
+
     // The shared permission catalogue: name (machine key) -> English description. Drawing permissions
     // plus the management permissions that gate the admin panel itself.
     public static readonly IReadOnlyList<(string Name, string Description)> Permissions = new[]
     {
-        ("add_point",          "Create and manage your own point shapes"),
-        ("add_line",           "Create and manage your own line shapes"),
-        ("add_polygon",        "Create and manage your own polygon shapes"),
-        ("manage_users",       "Create, update, and delete users"),
-        ("manage_roles",       "Create, update, and delete roles"),
-        ("manage_permissions", "Manage permissions"),
-        ("add_poi",            "Add POIs to the map"),
-        ("manage_pois",        "Manage POIs and POI categories"),
+        ("add_point",               "Create and manage your own point shapes"),
+        ("add_line",                "Create and manage your own line shapes"),
+        ("add_polygon",             "Create and manage your own polygon shapes"),
+        (ManageUsersPermission,       "Create, update, and delete users"),
+        (ManageRolesPermission,       "Create, update, and delete roles"),
+        (ManagePermissionsPermission, "Manage permissions"),
+        ("add_poi",                 "Add POIs to the map"),
+        (ManagePoisPermission,        "Manage POIs and POI categories"),
     };
 
-    // Holding ANY of these effective permissions lets a user open the admin panel.
+    // Holding ANY of these effective permissions lets a user open the admin panel. Which sections
+    // they can actually use inside it is decided per-resource (one policy per name; see Program.cs).
     public static readonly IReadOnlySet<string> AdminPermissions = new HashSet<string>
     {
-        "manage_users",
-        "manage_roles",
-        "manage_permissions",
-        "manage_pois",
+        ManageUsersPermission,
+        ManageRolesPermission,
+        ManagePermissionsPermission,
+        ManagePoisPermission,
     };
 }

@@ -12,7 +12,7 @@ namespace Basarsoft.Api.Controllers;
 // GET /api/poi/categories, because operators and viewers need it too. Unlike the RBAC admin
 // controllers this one reads the JWT sub: tbl_poi_category carries creator/modifier user columns.
 [ApiController]
-[Authorize(Policy = AdminAccessRequirement.PolicyName)]
+[Authorize(Policy = PermissionRequirement.ManagePois)]
 [Route("api/admin/poi-categories")]
 public class AdminPoiCategoriesController : ControllerBase
 {

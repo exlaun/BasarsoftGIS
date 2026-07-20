@@ -86,11 +86,29 @@ public class RoleService : IRoleService
         return (AdminWriteStatus.Ok, updated);
     }
 
-    public async Task<bool> DeleteAsync(int id)
+    public async Task<AdminWriteStatus> DeleteAsync(int id)
     {
         var role = await _db.Roles.FirstOrDefaultAsync(r => r.Id == id);
         if (role is null)
-            return false;
+            return AdminWriteStatus.NotFound;
+
+        // The role's assignments die with it (links removed below), so first make sure some active
+        // user would still hold a management permission WITHOUT this role — deleting e.g. the Admin
+        // role otherwise locks everyone out of the admin panel for good. One round-trip of
+        // correlated EXISTS subqueries, mirroring UserAdminService.OtherAdminExistsAsync.
+        // Array-typed names: EF/Npgsql translates Contains over an array, not over IReadOnlySet.
+        var adminNames = SeedData.AdminPermissions.ToArray();
+        var adminSurvives = await _db.Users.AnyAsync(u => u.IsActive &&
+            (_db.UserRoles.Any(ur => ur.UserId == u.Id && ur.RoleId != id
+                 && _db.Roles.Any(r => r.Id == ur.RoleId)
+                 && _db.RolePermissions.Any(rp => rp.RoleId == ur.RoleId
+                     && _db.Permissions.Any(p => p.Id == rp.PermissionId
+                         && adminNames.Contains(p.Name))))
+             || _db.UserPermissions.Any(up => up.UserId == u.Id
+                 && _db.Permissions.Any(p => p.Id == up.PermissionId
+                     && adminNames.Contains(p.Name)))));
+        if (!adminSurvives)
+            return AdminWriteStatus.LastAdmin;
 
         // Remove the role's grant links + every user's assignment of it, so nobody keeps effective
         // permissions from a deleted role, then soft-delete the row itself.
@@ -98,7 +116,7 @@ public class RoleService : IRoleService
         _db.UserRoles.RemoveRange(_db.UserRoles.Where(ur => ur.RoleId == id));
         role.IsDeleted = true;
         await _db.SaveChangesAsync();
-        return true;
+        return AdminWriteStatus.Ok;
     }
 
     public async Task<bool> SetPermissionsAsync(int roleId, IReadOnlyList<int> permissionIds)

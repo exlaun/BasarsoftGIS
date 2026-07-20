@@ -11,6 +11,11 @@ public class FlexibleTimeOnlyConverter : JsonConverter<TimeOnly>
 {
     public override TimeOnly Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
+        // A non-string token (e.g. {"openTime": 900}) would make GetString() throw
+        // InvalidOperationException, which MVC surfaces as a 500; JsonException becomes a clean 400.
+        if (reader.TokenType != JsonTokenType.String)
+            throw new JsonException("Expected a time string in HH:mm or HH:mm:ss format.");
+
         var text = reader.GetString();
         if (!TimeOnly.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var value))
             throw new JsonException($"'{text}' is not a valid time. Expected HH:mm or HH:mm:ss.");

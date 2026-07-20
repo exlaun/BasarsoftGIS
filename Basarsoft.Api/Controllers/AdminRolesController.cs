@@ -6,9 +6,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Basarsoft.Api.Controllers;
 
-// Admin role management + the role's permission assignment.
+// Admin role management + the role's permission assignment. Gated by manage_roles specifically.
 [ApiController]
-[Authorize(Policy = AdminAccessRequirement.PolicyName)]
+[Authorize(Policy = PermissionRequirement.ManageRoles)]
 [Route("api/admin/roles")]
 public class AdminRolesController : ControllerBase
 {
@@ -85,9 +85,16 @@ public class AdminRolesController : ControllerBase
     {
         try
         {
-            return await _roles.DeleteAsync(id)
-                ? NoContent()
-                : NotFound(new { message = "Role not found." });
+            return await _roles.DeleteAsync(id) switch
+            {
+                AdminWriteStatus.NotFound => NotFound(new { message = "Role not found." }),
+                AdminWriteStatus.LastAdmin => Conflict(new
+                {
+                    message = "Deleting this role would leave no active admin; " +
+                              "grant another user a management permission first.",
+                }),
+                _ => NoContent(),
+            };
         }
         catch (Exception ex) { return ServerError(ex, nameof(Delete)); }
     }
