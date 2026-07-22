@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using BC = BCrypt.Net.BCrypt;
 
 namespace Basarsoft.Api.Data;
@@ -24,6 +25,7 @@ public static class DemoSeeder
         "user_permissions", "role_permissions", "user_roles",
         "tbl_geo_authorization", "tbl_poi", "tbl_poi_category",
         "tbl_location_analysis_criterion", "tbl_location_analysis",
+        "tbl_stop", "tbl_route",
         "tbl_point", "tbl_line", "tbl_polygon",
         "permissions", "roles", "users",
         // tbl_province is deliberately absent: static reference data with no FK into the demo tables
@@ -42,12 +44,17 @@ public static class DemoSeeder
         "seq_tbl_point", "seq_tbl_line", "seq_tbl_polygon",
         "seq_tbl_geo_authorization", "seq_tbl_poi_category", "seq_tbl_poi",
         "seq_tbl_location_analysis", "seq_tbl_location_analysis_criterion",
+        "seq_tbl_route", "seq_tbl_stop",
         // seq_tbl_province keeps running: its table is not wiped (see Tables above).
     ];
 
     private const int Srid = 4326;
 
     private static readonly WKTReader Reader = new();
+
+    // RouteSaveRequest's color rule, mirrored here so a seeded route stays editable through the UI
+    // instead of failing validation the first time an operator renames it.
+    private static readonly Regex HexColor = new("^#[0-9a-fA-F]{6}$", RegexOptions.Compiled);
 
     private sealed record ProvinceSeedPoint(
         DemoData.DemoProvince Manifest,
@@ -118,6 +125,7 @@ public static class DemoSeeder
             var categories = await InsertCategoriesAsync(db, users["admin"]);
             await InsertShapesAsync(db, users, provincePoints);
             await InsertPoisAsync(db, users, categories, provincePoints);
+            await InsertTransportationAsync(db, users);
 
             await BackdateModifiedDatesAsync(db);
             await AssertEveryShapeIsInsideItsAreaAsync(db);
@@ -186,8 +194,8 @@ public static class DemoSeeder
         Require(rolePermissions.Count == 5, $"Expected five roles, found {rolePermissions.Count}.");
         Require(rolePermissions[SeedData.ViewerRoleName].Count == 0,
             "Viewer must remain permission-free.");
-        Require(rolePermissions[SeedData.OperatorRoleName].SetEquals(["add_poi"]),
-            "Operator must inherit add_poi and no redundant drawing permission.");
+        Require(rolePermissions[SeedData.OperatorRoleName].SetEquals(["add_poi", "manage_transport"]),
+            "Operator must inherit add_poi + manage_transport and no redundant drawing permission.");
 
         var users = DemoData.Users.ToDictionary(u => u.Username, StringComparer.Ordinal);
         var effectiveAreas = new Dictionary<string, Geometry?>(StringComparer.Ordinal);
@@ -386,6 +394,94 @@ public static class DemoSeeder
                 && new[] { "antalya_operator", "gaziantep_operator", "trabzon_operator" }
                     .All(owner => poiOwners.GetValueOrDefault(owner) == 7),
             "Curated POI ownership must be admin 25, istanbul_operator 12, and seven for the other three operators.");
+
+        Require(DemoData.Routes.Count == DemoData.ExpectedRouteCount,
+            $"Expected {DemoData.ExpectedRouteCount} routes, found {DemoData.Routes.Count}.");
+        RequireUnique(DemoData.Routes.Select(r => r.Name), "route names");
+        Require(DemoData.Routes.Select(r => r.Color).Distinct(StringComparer.Ordinal).Count()
+                == DemoData.Routes.Count,
+            "Every demo route needs its own color, or two lines' stop markers look identical.");
+
+        var routes = DemoData.Routes.ToDictionary(r => r.Name, StringComparer.Ordinal);
+        foreach (var route in DemoData.Routes)
+        {
+            Require(users.TryGetValue(route.Owner, out var owner),
+                $"Route '{route.Name}' refers to unknown owner '{route.Owner}'.");
+            Require(route.DaysAgo >= 0, $"Route '{route.Name}' has a negative age.");
+            Require(HexColor.IsMatch(route.Color),
+                $"Route '{route.Name}' has a color the API would reject: '{route.Color}'.");
+            Require(route.Name.Length <= 80, $"Route name '{route.Name}' exceeds the API's 80 characters.");
+
+            var effectivePermissions = rolePermissions[owner!.Role]
+                .Concat(owner.DirectPermissions)
+                .ToHashSet(StringComparer.Ordinal);
+            Require(effectivePermissions.Contains(SeedData.ManageTransportPermission),
+                $"Owner '{owner.Username}' cannot manage seeded route '{route.Name}'.");
+        }
+
+        Require(DemoData.Stops.Count == DemoData.ExpectedStopCount,
+            $"Expected {DemoData.ExpectedStopCount} stops, found {DemoData.Stops.Count}.");
+
+        // A stop's SequenceOrder is its position inside its route's run of the manifest, so each route
+        // has to occupy exactly one unbroken run: interleave two and the seeded order stops matching
+        // the order the manifest reads in.
+        var stopNamesByRoute = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        string? previousRoute = null;
+        foreach (var stop in DemoData.Stops)
+        {
+            Require(routes.TryGetValue(stop.Route, out var route),
+                $"Stop '{stop.Name}' refers to unknown route '{stop.Route}'.");
+            if (!string.Equals(stop.Route, previousRoute, StringComparison.Ordinal))
+            {
+                Require(!stopNamesByRoute.ContainsKey(stop.Route),
+                    $"Route '{stop.Route}' stops are not contiguous in the manifest.");
+                stopNamesByRoute[stop.Route] = [];
+                previousRoute = stop.Route;
+            }
+
+            stopNamesByRoute[stop.Route].Add(stop.Name);
+            Require(stop.Name.Length <= 80, $"Stop name '{stop.Name}' exceeds the API's 80 characters.");
+
+            // A stop belongs to whoever owns its route, so that operator's area is the one it has to
+            // sit inside — exactly what CreateStopAsync would have enforced had an operator placed it.
+            var geometry = Parse(stop.Wkt, OgcGeometryType.Point, stop.Name);
+            if (effectiveAreas[route!.Owner] is { } area)
+                Require(area.Covers(geometry),
+                    $"Stop '{stop.Name}' falls outside '{route.Owner}' effective area.");
+        }
+
+        // Names repeat across routes on purpose (two Trabzon lines share their transfer points), so
+        // uniqueness is only meaningful within a single route.
+        foreach (var (routeName, stopNames) in stopNamesByRoute)
+            RequireUnique(stopNames, $"stop names on route '{routeName}'");
+
+        var expectedStopsPerRoute = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["Metrobüs (Beylikdüzü–Söğütlüçeşme)"] = 7,
+            ["M4 Kadıköy–Tavşantepe"] = 8,
+            ["Antalya Nostalji Tramvayı"] = 6,
+            ["AntRay T1 Fatih–Expo"] = 7,
+            ["Gaziantep Tramvay T1"] = 7,
+            ["GaziRay (Başpınar–Oğuzeli)"] = 6,
+            ["Trabzon Sahil Hattı"] = 8,
+            ["Trabzon–Uzungöl Hattı"] = 7,
+        };
+        Require(expectedStopsPerRoute.Count == stopNamesByRoute.Count
+                && expectedStopsPerRoute.All(pair =>
+                    stopNamesByRoute.TryGetValue(pair.Key, out var names) && names.Count == pair.Value),
+            "Route-to-stop distribution no longer matches the eight-route/56-stop contract.");
+
+        var routeOwners = DemoData.Routes
+            .GroupBy(r => r.Owner)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        Require(routeOwners.Count == 4
+                && new[]
+                    {
+                        "istanbul_operator", "antalya_operator",
+                        "gaziantep_operator", "trabzon_operator",
+                    }
+                    .All(owner => routeOwners.GetValueOrDefault(owner) == 2),
+            "Route ownership must be exactly two routes for each of the four city operators.");
     }
 
     // Manifest-derived per-category POI counts: curated entries plus the province template rotation.
@@ -762,6 +858,57 @@ public static class DemoSeeder
         await db.SaveChangesAsync();
     }
 
+    private static async Task InsertTransportationAsync(AppDbContext db, Dictionary<string, int> users)
+    {
+        // Routes first, on their own SaveChanges: Stop carries a raw RouteId and no navigation
+        // property, so EF cannot fix a route's generated id into its stops — same reason
+        // InsertCategoriesAsync saves one level of its tree at a time.
+        var routes = DemoData.Routes.Select(route => new TransportRoute
+        {
+            Name = route.Name,
+            Color = route.Color,
+            UserId = users[route.Owner],
+            CreatedAt = DateTime.UtcNow.AddDays(-route.DaysAgo),
+            // A never-edited route reports its creator as its last modifier, like every other table.
+            ModifiedUserId = users[route.Owner],
+        }).ToList();
+
+        db.Routes.AddRange(routes);
+        await db.SaveChangesAsync();
+
+        var routesByName = DemoData.Routes
+            .Zip(routes, (manifest, row) => (manifest.Name, Row: row))
+            .ToDictionary(pair => pair.Name, pair => pair.Row, StringComparer.Ordinal);
+
+        // SequenceOrder restarts at 1 for every route and counts up in manifest order: the contiguous
+        // 1..N the reorder guard and the panel's order badges rely on. The manifest keeps each route's
+        // stops in one unbroken run (ValidateManifest enforces it), so this counter cannot interleave.
+        var orders = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var stop in DemoData.Stops)
+        {
+            var route = routesByName[stop.Route];
+            var order = orders[stop.Route] = orders.GetValueOrDefault(stop.Route) + 1;
+
+            db.Stops.Add(new Stop
+            {
+                UserId = route.UserId,
+                Name = stop.Name,
+                // Left null deliberately: a stop renders in its route's color, and CreateStopAsync
+                // never sets this either.
+                Color = null,
+                Geom = Parse(stop.Wkt, OgcGeometryType.Point, stop.Name),
+                RouteId = route.Id,
+                SequenceOrder = order,
+                // Placed an hour apart just after the route was created, so the audit trail reads the
+                // way it would had an operator added them one by one along the line.
+                CreatedAt = route.CreatedAt.AddHours(order),
+                ModifiedUserId = route.UserId,
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
     // --- After the inserts -------------------------------------------------------------------------
 
     private static async Task BackdateModifiedDatesAsync(AppDbContext db)
@@ -806,6 +953,7 @@ public static class DemoSeeder
         owned.AddRange((await db.Lines.ToListAsync()).Select(l => (l.UserId, "line", l.Name, l.Geom)));
         owned.AddRange((await db.Polygons.ToListAsync()).Select(g => (g.UserId, "polygon", g.Name, g.Geom)));
         owned.AddRange((await db.Pois.ToListAsync()).Select(p => (p.UserId, "poi", p.Name, p.Geom)));
+        owned.AddRange((await db.Stops.ToListAsync()).Select(s => (s.UserId, "stop", s.Name, s.Geom)));
 
         var escaped = owned
             .Where(o => EffectiveArea(o.UserId) is { } area && !area.Covers(o.Geom))
@@ -915,6 +1063,51 @@ public static class DemoSeeder
                 $"{poiOperator} must own exactly seven POIs.");
         }
 
+        var persistedRoutes = await db.Routes.OrderBy(route => route.Id).ToListAsync();
+        Require(persistedRoutes.Count == DemoData.ExpectedRouteCount,
+            $"Post-insert route count is {persistedRoutes.Count}, expected {DemoData.ExpectedRouteCount}.");
+        Require(persistedRoutes.Select(route => route.Id)
+                    .SequenceEqual(Enumerable.Range(1, DemoData.ExpectedRouteCount))
+                && persistedRoutes.Zip(DemoData.Routes).All(pair =>
+                    pair.First.Name == pair.Second.Name
+                    && pair.First.Color == pair.Second.Color
+                    && pair.First.UserId == userIds[pair.Second.Owner]),
+            "Post-insert route ids/order/ownership do not match the deterministic manifest contract.");
+
+        var routeOwners = persistedRoutes
+            .GroupBy(route => route.UserId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        Require(routeOwners.Count == 4
+                && new[]
+                    {
+                        "istanbul_operator", "antalya_operator",
+                        "gaziantep_operator", "trabzon_operator",
+                    }
+                    .All(cityOperator => routeOwners.GetValueOrDefault(userIds[cityOperator]) == 2),
+            "Each of the four city operators must own exactly two routes.");
+
+        var persistedStops = await db.Stops.ToListAsync();
+        Require(persistedStops.Count == DemoData.ExpectedStopCount,
+            $"Post-insert stop count is {persistedStops.Count}, expected {DemoData.ExpectedStopCount}.");
+        // ListAllStopsAsync drops stops whose route is not live, so an orphan would simply vanish.
+        var routeIds = persistedRoutes.Select(route => route.Id).ToHashSet();
+        Require(persistedStops.All(stop => routeIds.Contains(stop.RouteId)),
+            "A seeded stop points at a route the API cannot see, so the stop would silently disappear.");
+
+        foreach (var route in persistedRoutes)
+        {
+            var stops = persistedStops.Where(stop => stop.RouteId == route.Id).ToList();
+            Require(stops.Count > 0, $"Route '{route.Name}' was seeded without any stops.");
+            // The (route_id, sequence_order) index is non-unique on purpose, so nothing below this
+            // line enforces the contiguous 1..N that the reorder guard and the order badges assume.
+            Require(stops.Select(stop => stop.SequenceOrder)
+                    .OrderBy(order => order)
+                    .SequenceEqual(Enumerable.Range(1, stops.Count)),
+                $"Route '{route.Name}' stop orders are not a contiguous 1..{stops.Count}.");
+            Require(stops.All(stop => stop.UserId == route.UserId),
+                $"Route '{route.Name}' has a stop owned by someone other than the route's owner.");
+        }
+
         var persistedPoints = await db.Points
             .Where(point => point.UserId == userIds["admin"])
             .ToListAsync();
@@ -1010,7 +1203,7 @@ public static class DemoSeeder
                 .ToHashSet(StringComparer.Ordinal),
             [DemoData.RegionalManagerRoleName] = ["add_point", "add_line", "add_polygon"],
             [DemoData.EditorRoleName] = ["add_point", "add_line"],
-            [SeedData.OperatorRoleName] = ["add_poi"],
+            [SeedData.OperatorRoleName] = ["add_poi", "manage_transport"],
             [SeedData.ViewerRoleName] = [],
         };
         foreach (var role in rolesById.Values)
@@ -1047,21 +1240,25 @@ public static class DemoSeeder
     {
         // IgnoreQueryFilters so soft-deleted rows are counted too — they are about to go as well.
         logger.LogWarning(
-            "Currently: {Users} users, {Roles} roles, {Shapes} shapes, {Pois} POIs, {Categories} POI categories.",
+            "Currently: {Users} users, {Roles} roles, {Shapes} shapes, {Pois} POIs, {Categories} POI " +
+            "categories, {Routes} routes, {Stops} stops.",
             await db.Users.IgnoreQueryFilters().CountAsync(),
             await db.Roles.IgnoreQueryFilters().CountAsync(),
             await db.Points.IgnoreQueryFilters().CountAsync()
                 + await db.Lines.IgnoreQueryFilters().CountAsync()
                 + await db.Polygons.IgnoreQueryFilters().CountAsync(),
             await db.Pois.IgnoreQueryFilters().CountAsync(),
-            await db.PoiCategories.IgnoreQueryFilters().CountAsync());
+            await db.PoiCategories.IgnoreQueryFilters().CountAsync(),
+            await db.Routes.IgnoreQueryFilters().CountAsync(),
+            await db.Stops.IgnoreQueryFilters().CountAsync());
     }
 
     private static async Task LogSummaryAsync(AppDbContext db, ILogger logger, Dictionary<string, int> users)
     {
         logger.LogInformation(
             "Demo data seeded: {Users} users, {Roles} roles, {Points} points, {Lines} lines, " +
-            "{Polygons} polygons, {Areas} authorization areas, {Categories} POI categories, {Pois} POIs.",
+            "{Polygons} polygons, {Areas} authorization areas, {Categories} POI categories, {Pois} POIs, " +
+            "{Routes} transportation routes, {Stops} stops.",
             await db.Users.CountAsync(),
             await db.Roles.CountAsync(),
             await db.Points.CountAsync(),
@@ -1069,7 +1266,9 @@ public static class DemoSeeder
             await db.Polygons.CountAsync(),
             await db.GeoAuthorizations.CountAsync(),
             await db.PoiCategories.CountAsync(),
-            await db.Pois.CountAsync());
+            await db.Pois.CountAsync(),
+            await db.Routes.CountAsync(),
+            await db.Stops.CountAsync());
 
         foreach (var persona in DemoData.Users)
             logger.LogInformation(

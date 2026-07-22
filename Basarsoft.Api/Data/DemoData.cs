@@ -15,6 +15,8 @@ public static class DemoData
     public const int ExpectedCategoryCount = 42;
     public const int ExpectedAreaCount = 15;
     public const int ExpectedProvinceCount = 81;
+    public const int ExpectedRouteCount = 8;
+    public const int ExpectedStopCount = 56;
 
     public const string RegionalManagerRoleName = "Regional Manager";
     public const string EditorRoleName = "Editor";
@@ -512,5 +514,108 @@ public static class DemoData
         new("gaziantep_operator", "İmam Çağdaş", "Restaurant", "POINT(37.383 37.063)", At(11, 0), At(22, 0), 37),
         new("trabzon_operator", "Sümela Manastırı", "Historical Site", "POINT(39.658 40.690)", At(9, 0), At(18, 0), 35),
         new("trabzon_operator", "Uzungöl", "National Park", "POINT(40.293 40.618)", At(0, 0), At(23, 59), 33),
+    ];
+
+    // Transportation. A route carries no geometry — only its stops do — so the owner is what ties a
+    // route to a city: every stop inherits it, and the seeder preflight then checks each stop against
+    // that operator's authorization area with Covers().
+    public sealed record DemoRoute(string Owner, string Name, string Color, int DaysAgo);
+
+    // Two real lines per operator city, each on its own color so no two routes' stop markers look
+    // alike anywhere on the map. Order fixes the ids 1..8 after seq_tbl_route restarts.
+    public static readonly IReadOnlyList<DemoRoute> Routes =
+    [
+        new("istanbul_operator", "Metrobüs (Beylikdüzü–Söğütlüçeşme)", ColorRed, 34),
+        new("istanbul_operator", "M4 Kadıköy–Tavşantepe", ColorViolet, 32),
+        new("antalya_operator", "Antalya Nostalji Tramvayı", ColorAmber, 30),
+        new("antalya_operator", "AntRay T1 Fatih–Expo", ColorBlue, 28),
+        new("gaziantep_operator", "Gaziantep Tramvay T1", ColorGreen, 26),
+        new("gaziantep_operator", "GaziRay (Başpınar–Oğuzeli)", ColorIndigo, 24),
+        new("trabzon_operator", "Trabzon Sahil Hattı", ColorCyan, 22),
+        new("trabzon_operator", "Trabzon–Uzungöl Hattı", ColorOrange, 20),
+    ];
+
+    // Route is the key into Routes above. Order matters twice over: it fixes the ids handed out by the
+    // restarted seq_tbl_stop, and a stop's position within its route's run becomes its SequenceOrder,
+    // so each route ends up with the contiguous 1..N the reorder guard and the panel badges expect.
+    // Each route must therefore occupy one unbroken run here (the preflight enforces it).
+    public sealed record DemoStop(string Route, string Name, string Wkt);
+
+    // 56 stops named after the real neighborhoods and landmarks each line serves. The two Trabzon
+    // routes deliberately share Meydan Parkı and Değirmendere, the way real lines share a transfer
+    // point — so stop names are unique per route, not globally.
+    public static readonly IReadOnlyList<DemoStop> Stops =
+    [
+        // 1. Metrobüs: the west-to-east BRT spine across both sides of the Bosphorus.
+        new("Metrobüs (Beylikdüzü–Söğütlüçeşme)", "Beylikdüzü Sondurak", "POINT(28.639 40.990)"),
+        new("Metrobüs (Beylikdüzü–Söğütlüçeşme)", "Avcılar Üniversite", "POINT(28.718 40.980)"),
+        new("Metrobüs (Beylikdüzü–Söğütlüçeşme)", "Şirinevler", "POINT(28.845 40.993)"),
+        new("Metrobüs (Beylikdüzü–Söğütlüçeşme)", "Cevizlibağ", "POINT(28.916 41.009)"),
+        new("Metrobüs (Beylikdüzü–Söğütlüçeşme)", "Zincirlikuyu", "POINT(29.009 41.068)"),
+        new("Metrobüs (Beylikdüzü–Söğütlüçeşme)", "15 Temmuz Şehitler Köprüsü", "POINT(29.035 41.045)"),
+        new("Metrobüs (Beylikdüzü–Söğütlüçeşme)", "Söğütlüçeşme", "POINT(29.050 40.991)"),
+
+        // 2. M4: the Anatolian-side metro, Kadıköy out to Pendik.
+        new("M4 Kadıköy–Tavşantepe", "Kadıköy", "POINT(29.025 40.991)"),
+        new("M4 Kadıköy–Tavşantepe", "Ayrılık Çeşmesi", "POINT(29.035 40.998)"),
+        new("M4 Kadıköy–Tavşantepe", "Ünalan", "POINT(29.066 41.001)"),
+        new("M4 Kadıköy–Tavşantepe", "Göztepe", "POINT(29.075 40.988)"),
+        new("M4 Kadıköy–Tavşantepe", "Kozyatağı", "POINT(29.100 40.977)"),
+        new("M4 Kadıköy–Tavşantepe", "Maltepe", "POINT(29.131 40.935)"),
+        new("M4 Kadıköy–Tavşantepe", "Kartal", "POINT(29.183 40.905)"),
+        new("M4 Kadıköy–Tavşantepe", "Tavşantepe", "POINT(29.215 40.898)"),
+
+        // 3. Nostalji Tramvay: the short heritage line along the old town seafront.
+        new("Antalya Nostalji Tramvayı", "Zerdalilik", "POINT(30.718 36.888)"),
+        new("Antalya Nostalji Tramvayı", "İsmetpaşa", "POINT(30.708 36.887)"),
+        new("Antalya Nostalji Tramvayı", "Kalekapısı", "POINT(30.703 36.886)"),
+        new("Antalya Nostalji Tramvayı", "Cumhuriyet Meydanı", "POINT(30.701 36.885)"),
+        new("Antalya Nostalji Tramvayı", "Konyaaltı Caddesi", "POINT(30.690 36.885)"),
+        new("Antalya Nostalji Tramvayı", "Antalya Müzesi", "POINT(30.680 36.886)"),
+
+        // 4. AntRay T1: the modern tram from the western suburbs out past the airport.
+        new("AntRay T1 Fatih–Expo", "Fatih", "POINT(30.652 36.879)"),
+        new("AntRay T1 Fatih–Expo", "Meydan", "POINT(30.674 36.885)"),
+        new("AntRay T1 Fatih–Expo", "Şarampol", "POINT(30.702 36.893)"),
+        new("AntRay T1 Fatih–Expo", "Otogar", "POINT(30.716 36.912)"),
+        new("AntRay T1 Fatih–Expo", "Antalya Havalimanı", "POINT(30.795 36.899)"),
+        new("AntRay T1 Fatih–Expo", "Aksu", "POINT(30.845 36.945)"),
+        new("AntRay T1 Fatih–Expo", "Expo", "POINT(30.870 36.960)"),
+
+        // 5. Gaziantep T1: north Şehitkamil down through the historic centre to Karataş.
+        new("Gaziantep Tramvay T1", "Şehitkamil", "POINT(37.362 37.093)"),
+        new("Gaziantep Tramvay T1", "Batıkent", "POINT(37.356 37.084)"),
+        new("Gaziantep Tramvay T1", "Üniversite", "POINT(37.348 37.073)"),
+        new("Gaziantep Tramvay T1", "Şehreküstü", "POINT(37.370 37.068)"),
+        new("Gaziantep Tramvay T1", "Karagöz", "POINT(37.379 37.064)"),
+        new("Gaziantep Tramvay T1", "Şahinbey", "POINT(37.384 37.060)"),
+        new("Gaziantep Tramvay T1", "Karataş", "POINT(37.362 37.029)"),
+
+        // 6. GaziRay: the suburban rail line across the city, industrial west to Oğuzeli.
+        new("GaziRay (Başpınar–Oğuzeli)", "Başpınar", "POINT(37.230 37.050)"),
+        new("GaziRay (Başpınar–Oğuzeli)", "Organize Sanayi", "POINT(37.280 37.056)"),
+        new("GaziRay (Başpınar–Oğuzeli)", "Gaziantep Garı", "POINT(37.385 37.071)"),
+        new("GaziRay (Başpınar–Oğuzeli)", "Beylerbeyi", "POINT(37.430 37.040)"),
+        new("GaziRay (Başpınar–Oğuzeli)", "Gaziantep Havalimanı", "POINT(37.479 36.947)"),
+        new("GaziRay (Başpınar–Oğuzeli)", "Oğuzeli", "POINT(37.503 36.956)"),
+
+        // 7. Sahil Hattı: the coastal service from Akçaabat through the centre to Yomra.
+        new("Trabzon Sahil Hattı", "Akçaabat", "POINT(39.568 41.021)"),
+        new("Trabzon Sahil Hattı", "Söğütlü", "POINT(39.650 41.002)"),
+        new("Trabzon Sahil Hattı", "Beşirli", "POINT(39.698 41.006)"),
+        new("Trabzon Sahil Hattı", "Meydan Parkı", "POINT(39.718 41.005)"),
+        new("Trabzon Sahil Hattı", "Trabzon Limanı", "POINT(39.737 41.003)"),
+        new("Trabzon Sahil Hattı", "Değirmendere", "POINT(39.752 40.998)"),
+        new("Trabzon Sahil Hattı", "KTÜ Yalıncak", "POINT(39.777 40.993)"),
+        new("Trabzon Sahil Hattı", "Yomra", "POINT(39.860 40.955)"),
+
+        // 8. Uzungöl Hattı: leaves the coast at Of and climbs inland; Uzungöl matches its POI exactly.
+        new("Trabzon–Uzungöl Hattı", "Meydan Parkı", "POINT(39.718 41.005)"),
+        new("Trabzon–Uzungöl Hattı", "Değirmendere", "POINT(39.752 40.998)"),
+        new("Trabzon–Uzungöl Hattı", "Araklı", "POINT(40.064 40.941)"),
+        new("Trabzon–Uzungöl Hattı", "Sürmene", "POINT(40.113 40.911)"),
+        new("Trabzon–Uzungöl Hattı", "Of", "POINT(40.260 40.949)"),
+        new("Trabzon–Uzungöl Hattı", "Çaykara", "POINT(40.234 40.755)"),
+        new("Trabzon–Uzungöl Hattı", "Uzungöl", "POINT(40.293 40.618)"),
     ];
 }

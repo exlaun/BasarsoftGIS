@@ -18,9 +18,11 @@ public static class SeedData
     public const string ViewerRoleName = "Viewer";
     public const string ViewerRoleDescription = "View-only access to the map and POIs";
 
-    // Granted to the Operator role when the seeder first creates it. After that, the admin panel owns
-    // the role's permission set (same hands-off rule as the Admin role).
-    public static readonly IReadOnlyList<string> OperatorPermissions = new[] { "add_poi" };
+    // Granted to the Operator role. Applied when the seeder first creates the role and, for any
+    // brand-new name added here later, topped up onto an existing Operator role too (AdminSeeder step
+    // 5b) — the same targeted, can't-undo-a-removal rule the Admin role gets. After that the admin
+    // panel owns the set.
+    public static readonly IReadOnlyList<string> OperatorPermissions = new[] { "add_poi", ManageTransportPermission };
 
     // The four management permission names, as constants so the per-resource authorization policies
     // (Program.cs / PermissionRequirement) and controllers reference the same spelling as the seed.
@@ -28,6 +30,11 @@ public static class SeedData
     public const string ManageRolesPermission = "manage_roles";
     public const string ManagePermissionsPermission = "manage_permissions";
     public const string ManagePoisPermission = "manage_pois";
+
+    // The transportation module's single permission. Deliberately NOT in AdminPermissions below: it
+    // gates on-map operator actions (the Add-Stop tool + the Route panel's writes), not the admin
+    // panel, so it needs no per-resource policy and holding it does not unlock /admin.
+    public const string ManageTransportPermission = "manage_transport";
 
     // The shared permission catalogue: name (machine key) -> English description. Drawing permissions
     // plus the management permissions that gate the admin panel itself.
@@ -41,6 +48,7 @@ public static class SeedData
         (ManagePermissionsPermission, "Manage permissions"),
         ("add_poi",                 "Add POIs to the map"),
         (ManagePoisPermission,        "Manage POIs and POI categories"),
+        (ManageTransportPermission,   "Create and manage transportation routes and stops"),
     };
 
     // Holding ANY of these effective permissions lets a user open the admin panel. Which sections

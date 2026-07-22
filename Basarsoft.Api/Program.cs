@@ -80,6 +80,9 @@ builder.Services.AddScoped<IPoiCategoryService, PoiCategoryService>();
 // renders back as heat maps.
 builder.Services.AddScoped<ILocationAnalysisService, LocationAnalysisService>();
 
+// Transportation module: routes (name + color) and their ordered point stops.
+builder.Services.AddScoped<ITransportationService, TransportationService>();
+
 // Global exception handling: a final safety net that converts any unhandled exception into a clean
 // 500 JSON response (the controllers also try-catch individually). AddProblemDetails() supplies the
 // standard error body format that UseExceptionHandler() falls back to.

@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './DrawToolbar.css'
 
 // Inline feather-style icons (inherit currentColor, no icon dependency) — matches the
-// convention in ThemeToggle.jsx / PasswordInput.jsx.
+// convention in ThemeToggle.jsx / PasswordInput.jsx. 18px reads well centred in a 2.5rem circle.
 const iconProps = {
-  width: 16,
-  height: 16,
+  width: 18,
+  height: 18,
   viewBox: '0 0 24 24',
   fill: 'none',
   stroke: 'currentColor',
@@ -50,12 +50,25 @@ const PolygonIcon = (
     <path d="M12 2l9.5 6.9-3.6 11.2H6.1L2.5 8.9 12 2z" />
   </svg>
 )
+// Pencil — the Draw group parent (Point/Line/Polygon live under it).
+const DrawIcon = (
+  <svg {...iconProps}>
+    <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+  </svg>
+)
 // Bar chart — inventory analysis (count shapes under a temporary polygon).
 const AnalysisIcon = (
   <svg {...iconProps}>
     <line x1="18" y1="20" x2="18" y2="10" />
     <line x1="12" y1="20" x2="12" y2="4" />
     <line x1="6" y1="20" x2="6" y2="14" />
+  </svg>
+)
+// Pulse line — the Analysis group parent. Deliberately different from the bar-chart icon above so a
+// collapsed group and its Intersection child never look like the same button.
+const ActivityIcon = (
+  <svg {...iconProps}>
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
   </svg>
 )
 // Flame — heat map analysis (density of the caller's shapes, rendered by GeoServer).
@@ -70,6 +83,25 @@ const PoiIcon = (
   <svg {...iconProps}>
     <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
     <line x1="4" y1="22" x2="4" y2="15" />
+  </svg>
+)
+// Bus — add a transportation stop to a route. Distinct from the POI flag and the plain point pin.
+const StopIcon = (
+  <svg {...iconProps}>
+    <rect x="4" y="4" width="16" height="13" rx="2" />
+    <line x1="4" y1="11" x2="20" y2="11" />
+    <line x1="8" y1="17" x2="8" y2="20" />
+    <line x1="16" y1="17" x2="16" y2="20" />
+    <circle cx="8" cy="14" r="1" />
+    <circle cx="16" cy="14" r="1" />
+  </svg>
+)
+// Pin with a plus — the Places group parent (POI/Add Stop): "put a shared thing on the map".
+const PlacesIcon = (
+  <svg {...iconProps}>
+    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+    <line x1="12" y1="7" x2="12" y2="13" />
+    <line x1="9" y1="10" x2="15" y2="10" />
   </svg>
 )
 // Crosshair — Konum Analizi (weighted location analysis over POIs in a chosen region).
@@ -100,25 +132,56 @@ const LAYER_OPTIONS = [
   { type: 'polygon', label: 'Polygons', icon: PolygonIcon },
 ]
 
-// Tool keys match what MapPage expects: 'none' pans, 'select' inspects/edits/deletes, the three OL
-// draw types draw, 'analysis' counts shapes under a temporary polygon. Deleting lives inside the
-// Select popup (behind a confirmation) rather than as a click-to-delete tool.
-const TOOLS = [
-  { key: 'none', label: 'Pan', icon: PanIcon },
-  { key: 'select', label: 'Select', icon: SelectIcon },
-  { key: 'Point', label: 'Point', icon: PointIcon },
-  { key: 'LineString', label: 'Line', icon: LineIcon },
-  { key: 'Polygon', label: 'Polygon', icon: PolygonIcon },
-  { key: 'Poi', label: 'POI', icon: PoiIcon },
-  { key: 'analysis', label: 'Analysis', icon: AnalysisIcon },
-  { key: 'heatmap', label: 'Heat Map', icon: HeatmapIcon },
-  // Weighted location analysis over POIs. No permission gate: like Analysis/Heat Map it is a
-  // read-only tool, so the permission-free User (Viewer) role sees and uses it too.
-  { key: 'konum', label: 'Location Analysis', icon: KonumIcon },
+// The rail, top to bottom. Leaf `key` values are the tool keys MapPage expects: 'none' pans,
+// 'select' inspects/edits/deletes, the three OL draw types draw, 'analysis' counts shapes under a
+// temporary polygon. Deleting lives inside the Select popup (behind a confirmation) rather than as
+// a click-to-delete tool.
+//
+// Related tools are collapsed behind one parent button whose flyout reveals the children — the two
+// cursor modes stay top-level because they are the ones reached most often.
+const TOOL_GROUPS = [
+  { kind: 'tool', key: 'none', label: 'Pan', icon: PanIcon },
+  { kind: 'tool', key: 'select', label: 'Select', icon: SelectIcon },
+  {
+    kind: 'group',
+    id: 'draw',
+    label: 'Draw',
+    icon: DrawIcon,
+    children: [
+      { key: 'Point', label: 'Point', icon: PointIcon },
+      { key: 'LineString', label: 'Line', icon: LineIcon },
+      { key: 'Polygon', label: 'Polygon', icon: PolygonIcon },
+    ],
+  },
+  {
+    kind: 'group',
+    id: 'places',
+    label: 'Places',
+    icon: PlacesIcon,
+    children: [
+      { key: 'Poi', label: 'POI', icon: PoiIcon },
+      // Add a transportation stop (gated by manage_transport via TOOL_CONFIG, so End Users never see it).
+      { key: 'AddStop', label: 'Add Stop', icon: StopIcon },
+    ],
+  },
+  {
+    kind: 'group',
+    id: 'analysis',
+    label: 'Analysis',
+    icon: ActivityIcon,
+    children: [
+      { key: 'analysis', label: 'Intersection Analysis', icon: AnalysisIcon },
+      { key: 'heatmap', label: 'Heat Map', icon: HeatmapIcon },
+      // Weighted location analysis over POIs. No permission gate: like Analysis/Heat Map it is a
+      // read-only tool, so the permission-free User (Viewer) role sees and uses it too.
+      { key: 'konum', label: 'Location Analysis', icon: KonumIcon },
+    ],
+  },
+  { kind: 'layers', id: 'layers', label: 'Layers', icon: LayersIcon },
 ]
 
-// Bottom-left hint per active tool. Kept accurate to each interaction: Pan drags (no click), a Point
-// finishes on a single click (no double-click), and only Line/Polygon need a double-click to finish.
+// Hint pill (top-center) per active tool. Kept accurate to each interaction: Pan drags (no click), a
+// Point finishes on a single click (no double-click), and only Line/Polygon need a double-click to finish.
 const TOOL_HINTS = {
   none: 'Drag to move the map.',
   select: 'Click a shape to view its details.',
@@ -126,6 +189,7 @@ const TOOL_HINTS = {
   LineString: 'Click to add points, then double-click to finish the line.',
   Polygon: 'Click to add corners, then double-click to finish the polygon.',
   Poi: 'Click on the map to place a POI, then fill in its details.',
+  AddStop: 'Click on the map to place a stop, then choose its route.',
   analysis: 'Draw a polygon to count the shapes it touches. Nothing is saved.',
   heatmap: 'Shows your shape density as a GeoServer heat map. Pick another tool to turn it off.',
   konum: 'Pick a province or draw a region, weight 2-5 POI categories, then start the analysis.',
@@ -138,77 +202,150 @@ export default function DrawToolbar({
   layerVisibility = {},
   onToggleLayer,
 }) {
-  // A tool the caller has no permission for is removed from the bar entirely (not just disabled), so
-  // it never appears on that user's screen. Pan/Select/Analysis carry no permission gate and always show.
-  const visibleTools = TOOLS.filter((tool) => !disabledTools.has(tool.key))
+  // A tool the caller has no permission for is removed from the rail entirely (not just disabled), so
+  // it never appears on that user's screen. A group left with no children disappears with them — a
+  // Viewer holds no add_* permission, so Draw and Places vanish rather than opening onto nothing.
+  // Pan/Select/Analysis/Layers carry no permission gate and always show.
+  const visibleGroups = useMemo(
+    () =>
+      TOOL_GROUPS.map((entry) =>
+        entry.kind === 'group'
+          ? { ...entry, children: entry.children.filter((child) => !disabledTools.has(child.key)) }
+          : entry,
+      ).filter((entry) => entry.kind !== 'group' || entry.children.length > 0),
+    [disabledTools],
+  )
 
-  // The Layers button opens an inline menu of the three visibility checkboxes. Kept open while the user
-  // ticks boxes; a click anywhere outside closes it.
-  const [layersOpen, setLayersOpen] = useState(false)
-  const layersRef = useRef(null)
+  // Id of the group whose flyout is open, or null. One at a time: opening a group replaces the
+  // previous one. A click anywhere outside the rail, or Escape, closes it.
+  const [openGroup, setOpenGroup] = useState(null)
+  const railRef = useRef(null)
   useEffect(() => {
-    if (!layersOpen) return undefined
+    if (!openGroup) return undefined
     const onDocPointerDown = (event) => {
-      if (layersRef.current && !layersRef.current.contains(event.target)) setLayersOpen(false)
+      if (railRef.current && !railRef.current.contains(event.target)) setOpenGroup(null)
+    }
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setOpenGroup(null)
     }
     document.addEventListener('mousedown', onDocPointerDown)
-    return () => document.removeEventListener('mousedown', onDocPointerDown)
-  }, [layersOpen])
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [openGroup])
+
+  // Picking a tool from a flyout closes it — the choice is made, and the map underneath is freed up.
+  // The Layers flyout is deliberately excluded (see below): its rows are toggles, not a choice.
+  const pickTool = useCallback(
+    (key) => {
+      onSelectTool(key)
+      setOpenGroup(null)
+    },
+    [onSelectTool],
+  )
 
   return (
     <div className="draw-toolbar">
       <p className="draw-toolbar-hint">{TOOL_HINTS[activeTool] ?? TOOL_HINTS.none}</p>
 
-      <div className="draw-toolbar-tools">
-        {visibleTools.map((tool) => (
-          <button
-            key={tool.key}
-            type="button"
-            className={`draw-tool${activeTool === tool.key ? ' is-active' : ''}`}
-            onClick={() => onSelectTool(tool.key)}
-            aria-pressed={activeTool === tool.key}
-            title={tool.label}
-          >
-            <span className="draw-tool-icon" aria-hidden="true">
-              {tool.icon}
-            </span>
-            <span className="draw-tool-label">{tool.label}</span>
-          </button>
-        ))}
+      <div className="draw-rail" ref={railRef}>
+        {visibleGroups.map((entry) => {
+          if (entry.kind === 'tool') {
+            return (
+              <div key={entry.key} className="draw-item">
+                <button
+                  type="button"
+                  className={`draw-tool${activeTool === entry.key ? ' is-active' : ''}`}
+                  onClick={() => pickTool(entry.key)}
+                  aria-pressed={activeTool === entry.key}
+                  aria-label={entry.label}
+                >
+                  <span className="draw-tool-icon">{entry.icon}</span>
+                </button>
+                <span className="draw-tip" role="tooltip">
+                  {entry.label}
+                </span>
+              </div>
+            )
+          }
 
-        <div className="draw-layers" ref={layersRef}>
-          <button
-            type="button"
-            className={`draw-tool${layersOpen ? ' is-active' : ''}`}
-            onClick={() => setLayersOpen((open) => !open)}
-            aria-haspopup="true"
-            aria-expanded={layersOpen}
-            title="Layers"
-          >
-            <span className="draw-tool-icon" aria-hidden="true">
-              {LayersIcon}
-            </span>
-            <span className="draw-tool-label">Layers</span>
-          </button>
+          const isOpen = openGroup === entry.id
+          // A collapsed group still shows which of its tools is live, so the rail never hides the
+          // current mode. Layers has no tool of its own — only its own open state.
+          const isActive =
+            entry.kind === 'group' && entry.children.some((child) => child.key === activeTool)
 
-          {layersOpen && (
-            <div className="draw-layers-menu" role="group" aria-label="Layer visibility">
-              {LAYER_OPTIONS.map(({ type, label, icon }) => (
-                <label key={type} className="draw-layers-row">
-                  <input
-                    type="checkbox"
-                    checked={layerVisibility[type] ?? true}
-                    onChange={() => onToggleLayer?.(type)}
-                  />
-                  <span className="draw-layers-icon" aria-hidden="true">
-                    {icon}
-                  </span>
-                  <span>{label}</span>
-                </label>
-              ))}
+          return (
+            <div
+              key={entry.id}
+              className={`draw-item${isOpen ? ' is-open' : ''}`}
+            >
+              <button
+                type="button"
+                className={`draw-tool${isActive || isOpen ? ' is-active' : ''}`}
+                onClick={() => setOpenGroup((current) => (current === entry.id ? null : entry.id))}
+                aria-haspopup="true"
+                aria-expanded={isOpen}
+                aria-label={entry.label}
+              >
+                <span className="draw-tool-icon">{entry.icon}</span>
+                <span className="draw-tool-caret" aria-hidden="true" />
+              </button>
+              <span className="draw-tip" role="tooltip">
+                {entry.label}
+              </span>
+
+              {isOpen && entry.kind === 'group' && (
+                <div className="draw-flyout" role="group" aria-label={entry.label}>
+                  {entry.children.map((child) => (
+                    <div key={child.key} className="draw-item">
+                      <button
+                        type="button"
+                        className={`draw-tool${activeTool === child.key ? ' is-active' : ''}`}
+                        onClick={() => pickTool(child.key)}
+                        aria-pressed={activeTool === child.key}
+                        aria-label={child.label}
+                      >
+                        <span className="draw-tool-icon">{child.icon}</span>
+                      </button>
+                      <span className="draw-tip draw-tip-below" role="tooltip">
+                        {child.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Layer visibility: toggles rather than a choice, so this flyout stays open while the
+                  user ticks several layers and closes only on outside-click/Escape. */}
+              {isOpen && entry.kind === 'layers' && (
+                <div className="draw-flyout" role="group" aria-label="Layer visibility">
+                  {LAYER_OPTIONS.map(({ type, label, icon }) => {
+                    const shown = layerVisibility[type] ?? true
+                    return (
+                      <div key={type} className="draw-item">
+                        <button
+                          type="button"
+                          className={`draw-tool draw-layer-toggle${shown ? ' is-active' : ' is-off'}`}
+                          onClick={() => onToggleLayer?.(type)}
+                          aria-pressed={shown}
+                          aria-label={`${label} layer`}
+                        >
+                          <span className="draw-tool-icon">{icon}</span>
+                        </button>
+                        <span className="draw-tip draw-tip-below" role="tooltip">
+                          {label}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          )
+        })}
       </div>
     </div>
   )

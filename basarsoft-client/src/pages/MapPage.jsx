@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import Map from 'ol/Map'
+// Imported under an alias on purpose: as plain `Map` it shadows the built-in JavaScript Map for this
+// whole module, and `new Map([[k, v]])` then silently builds an OpenLayers map whose ol/Object get()
+// returns undefined for every key — a lookup table that compiles, runs, and is always empty.
+import OlMap from 'ol/Map'
 import View from 'ol/View'
 import Overlay from 'ol/Overlay'
 import Collection from 'ol/Collection'
 import Feature from 'ol/Feature'
+import LineString from 'ol/geom/LineString'
 import TileLayer from 'ol/layer/Tile'
 import OSM from 'ol/source/OSM'
 import VectorLayer from 'ol/layer/Vector'
@@ -16,8 +20,9 @@ import Modify from 'ol/interaction/Modify'
 import Translate from 'ol/interaction/Translate'
 import WKT from 'ol/format/WKT'
 import { fromLonLat } from 'ol/proj'
-import { getCenter } from 'ol/extent'
+import { boundingExtent, getCenter } from 'ol/extent'
 import { Style, Circle as CircleStyle, Fill, Stroke, Text, Icon as IconStyle } from 'ol/style'
+import { asArray } from 'ol/color'
 import 'ol/ol.css'
 import { useAuth } from '../context/auth-context'
 import SessionTimer from '../components/SessionTimer'
@@ -34,9 +39,22 @@ import PoiInfoModal from '../components/PoiInfoModal'
 import PoiSearchBar from '../components/PoiSearchBar'
 import PoiIconBadge from '../components/PoiIconBadge'
 import LocationAnalysisPanel from '../components/LocationAnalysisPanel'
+import RouteManagementPanel from '../components/RouteManagementPanel'
+import RouteFormModal from '../components/RouteFormModal'
+import StopFormModal from '../components/StopFormModal'
+import StopInfoModal from '../components/StopInfoModal'
 import { listAllGeometry, saveGeometry, updateGeometry, deleteGeometry, analyzeArea } from '../api/geometry'
 import { listPois, createPoi, deletePoi, listPoiCategories } from '../api/poi'
 import { listProvinces, getProvince, createLocationAnalysis } from '../api/locationAnalysis'
+import {
+  listRoutes,
+  createRoute,
+  updateRoute,
+  listStops,
+  createStop,
+  listRouteStops,
+  reorderStops,
+} from '../api/transportation'
 import {
   DEFAULT_POI_COLOR,
   categoryBadgeAppearance,
@@ -48,6 +66,15 @@ import './MapPage.css'
 
 // Approximate geographic center of Turkey (lon, lat).
 const TURKEY_CENTER = [35.2433, 38.9637]
+
+// Fit padding [top, right, bottom, left] for framing something beside the Location Analysis card,
+// which sits at left: 5rem (80px) and runs up to 340px wide — so ~440px of left padding keeps the
+// fitted extent in the part of the map the card is not covering.
+const LEFT_PANEL_FIT_PADDING = [70, 70, 70, 440]
+
+// The same idea for the right-edge drawers (Routes, Shapes), which are min(460px, 94vw) wide.
+// Mirrors the query drawer's own [90, 440, 90, 90] in handleRowClick.
+const RIGHT_DRAWER_FIT_PADDING = [70, 480, 70, 70]
 
 // The OSM view works in Web Mercator; we store WGS84 lon/lat in the DB. Transform at every boundary
 // so a shape saved from the map lands back in exactly the same place when read.
@@ -62,6 +89,9 @@ const TOOL_CONFIG = {
   LineString: { drawType: 'LineString', apiType: 'line', permission: 'add_line' },
   Polygon: { drawType: 'Polygon', apiType: 'polygon', permission: 'add_polygon' },
   Poi: { drawType: 'Point', apiType: 'poi', permission: 'add_poi' },
+  // Transportation stop: a point saved through /api/stops (not /api/geometry), gated by
+  // manage_transport. Shares the draw-interaction plumbing with the other point tools.
+  AddStop: { drawType: 'Point', apiType: 'stop', permission: 'manage_transport' },
 }
 
 const GEOMETRY_WRITE_PERMISSION_BY_TYPE = {
@@ -157,6 +187,112 @@ const poiStyleFn = (feature, resolution) => {
   ]
 }
 
+// Fallback marker color for a stop whose route has no color set. Kept in sync with
+// DEFAULT_ROUTE_COLOR in RouteManagementPanel.jsx so a route looks the same on the map and in the panel.
+const STOP_DEFAULT_COLOR = '#2563eb'
+
+// Stop marker: a circle in its route's color with the sequence number inside; the stop name renders
+// above once zoomed past the same label threshold as POIs. No declutter — stops on a route are sparse.
+const stopStyleFn = (feature, resolution) => {
+  const color = feature.get('routeColor') || STOP_DEFAULT_COLOR
+  const order = feature.get('sequenceOrder')
+  const name = feature.get('name')
+  const styles = [
+    new Style({
+      image: new CircleStyle({
+        radius: 11,
+        fill: new Fill({ color }),
+        stroke: new Stroke({ color: '#ffffff', width: 2 }),
+      }),
+      text: new Text({
+        text: order != null ? String(order) : '',
+        font: '700 11px sans-serif',
+        fill: new Fill({ color: '#ffffff' }),
+      }),
+    }),
+  ]
+  if (resolution < POI_LABEL_MAX_RESOLUTION && name) {
+    styles.push(
+      new Style({
+        text: new Text({
+          text: name,
+          font: '600 12px sans-serif',
+          offsetY: -22,
+          fill: new Fill({ color: '#111827' }),
+          stroke: new Stroke({ color: '#ffffff', width: 3 }),
+        }),
+      }),
+    )
+  }
+  return styles
+}
+
+// Route names label their connector line earlier (coarser resolution) than stop names label their
+// markers: a route spans a whole city, so it should identify itself well before its individual stops
+// are worth naming. This is only a cheap early-out anyway — Text.overflow defaults to false for
+// line placement, so a name that does not fit along its line is dropped no matter the zoom. That is
+// also why this layer needs no declutter, and so cannot hit the self-collision the POI icons did.
+const ROUTE_LABEL_MAX_RESOLUTION = 600
+
+// A route's connector line, drawn transit-map style: a white casing under a stroke in the route's
+// color, so it stays readable over any basemap. `selectedRouteId` is the route currently open in the
+// Route panel (null = none); its line is drawn heavier and the rest fade back, which is what makes
+// picking a route in the panel a visible action on the map. Stop markers deliberately never fade —
+// they must stay legible and clickable whatever is selected.
+const routeLineStyleFn = (feature, resolution, selectedRouteId) => {
+  const color = feature.get('routeColor') || STOP_DEFAULT_COLOR
+  const selected = selectedRouteId != null && feature.get('routeId') === selectedRouteId
+  const dimmed = selectedRouteId != null && !selected
+  // asArray parses the '#rrggbb' into [r, g, b, a]; it hands back a cached array, so copy before
+  // changing the alpha.
+  const [r, g, b] = asArray(color)
+  const strokeColor = dimmed ? [r, g, b, 0.3] : color
+  const styles = [
+    new Style({
+      stroke: new Stroke({
+        color: dimmed ? 'rgba(255, 255, 255, 0.4)' : '#ffffff',
+        width: selected ? 8 : 6,
+      }),
+    }),
+    new Style({
+      stroke: new Stroke({ color: strokeColor, width: selected ? 5 : 3 }),
+    }),
+  ]
+  if (resolution < ROUTE_LABEL_MAX_RESOLUTION && !dimmed) {
+    const name = feature.get('name')
+    if (name) {
+      styles.push(
+        new Style({
+          text: new Text({
+            text: name,
+            placement: 'line',
+            font: '700 12px sans-serif',
+            fill: new Fill({ color }),
+            stroke: new Stroke({ color: '#ffffff', width: 3 }),
+          }),
+        }),
+      )
+    }
+  }
+  return styles
+}
+
+// Copy a stop's server fields onto its OpenLayers feature (used by the initial load and after a
+// create). `color` mirrors routeColor so the overlap-picker swatch matches the marker.
+const stampStopFeature = (feature, item) => {
+  feature.set('apiType', 'stop')
+  feature.set('dbId', item.id)
+  feature.set('name', item.name)
+  feature.set('routeId', item.routeId)
+  feature.set('routeName', item.routeName)
+  feature.set('routeColor', item.routeColor)
+  feature.set('color', item.routeColor || STOP_DEFAULT_COLOR)
+  feature.set('sequenceOrder', item.sequenceOrder)
+  feature.set('createdBy', item.createdBy)
+  feature.set('createdAt', item.createdAt)
+  feature.set('userId', item.userId)
+}
+
 // Distinct dashed style for the temporary analysis polygon so it reads as "not a saved shape".
 const ANALYSIS_STYLE = new Style({
   fill: new Fill({ color: 'rgba(249, 115, 22, 0.12)' }),
@@ -215,6 +351,19 @@ export default function MapPage() {
   // shape layers. In WMS mode this overlay hides too — the WMS image already contains the POIs
   // (GeoServer renders vw_poi with its category style), so keeping it would double every marker.
   const poiLayerRef = useRef(null)
+  // Transportation stops layer, kept OUT of layersRef like poiLayer (not checkbox-driven). Fed by a
+  // plain /api/stops read (no GeoServer); hides in WMS mode where nothing renders it anyway.
+  const stopLayerRef = useRef(null)
+  // The connector polylines joining each route's stops in sequence order. Derived on the client
+  // (a route carries no geometry server-side) and rebuilt by rebuildRouteLines. Its own source, NOT
+  // sources.stop: that one is the Add-Stop Draw interaction's target and is iterated by
+  // applyStopOrderToMap, both of which assume points only.
+  const routeLineSourceRef = useRef(null)
+  const routeLineLayerRef = useRef(null)
+  // selectedRouteId for the line style to read. A ref because the style function runs on every
+  // render frame of the layer, long after the map effect that created it closed over its scope —
+  // the same reason pendingStopRouteRef is a ref rather than state.
+  const selectedRouteIdRef = useRef(null)
   // GeoServer heat map layer (vw_heat + vec:Heatmap style) + its source; visible only while the
   // 'heatmap' tool is active. Created once, so toggling can never stack duplicate layers.
   const heatLayerRef = useRef(null)
@@ -231,6 +380,10 @@ export default function MapPage() {
   const authAreaSourceRef = useRef(null)
   const authGeomRef = useRef(null)
   const statusTimerRef = useRef(null)
+  // The route to lock the next Add-Stop draw to (set by the panel's "Add stop to this route"); null
+  // means the Add-Stop toolbar tool, where the operator picks the route in the form. A ref, not state,
+  // because the drawend closure reads it without needing to re-run the tool effect.
+  const pendingStopRouteRef = useRef(null)
   // Geometry captured before an edit so a cancelled edit can restore the shape's original position.
   const originalGeomRef = useRef(null)
   // Name/color carried from the info popup into geometry-edit mode, saved together with the new location.
@@ -284,6 +437,22 @@ export default function MapPage() {
   // Dropdown/criteria reference data, fetched lazily the first time the tool is opened.
   const [provinces, setProvinces] = useState(null)
   const [konumCategories, setKonumCategories] = useState(null)
+  // --- Transportation module state ---
+  // Route Management panel open/closed (top-bar toggle). Visible to every authenticated user.
+  const [routePanelOpen, setRoutePanelOpen] = useState(false)
+  // Routes shown in the panel; loaded when the panel opens and after a create/edit.
+  const [routes, setRoutes] = useState([])
+  const [routesLoading, setRoutesLoading] = useState(false)
+  // The route selected in the panel (drives the stop list / add-stop flow); null = none.
+  const [selectedRouteId, setSelectedRouteId] = useState(null)
+  // The route create/edit form modal: { mode:'create' } | { mode:'edit', route } | null.
+  const [routeForm, setRouteForm] = useState(null)
+  // The stop currently opened in its read-only info popup (Select tool): { feature } or null.
+  const [selectedStop, setSelectedStop] = useState(null)
+  // The selected route's stops in sequence order (loaded when a route is selected); drives the panel's
+  // stop list and drag-reorder.
+  const [routeStops, setRouteStops] = useState([])
+  const [routeStopsLoading, setRouteStopsLoading] = useState(false)
 
   const disabledDrawTools = useMemo(() => {
     const granted = new Set(permissions)
@@ -303,12 +472,203 @@ export default function MapPage() {
     selectedShape && canWriteShapeType(selectedShape.feature.get('apiType')),
   )
 
+  // The transportation write gate: Operators (manage_transport) create/edit routes, place stops, and
+  // reorder them; End Users lack it and get a read-only panel. Mirrors the server's inline check.
+  const hasManageTransport = useMemo(() => permissions.includes('manage_transport'), [permissions])
+
   // Stable so effects can depend on it without re-running; shows a transient toast. `duration` lets
   // an important message linger longer so it isn't missed.
   const flashStatus = useCallback((type, text, duration = 2800) => {
     setStatus({ type, text })
     window.clearTimeout(statusTimerRef.current)
     statusTimerRef.current = window.setTimeout(() => setStatus(null), duration)
+  }, [])
+
+  // --- Transportation: route panel handlers ---
+  const loadRoutes = useCallback(async () => {
+    setRoutesLoading(true)
+    try {
+      setRoutes(await listRoutes())
+    } catch {
+      flashStatus('error', 'Could not load routes.')
+    } finally {
+      setRoutesLoading(false)
+    }
+  }, [flashStatus])
+
+  // Load a route's stops into the panel. Done from the selection event handler (not an effect) per
+  // React's "you might not need an effect" guidance and the set-state-in-effect lint rule. A request
+  // id guards against a fast A->B selection showing A's stops under B.
+  const stopsRequestRef = useRef(0)
+  const loadRouteStops = useCallback((routeId) => {
+    const requestId = ++stopsRequestRef.current
+    if (routeId == null) {
+      setRouteStops([])
+      return
+    }
+    setRouteStopsLoading(true)
+    listRouteStops(routeId)
+      .then((data) => {
+        if (stopsRequestRef.current === requestId) setRouteStops(data)
+      })
+      .catch(() => {
+        if (stopsRequestRef.current === requestId) {
+          setRouteStops([])
+          flashStatus('error', 'Could not load stops.')
+        }
+      })
+      .finally(() => {
+        if (stopsRequestRef.current === requestId) setRouteStopsLoading(false)
+      })
+  }, [flashStatus])
+
+  // The two right-edge drawers share one slot, so opening either slides the other out. Both toggles
+  // read the current value from the closure rather than from a setState updater, keeping the updater
+  // pure now that opening carries side effects (same shape as handleSelectRoute below).
+  // Routes also refreshes its list on every open so stop counts stay current.
+  const handleToggleRoutePanel = useCallback(() => {
+    const next = !routePanelOpen
+    setRoutePanelOpen(next)
+    if (next) {
+      setDrawerOpen(false)
+      loadRoutes()
+    }
+  }, [routePanelOpen, loadRoutes])
+
+  const handleToggleDrawer = useCallback(() => {
+    const next = !drawerOpen
+    setDrawerOpen(next)
+    if (next) setRoutePanelOpen(false)
+  }, [drawerOpen])
+
+  // Frame every stop on a route. Reads the map's own stop source rather than the panel's routeStops,
+  // so the fly starts on the click instead of waiting for loadRouteStops' request to land. Every stop
+  // is already on the client from the one-shot listStops() at map init, and a stop drawn this session
+  // was added to this same source, so both are covered.
+  const zoomToRoute = useCallback((routeId) => {
+    const coordinates = (sourcesRef.current?.stop.getFeatures() ?? [])
+      .filter((feature) => feature.get('routeId') === routeId)
+      .map((feature) => feature.getGeometry().getCoordinates())
+    // A route with no stops has nothing to frame; the panel's own "No stops yet" line explains it.
+    if (coordinates.length === 0) return
+    // A single stop yields a zero-area extent, which fit resolves to maxZoom — the same zoom 15
+    // handleStopRowClick uses, so a one-stop route and its stop land identically.
+    mapRef.current?.getView().fit(boundingExtent(coordinates), {
+      padding: RIGHT_DRAWER_FIT_PADDING,
+      maxZoom: 15,
+      duration: 450,
+    })
+  }, [])
+
+  // Click a route to select it (drives the stop list / add-stop flow); click again to deselect. Load
+  // its stops in the same handler so no effect calls setState synchronously.
+  const handleSelectRoute = useCallback((routeId) => {
+    const next = routeId === selectedRouteId ? null : routeId
+    setSelectedRouteId(next)
+    loadRouteStops(next)
+    // Only when selecting: re-clicking a route to deselect it leaves the view where the user put it.
+    if (next != null) zoomToRoute(next)
+  }, [selectedRouteId, loadRouteStops, zoomToRoute])
+
+  // Create or edit a route from the panel's form modal. Throws on failure (e.g. a duplicate name ->
+  // 409) so the modal can keep itself open and show the error; only a success closes it.
+  const submitRouteForm = useCallback(async (name, color) => {
+    if (routeForm?.mode === 'edit') {
+      const saved = await updateRoute(routeForm.route.id, { name, color })
+      flashStatus('success', `Route "${saved.name}" updated.`)
+    } else {
+      const saved = await createRoute({ name, color })
+      flashStatus('success', `Route "${saved.name}" created.`)
+    }
+    await loadRoutes()
+    setRouteForm(null)
+  }, [routeForm, loadRoutes, flashStatus])
+
+  // Redraw every route's connector line from whatever is currently in the stop source: group the
+  // stop features by route, walk each group in sequence order, and join them into one LineString.
+  // A full rebuild rather than patching a single line — with a few dozen stops it costs nothing, and
+  // it leaves every caller below with the same single idempotent call.
+  const rebuildRouteLines = useCallback(() => {
+    const stopSource = sourcesRef.current?.stop
+    const lineSource = routeLineSourceRef.current
+    if (!stopSource || !lineSource) return
+
+    const byRoute = new Map()
+    for (const feature of stopSource.getFeatures()) {
+      const routeId = feature.get('routeId')
+      // A just-drawn stop has no routeId until its save comes back; it joins the line then.
+      if (routeId == null) continue
+      if (!byRoute.has(routeId)) byRoute.set(routeId, [])
+      byRoute.get(routeId).push(feature)
+    }
+
+    lineSource.clear()
+    for (const [routeId, stops] of byRoute) {
+      // One stop cannot define a line; its marker alone still shows on the map.
+      if (stops.length < 2) continue
+      stops.sort((a, b) => a.get('sequenceOrder') - b.get('sequenceOrder'))
+      const line = new Feature(
+        new LineString(stops.map((stop) => stop.getGeometry().getCoordinates())),
+      )
+      line.set('routeId', routeId)
+      line.set('routeColor', stops[0].get('routeColor'))
+      // `name` is what the hover tooltip reads, so the line names its route for free. Deliberately
+      // NO apiType and NO dbId: the Select tool's hit filter requires both, so the connector can
+      // never be clicked or selected — same arrangement as the authorization-boundary backdrop.
+      line.set('name', stops[0].get('routeName'))
+      lineSource.addFeature(line)
+    }
+  }, [])
+
+  // Push a stop list's sequence numbers onto the matching map features so the numbered markers
+  // renumber in step with the panel (used by the optimistic reorder and its rollback).
+  const applyStopOrderToMap = useCallback((orderedStops) => {
+    const source = sourcesRef.current?.stop
+    if (!source) return
+    const orderById = new Map(orderedStops.map((stop) => [stop.id, stop.sequenceOrder]))
+    for (const feature of source.getFeatures()) {
+      const order = orderById.get(feature.get('dbId'))
+      if (order != null && feature.get('sequenceOrder') !== order) {
+        feature.set('sequenceOrder', order)
+        feature.changed()
+      }
+    }
+    // Reordering changes the line's vertex order, so it has to be redrawn too. Every reorder path —
+    // the optimistic update, the saved result, and the rollback — comes through here.
+    rebuildRouteLines()
+  }, [rebuildRouteLines])
+
+  // Panel drag-reorder: optimistically renumber the panel + map, then persist. On failure, roll back.
+  const handleReorderStops = useCallback(async (routeId, orderedIds) => {
+    const previous = routeStops
+    const byId = new Map(previous.map((stop) => [stop.id, stop]))
+    const optimistic = orderedIds.map((id, index) => ({ ...byId.get(id), sequenceOrder: index + 1 }))
+    setRouteStops(optimistic)
+    applyStopOrderToMap(optimistic)
+    try {
+      const saved = await reorderStops(routeId, orderedIds)
+      setRouteStops(saved)
+      applyStopOrderToMap(saved)
+    } catch {
+      setRouteStops(previous)
+      applyStopOrderToMap(previous)
+      flashStatus('error', 'Could not save the new stop order.')
+    }
+  }, [routeStops, applyStopOrderToMap, flashStatus])
+
+  // Panel stop-row click: fly to the stop and open its read-only info popup (like the query panel row).
+  const handleStopRowClick = useCallback((stopId) => {
+    const feature = sourcesRef.current?.stop.getFeatures().find((f) => f.get('dbId') === stopId)
+    if (!feature) return
+    const view = mapRef.current?.getView()
+    if (view) {
+      view.animate({
+        center: feature.getGeometry().getCoordinates(),
+        zoom: Math.max(view.getZoom() ?? 0, 15),
+        duration: 500,
+      })
+    }
+    setSelectedStop({ feature })
   }, [])
 
   // Clear any pending toast timer on unmount so it can't fire setStatus into an unmounted page
@@ -353,6 +713,9 @@ export default function MapPage() {
       // POIs share the sources map (so the Draw interaction's sources[apiType] lookup covers them)
       // but their layer deliberately lives outside `layers` — see poiLayerRef.
       poi: new VectorSource(),
+      // Transportation stops: same arrangement as POIs — in `sources` for the Draw plumbing, layer
+      // kept out of `layers` (see stopLayerRef).
+      stop: new VectorSource(),
     }
     const layers = {
       point: new VectorLayer({ source: sources.point, style: styleFn }),
@@ -364,6 +727,17 @@ export default function MapPage() {
     // declutter mirrors the SLD's conflictResolution: overlapping labels drop instead of colliding.
     const poiLayer = new VectorLayer({ source: sources.poi, style: poiStyleFn, declutter: true })
     poiLayerRef.current = poiLayer
+    const stopLayer = new VectorLayer({ source: sources.stop, style: stopStyleFn })
+    stopLayerRef.current = stopLayer
+    // The style closes over the ref so the layer can re-read the panel's selection on a .changed()
+    // without this once-only effect ever re-running.
+    const routeLineSource = new VectorSource()
+    routeLineSourceRef.current = routeLineSource
+    const routeLineLayer = new VectorLayer({
+      source: routeLineSource,
+      style: (feature, resolution) => routeLineStyleFn(feature, resolution, selectedRouteIdRef.current),
+    })
+    routeLineLayerRef.current = routeLineLayer
     const analysisSource = new VectorSource()
     analysisSourceRef.current = analysisSource
     const authAreaSource = new VectorSource()
@@ -411,7 +785,7 @@ export default function MapPage() {
     konumSourceRef.current = konumSource
     konumLayerRef.current = konumLayer
 
-    const map = new Map({
+    const map = new OlMap({
       target: mapElementRef.current,
       layers: [
         new TileLayer({ source: new OSM() }),
@@ -426,9 +800,16 @@ export default function MapPage() {
         layers.polygon,
         layers.line,
         layers.point,
+        // Route connector lines under every clickable marker, so the topmost feature at a pixel is
+        // always a marker rather than a line crossing it (hover tooltip and Select both depend on
+        // that ordering).
+        routeLineLayer,
         // POI markers above the personal shapes: they're the shared catalogue everyone must see.
         // Hidden in WMS mode, where GeoServer renders the same POIs inside the flat image.
         poiLayer,
+        // Transportation stops above the POIs; a client vector layer (direct /api/stops, no GeoServer),
+        // hidden in WMS mode.
+        stopLayer,
         // Heat map raster above the shapes (its alpha ramp keeps them readable underneath), below the
         // temporary analysis polygon so that overlay always stays on top.
         heatLayer,
@@ -528,6 +909,22 @@ export default function MapPage() {
       })
       .catch(() => flashStatus('error', 'Could not load POIs.'))
 
+    // Stops load independently too: a plain /api/stops read (route + sequence order), rendered on the
+    // client stop layer. One source failing never blanks the others.
+    listStops()
+      .then((items) => {
+        for (const item of items ?? []) {
+          const feature = wkt.readFeature(item.wkt, {
+            dataProjection: DATA_PROJ,
+            featureProjection: MAP_PROJ,
+          })
+          stampStopFeature(feature, item)
+          sources.stop.addFeature(feature)
+        }
+        rebuildRouteLines()
+      })
+      .catch(() => flashStatus('error', 'Could not load stops.'))
+
     return () => {
       map.un('pointermove', onPointerMove)
       map.setTarget(undefined)
@@ -535,6 +932,9 @@ export default function MapPage() {
       sourcesRef.current = null
       layersRef.current = null
       poiLayerRef.current = null
+      stopLayerRef.current = null
+      routeLineSourceRef.current = null
+      routeLineLayerRef.current = null
       wmsLayerRef.current = null
       wmsSourceRef.current = null
       heatLayerRef.current = null
@@ -584,8 +984,22 @@ export default function MapPage() {
     // The WMS image includes the POIs (vw_poi is in the backend's GetMap layer list), so the client
     // POI overlay hides with the shape layers — otherwise every marker would render twice.
     poiLayerRef.current?.setVisible(!inWms)
+    // Stops are a client-only overlay (not in any GeoServer layer), so they simply hide in WMS mode.
+    stopLayerRef.current?.setVisible(!inWms)
+    // Their connector lines are derived from those same stops, so they follow them exactly.
+    routeLineLayerRef.current?.setVisible(!inWms)
     if (inWms) wmsSourceRef.current?.refresh()
   }, [layerVisibility, displayMode])
+
+  // Selecting a route in the panel highlights its line and fades the rest. The style function reads
+  // the selection through a ref, so all this has to do is keep the ref current and ask the layer to
+  // restyle. An effect rather than a line inside handleSelectRoute so that any other path clearing
+  // the selection is covered too. (A ref write and .changed() are not setState, so this is clear of
+  // the react-hooks/set-state-in-effect rule.)
+  useEffect(() => {
+    selectedRouteIdRef.current = selectedRouteId
+    routeLineLayerRef.current?.changed()
+  }, [selectedRouteId])
 
   // Heat map follows its tool: visible only while 'heatmap' is active, so picking any other tool (or
   // switching to WMS mode, which resets the tool to Pan) turns it off. Refreshed on every activation
@@ -641,6 +1055,7 @@ export default function MapPage() {
       setConfirmingDelete(false)
       setSelectedPoi(null)
       setConfirmingPoiDelete(false)
+      setSelectedStop(null)
       resetKonum()
       setPendingDraw((draw) => {
         if (draw) sourcesRef.current?.[draw.apiType].removeFeature(draw.feature)
@@ -663,8 +1078,11 @@ export default function MapPage() {
   // Route a clicked feature to the right panel: a POI opens its read-only info panel, a personal
   // shape the editable info popup. Used by both the single-hit click and the overlap picker.
   const openHit = useCallback((feature) => {
-    if (feature.get('apiType') === 'poi') {
+    const apiType = feature.get('apiType')
+    if (apiType === 'poi') {
       setSelectedPoi({ feature })
+    } else if (apiType === 'stop') {
+      setSelectedStop({ feature })
     } else {
       setSelectedShape({ feature })
     }
@@ -677,10 +1095,22 @@ export default function MapPage() {
       flashStatus('error', 'You do not have permission to use that draw tool.')
       return
     }
+    // A toolbar tool selection is not tied to a route; the panel's "Add stop to this route" re-locks
+    // it right after activating the tool.
+    pendingStopRouteRef.current = null
     if (tool !== 'konum') resetKonum()
     const apiType = TOOL_CONFIG[tool]?.apiType
     if (apiType) setLayerVisibility((prev) => (prev[apiType] ? prev : { ...prev, [apiType]: true }))
     setActiveTool(tool)
+  }
+
+  // Panel "Add stop to this route": activate the Add-Stop tool locked to this route so the next map
+  // click adds a stop directly to it (its form pre-selects and fixes the route). handleSelectTool
+  // clears the lock first, so we set it right after.
+  const handleAddStopToRoute = (route) => {
+    if (!hasManageTransport) return
+    handleSelectTool('AddStop')
+    pendingStopRouteRef.current = route
   }
 
   // If permissions are changed from the admin panel while a draw tool is active, drop back to Pan and
@@ -742,7 +1172,10 @@ export default function MapPage() {
           featureProjection: MAP_PROJ,
           dataProjection: DATA_PROJ,
         })
-        setPendingDraw({ feature, geomWkt, apiType })
+        // For a stop added via the panel's "Add stop to this route", carry the locked route so its
+        // form pre-selects and fixes the route; the toolbar Add-Stop tool leaves it null (free pick).
+        const lockedRoute = apiType === 'stop' ? pendingStopRouteRef.current : undefined
+        setPendingDraw({ feature, geomWkt, apiType, lockedRoute })
       })
 
       map.addInteraction(draw)
@@ -953,6 +1386,41 @@ export default function MapPage() {
     }
   }
 
+  // Stop popup — Save: persist the placed point with its name + route. Mirrors handlePoiSave (stamp
+  // the feature on success, roll the drawing back on failure).
+  const handleStopSave = async (name, routeId) => {
+    if (!pendingDraw) return
+    const { feature, geomWkt } = pendingDraw
+    try {
+      const saved = await createStop(geomWkt, name, routeId)
+      stampStopFeature(feature, saved)
+      feature.changed() // re-run the style so the marker shows its route color + sequence number
+      rebuildRouteLines() // extend the route's line to the stop that just joined it
+      // Keep the panel's stop count current without a refetch flicker.
+      setRoutes((current) =>
+        current.map((route) =>
+          route.id === saved.routeId ? { ...route, stopCount: route.stopCount + 1 } : route,
+        ),
+      )
+      // If this stop's route is the one open in the panel, show it in the ordered list immediately.
+      setRouteStops((current) => (saved.routeId === selectedRouteId ? [...current, saved] : current))
+      flashStatus('success', 'Stop saved.')
+    } catch (error) {
+      sourcesRef.current?.stop.removeFeature(feature) // roll the drawing back if the save failed
+      const data = error.response?.data
+      const message = data?.code === 'outside_authorized_area'
+        ? 'The stop is outside your authorized area.'
+        : data?.code === 'route_not_found'
+          ? 'That route no longer exists. Pick another one.'
+          : error.response?.status === 403
+            ? 'You do not have permission to add stops.'
+            : 'Could not save the stop.'
+      flashStatus('error', message)
+    } finally {
+      setPendingDraw(null)
+    }
+  }
+
   // POI confirm dialog — Delete: soft-delete on the server (creator or admin only), then drop the
   // marker from the map.
   const handlePoiDelete = async () => {
@@ -1124,7 +1592,7 @@ export default function MapPage() {
       source?.clear()
       source?.addFeature(feature)
       mapRef.current?.getView().fit(feature.getGeometry().getExtent(), {
-        padding: [70, 70, 70, 420],
+        padding: LEFT_PANEL_FIT_PADDING,
         maxZoom: 11,
         duration: 450,
       })
@@ -1274,7 +1742,15 @@ export default function MapPage() {
           <button
             className="map-logout"
             type="button"
-            onClick={() => setDrawerOpen((openNow) => !openNow)}
+            onClick={handleToggleRoutePanel}
+            aria-pressed={routePanelOpen}
+          >
+            Routes
+          </button>
+          <button
+            className="map-logout"
+            type="button"
+            onClick={handleToggleDrawer}
             aria-pressed={drawerOpen}
           >
             <svg
@@ -1335,6 +1811,28 @@ export default function MapPage() {
           />
         )}
 
+        {/* Route Management: right-edge drawer toggled from the top bar, sharing that edge with the
+            Shapes drawer below (opening either closes the other). Always mounted so its slide-out
+            animation can play. Visible to every authenticated user; write controls inside render only
+            for manage_transport holders (read-only for End Users). Available in both display modes —
+            browsing routes doesn't need the draw tools. */}
+        <RouteManagementPanel
+          open={routePanelOpen}
+          routes={routes}
+          loading={routesLoading}
+          canManage={hasManageTransport}
+          selectedRouteId={selectedRouteId}
+          stops={routeStops}
+          stopsLoading={routeStopsLoading}
+          onSelectRoute={handleSelectRoute}
+          onNewRoute={() => setRouteForm({ mode: 'create' })}
+          onEditRoute={(route) => setRouteForm({ mode: 'edit', route })}
+          onAddStopToRoute={handleAddStopToRoute}
+          onReorderStops={(orderedIds) => handleReorderStops(selectedRouteId, orderedIds)}
+          onStopClick={handleStopRowClick}
+          onClose={() => setRoutePanelOpen(false)}
+        />
+
         <QueryPanel
           open={drawerOpen}
           refreshKey={refreshKey}
@@ -1346,9 +1844,23 @@ export default function MapPage() {
         {pendingDraw && (
           pendingDraw.apiType === 'poi' ? (
             <PoiFormModal onSave={handlePoiSave} onCancel={handleModalCancel} />
+          ) : pendingDraw.apiType === 'stop' ? (
+            <StopFormModal
+              lockedRoute={pendingDraw.lockedRoute}
+              onSave={handleStopSave}
+              onCancel={handleModalCancel}
+            />
           ) : (
             <AttributeModal onSave={handleModalSave} onCancel={handleModalCancel} />
           )
+        )}
+        {routeForm && (
+          <RouteFormModal
+            mode={routeForm.mode}
+            route={routeForm.route}
+            onSave={submitRouteForm}
+            onCancel={() => setRouteForm(null)}
+          />
         )}
         {selectedShape && !editingGeom && (!confirmingDelete || !canWriteSelectedShape) && (
           <ShapeInfoModal
@@ -1407,6 +1919,19 @@ export default function MapPage() {
             confirmLabel="Delete"
             onConfirm={handlePoiDelete}
             onCancel={() => setConfirmingPoiDelete(false)}
+          />
+        )}
+        {selectedStop && (
+          <StopInfoModal
+            stop={{
+              name: selectedStop.feature.get('name'),
+              routeName: selectedStop.feature.get('routeName'),
+              routeColor: selectedStop.feature.get('routeColor'),
+              sequenceOrder: selectedStop.feature.get('sequenceOrder'),
+              createdBy: selectedStop.feature.get('createdBy'),
+              createdAt: selectedStop.feature.get('createdAt'),
+            }}
+            onClose={() => setSelectedStop(null)}
           />
         )}
         {infoItem && <InventoryInfoModal info={infoItem} onClose={() => setInfoItem(null)} />}

@@ -20,6 +20,8 @@ GeoServer WFS/WMS rendering, and weighted location analysis over all 81 Turkish 
 | Shared POIs | 36 | **139** |
 | POI categories | 19 | **42** |
 | Authorization areas | 4 | **15** |
+| Transportation routes | — | **8** |
+| Transportation stops | — | **56** |
 | Provinces represented | about 7 | **all 81** |
 
 The manifest is deterministic and validated before and after insertion. `seed-demo` resets the
@@ -108,6 +110,27 @@ The exact total is 139:
 
 POI names and daily hours are demo/sample content. They are not guaranteed to be current business
 names, live opening times, or travel advice.
+
+### Transportation routes and stops
+
+Eight routes and 56 stops, two real transit lines per operator city:
+
+| Owner | Routes | Stops |
+|---|---|---:|
+| `istanbul_operator` | Metrobüs (Beylikdüzü–Söğütlüçeşme), M4 Kadıköy–Tavşantepe | 7 + 8 |
+| `antalya_operator` | Antalya Nostalji Tramvayı, AntRay T1 Fatih–Expo | 6 + 7 |
+| `gaziantep_operator` | Gaziantep Tramvay T1, GaziRay (Başpınar–Oğuzeli) | 7 + 6 |
+| `trabzon_operator` | Trabzon Sahil Hattı, Trabzon–Uzungöl Hattı | 8 + 7 |
+
+Each route takes a different color, so no two lines' stop markers look alike. Stops are named after
+the neighborhoods and landmarks the line actually serves, are ordered `1..N` with no gaps, and sit
+inside their operator's authorization area — placing one outside fails the seed rather than producing
+a stop that renders but refuses every edit. The two Trabzon routes deliberately share Meydan Parkı and
+Değirmendere, the way real lines share a transfer point.
+
+Unlike private drawings, routes and stops are visible to every authenticated user; only the
+`manage_transport` permission, held by the Operator role, allows creating, editing, or reordering
+them. Route and stop names are demo/sample content on the same terms as the POI names above.
 
 ## POI categories and icons
 

@@ -146,6 +146,13 @@
   opacity: 0.9;
 }
 
+/* Inline save error inside a form modal (e.g. a duplicate route name). */
+.attr-modal-error {
+  color: #f87171;
+  opacity: 1;
+  font-weight: 600;
+}
+
 .attr-modal-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;

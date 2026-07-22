@@ -38,6 +38,10 @@ public class AppDbContext : DbContext
     public DbSet<LocationAnalysis> LocationAnalyses { get; set; }
     public DbSet<LocationAnalysisCriterion> LocationAnalysisCriteria { get; set; }
 
+    // Transportation module: named/colored routes and their ordered point stops (one route per stop).
+    public DbSet<TransportRoute> Routes { get; set; }
+    public DbSet<Stop> Stops { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -56,6 +60,7 @@ public class AppDbContext : DbContext
                      "tbl_geo_authorization",
                      "tbl_poi_category", "tbl_poi",
                      "tbl_province", "tbl_location_analysis", "tbl_location_analysis_criterion",
+                     "tbl_route", "tbl_stop",
                  })
         {
             modelBuilder.HasSequence<int>($"seq_{table}");
@@ -78,6 +83,38 @@ public class AppDbContext : DbContext
         ConfigureGeoAuthorization(modelBuilder);
         ConfigurePoi(modelBuilder);
         ConfigureLocationAnalysis(modelBuilder);
+        ConfigureTransportation(modelBuilder);
+    }
+
+    // Transportation module tables. A route is a name+color grouping with no geometry of its own; a
+    // stop is a point (IGeoFeature) that belongs to exactly one route and carries a per-route
+    // SequenceOrder the service manages. Stop's route FK is Restrict — a route can't vanish while stops
+    // still point at it (the module exposes no deletion anyway). Route and Stop share the geometry
+    // tables' !IsDeleted && IsActive filter so the required stop->route relationship stays
+    // filter-consistent (same pattern as tbl_location_analysis and its criteria).
+    private static void ConfigureTransportation(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TransportRoute>(e =>
+        {
+            e.ToTable("tbl_route");
+            e.HasQueryFilter(r => !r.IsDeleted && r.IsActive);
+            e.HasOne<User>().WithMany().HasForeignKey(r => r.UserId);
+            e.HasOne<User>().WithMany().HasForeignKey(r => r.ModifiedUserId);
+        });
+        UseSequenceId<TransportRoute>(modelBuilder, "tbl_route");
+
+        // Stop is an IGeoFeature, so the shared geometry mapping applies as-is; the route FK plus the
+        // per-route ordering index are the extras.
+        ConfigureGeometry<Stop>(modelBuilder, "tbl_stop", "geometry(Point,4326)");
+        modelBuilder.Entity<Stop>(e =>
+        {
+            e.HasOne<TransportRoute>().WithMany().HasForeignKey(s => s.RouteId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(s => s.RouteId);
+            // Non-unique on purpose: reorder renumbers a route's stops to a contiguous 1..N in one
+            // transaction, which a unique (route, order) constraint would trip mid-renumber. The index
+            // just serves the ordered per-route read.
+            e.HasIndex(s => new { s.RouteId, s.SequenceOrder });
+        });
     }
 
     // Location-analysis tables. tbl_province is seeded reference data (no owner, no soft delete);

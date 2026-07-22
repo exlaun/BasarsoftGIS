@@ -46,6 +46,8 @@ public class DemoDataContractTests
         Assert.Equal(42, DemoData.ExpectedCategoryCount);
         Assert.Equal(15, DemoData.ExpectedAreaCount);
         Assert.Equal(81, DemoData.ExpectedProvinceCount);
+        Assert.Equal(8, DemoData.ExpectedRouteCount);
+        Assert.Equal(56, DemoData.ExpectedStopCount);
         Assert.Equal("secret123", DemoData.Password);
 
         Assert.Equal(DemoData.ExpectedUserCount, DemoData.Users.Count);
@@ -57,6 +59,8 @@ public class DemoDataContractTests
             DemoData.Users.Count(user => user.AreaWkt is not null)
             + DemoData.Roles.Count(role => role.AreaWkt is not null));
         Assert.Equal(DemoData.ExpectedProvinceCount, DemoData.Provinces.Count);
+        Assert.Equal(DemoData.ExpectedRouteCount, DemoData.Routes.Count);
+        Assert.Equal(DemoData.ExpectedStopCount, DemoData.Stops.Count);
     }
 
     [Fact]
@@ -137,6 +141,64 @@ public class DemoDataContractTests
             .ToList();
         Assert.Equal(DemoData.ProvincePoiTemplates.Count, templateUse.Count);
         Assert.All(templateUse, count => Assert.InRange(count, 6, 7));
+    }
+
+    [Fact]
+    public void Routes_HaveTheApprovedOwnershipAndContiguouslyGroupedStops()
+    {
+        AssertDictionaryEqual(
+            new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["istanbul_operator"] = 2,
+                ["antalya_operator"] = 2,
+                ["gaziantep_operator"] = 2,
+                ["trabzon_operator"] = 2,
+            },
+            DemoData.Routes
+                .GroupBy(route => route.Owner)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal));
+
+        // manage_transport reaches nobody but the Operator role, so nobody else may own a route.
+        Assert.All(DemoData.Routes, route => Assert.Equal(
+            SeedData.OperatorRoleName,
+            DemoData.Users.Single(user => user.Username == route.Owner).Role));
+
+        // One color each, all of them shaped the way RouteSaveRequest demands.
+        Assert.Equal(
+            DemoData.Routes.Count,
+            DemoData.Routes.Select(route => route.Color).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(DemoData.Routes, route => Assert.Matches("^#[0-9a-fA-F]{6}$", route.Color));
+
+        // Each route owns one unbroken run of the stop manifest, and that run's order is exactly what
+        // the seeder turns into SequenceOrder 1..N.
+        var runs = new List<(string Route, List<string> Stops)>();
+        foreach (var stop in DemoData.Stops)
+        {
+            if (runs.Count == 0 || !string.Equals(runs[^1].Route, stop.Route, StringComparison.Ordinal))
+                runs.Add((stop.Route, []));
+            runs[^1].Stops.Add(stop.Name);
+        }
+
+        Assert.Equal(DemoData.Routes.Select(route => route.Name), runs.Select(run => run.Route));
+        AssertDictionaryEqual(
+            new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["Metrobüs (Beylikdüzü–Söğütlüçeşme)"] = 7,
+                ["M4 Kadıköy–Tavşantepe"] = 8,
+                ["Antalya Nostalji Tramvayı"] = 6,
+                ["AntRay T1 Fatih–Expo"] = 7,
+                ["Gaziantep Tramvay T1"] = 7,
+                ["GaziRay (Başpınar–Oğuzeli)"] = 6,
+                ["Trabzon Sahil Hattı"] = 8,
+                ["Trabzon–Uzungöl Hattı"] = 7,
+            },
+            runs.ToDictionary(run => run.Route, run => run.Stops.Count, StringComparer.Ordinal));
+
+        // Stop names repeat across routes on purpose (the two Trabzon lines share transfer points),
+        // never within a single route.
+        Assert.All(runs, run => Assert.Equal(
+            run.Stops.Count,
+            run.Stops.Distinct(StringComparer.Ordinal).Count()));
     }
 
     [Fact]
@@ -227,7 +289,7 @@ public class DemoDataContractTests
         AssertSetEqual(["add_point", "add_line", "add_polygon"],
             rolePermissions[DemoData.RegionalManagerRoleName]);
         AssertSetEqual(["add_point", "add_line"], rolePermissions[DemoData.EditorRoleName]);
-        AssertSetEqual(["add_poi"], rolePermissions[SeedData.OperatorRoleName]);
+        AssertSetEqual(["add_poi", "manage_transport"], rolePermissions[SeedData.OperatorRoleName]);
         Assert.Empty(rolePermissions[SeedData.ViewerRoleName]);
 
         foreach (var user in DemoData.Users)
@@ -245,7 +307,7 @@ public class DemoDataContractTests
                 "istanbul_editor" or "izmir_editor" or "antalya_editor" =>
                     Set("add_point", "add_line"),
                 "istanbul_operator" or "antalya_operator" or
-                    "gaziantep_operator" or "trabzon_operator" => Set("add_poi"),
+                    "gaziantep_operator" or "trabzon_operator" => Set("add_poi", "manage_transport"),
                 "viewer" => Set(),
                 _ => Set("add_point", "add_line", "add_polygon"),
             };

@@ -101,8 +101,10 @@ public static class AdminSeeder
             await db.SaveChangesAsync();
         }
 
-        // 5) POI module roles. Operator gets add_poi only at creation time (the admin panel owns the
-        // set afterwards, same rule as Admin); Viewer is deliberately permission-free (view-only).
+        // 5) POI + transportation roles. Operator gets its OperatorPermissions at creation time (the
+        // admin panel owns the set afterwards, same rule as Admin); Viewer is deliberately
+        // permission-free (view-only).
+        var createdOperatorRole = false;
         var operatorRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == SeedData.OperatorRoleName);
         if (operatorRole is null)
         {
@@ -113,6 +115,7 @@ public static class AdminSeeder
             };
             db.Roles.Add(operatorRole);
             await db.SaveChangesAsync();
+            createdOperatorRole = true;
 
             var operatorPermIds = await db.Permissions
                 .Where(p => SeedData.OperatorPermissions.Contains(p.Name))
@@ -123,6 +126,35 @@ public static class AdminSeeder
                 db.RolePermissions.AddRange(operatorPermIds.Select(pid =>
                     new RolePermission { RoleId = operatorRole.Id, PermissionId = pid }));
                 await db.SaveChangesAsync();
+            }
+        }
+
+        // 5b) When the catalogue grew, top an EXISTING Operator role up with just the brand-new
+        // permissions that belong to its default set (e.g. the transportation module added
+        // manage_transport). Same targeted, existence-checked grant as the Admin role's step 3b, so it
+        // can't undo a permission an admin removed from Operator via the panel.
+        if (!createdOperatorRole && newPermissionNames.Count > 0)
+        {
+            var newOperatorPermNames = newPermissionNames
+                .Where(name => SeedData.OperatorPermissions.Contains(name))
+                .ToList();
+            if (newOperatorPermNames.Count > 0)
+            {
+                var newOperatorPermIds = await db.Permissions
+                    .Where(p => newOperatorPermNames.Contains(p.Name))
+                    .Select(p => p.Id)
+                    .ToListAsync();
+                var alreadyGranted = await db.RolePermissions
+                    .Where(rp => rp.RoleId == operatorRole.Id && newOperatorPermIds.Contains(rp.PermissionId))
+                    .Select(rp => rp.PermissionId)
+                    .ToListAsync();
+                var missing = newOperatorPermIds.Except(alreadyGranted).ToList();
+                if (missing.Count > 0)
+                {
+                    db.RolePermissions.AddRange(missing.Select(pid =>
+                        new RolePermission { RoleId = operatorRole.Id, PermissionId = pid }));
+                    await db.SaveChangesAsync();
+                }
             }
         }
 

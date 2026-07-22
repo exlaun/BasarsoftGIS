@@ -1,31 +1,28 @@
-/* Positioning shell only: centered near the top so the tool pill hangs right under the title,
-   with the active-tool hint stacked directly beneath it (column-reverse puts the pill above the hint).
-   The shell is transparent and click-through — `pointer-events: none` keeps the map draggable in the
-   empty area; the interactive children opt back in. Centering the hint here (rather than the old
-   bottom-left spot) also keeps it clear of the top-left zoom control. */
+/* Positioning shell only: covers the map body so its two children (the left tool rail and the
+   top-center hint pill) can be placed independently. Transparent and click-through —
+   `pointer-events: none` keeps the map draggable; the interactive children opt back in. */
 .draw-toolbar {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 0.8rem;
+  inset: 0;
   z-index: 2;
-  display: flex;
-  flex-direction: column-reverse;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0 1rem;
   pointer-events: none;
 }
 
-/* The visible floating pill: rounded on every corner and shadowed so it reads as hanging over the map. */
-.draw-toolbar-tools {
+/* The visible floating rail: a vertical pill hugging the left edge, vertically centered. Clear of
+   the OL zoom buttons and POI search (top-left) and of the attribution/status stack (bottom).
+   z-index 7 keeps it and its flyouts above the Routes/Location-Analysis panels (6), so the toolbar
+   is never buried by a panel it just opened. */
+.draw-rail {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 7;
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.35rem;
-  padding: 0.5rem 0.55rem;
-  border-radius: 14px;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.45rem;
+  border-radius: 999px;
   background: var(--bar-bg);
   color: var(--bar-text);
   border: 1px solid var(--bar-border);
@@ -34,24 +31,35 @@
   transition: background 0.2s ease, color 0.2s ease;
 }
 
-.draw-tool {
+/* Wrapper around one button: anchors that button's tooltip and, for a group, its flyout. */
+.draw-item {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--bar-border);
-  border-radius: 8px;
+}
+
+.draw-tool {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
   background: transparent;
   color: var(--bar-text);
-  font-size: 0.85rem;
-  font-weight: 600;
   cursor: pointer;
-  text-align: left;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease,
+    transform 0.05s ease;
 }
 
 .draw-tool:hover {
   background: var(--bar-hover);
+}
+
+.draw-tool:focus-visible {
+  outline: 2px solid #4f9dff;
+  outline-offset: 2px;
 }
 
 .draw-tool:disabled {
@@ -64,98 +72,129 @@
 }
 
 .draw-tool:active {
-  transform: scale(0.98);
+  transform: scale(0.94);
 }
 
 .draw-tool.is-active {
   background: var(--bar-hover);
-  border-color: currentColor;
-  box-shadow: inset 0 0 0 1px currentColor;
+  box-shadow: inset 0 0 0 2px currentColor;
 }
 
 .draw-tool-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.2rem;
 }
 
-/* Layers button + its drop-down menu. The wrapper anchors the menu; the menu drops below the pill
-   (the toolbar hangs from the top) and is right-aligned so it can't spill off the right edge. */
-.draw-layers {
-  position: relative;
-  display: inline-flex;
-}
-
-.draw-layers-menu {
+/* Small dot at the lower-right of a group button — the only visual cue that it opens sub-buttons
+   rather than activating a tool directly. */
+.draw-tool-caret {
   position: absolute;
-  top: calc(100% + 0.45rem);
-  right: 0;
-  z-index: 5;
+  right: 0.34rem;
+  bottom: 0.34rem;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+}
+
+/* Sub-buttons of the open group: a horizontal pill beside the rail, using the same chrome. */
+.draw-flyout {
+  position: absolute;
+  left: calc(100% + 0.55rem);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 0.4rem;
-  padding: 0.6rem 0.75rem;
-  border-radius: 10px;
+  padding: 0.45rem;
+  border-radius: 999px;
   background: var(--bar-bg);
   color: var(--bar-text);
   border: 1px solid var(--bar-border);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
-  white-space: nowrap;
 }
 
-.draw-layers-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  user-select: none;
+/* A hidden layer keeps its circle but reads as switched off. */
+.draw-layer-toggle.is-off {
+  opacity: 0.45;
 }
 
-.draw-layers-row input[type='checkbox'] {
-  accent-color: #2563eb;
-  cursor: pointer;
+.draw-layer-toggle.is-off:hover {
+  opacity: 0.8;
 }
 
-.draw-layers-icon {
-  display: inline-flex;
-  opacity: 0.85;
-}
-
-.draw-toolbar-name {
-  justify-self: end;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.72rem;
-  opacity: 0.9;
-  white-space: nowrap;
-}
-
-.draw-toolbar-name input {
-  width: 180px;
-  padding: 0.4rem 0.5rem;
-  border-radius: 6px;
-  border: 1px solid var(--bar-border);
-  background: rgba(255, 255, 255, 0.08);
+/* Hover/focus label. Replaces the old inline text labels and the native `title` tooltip (which the
+   component no longer sets, so only one label ever appears). Never intercepts the pointer, so the
+   tooltip can't block a click on the button it describes. */
+.draw-tip {
+  position: absolute;
+  left: calc(100% + 0.5rem);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  padding: 0.28rem 0.5rem;
+  border-radius: 7px;
+  background: var(--bar-bg);
   color: var(--bar-text);
-  font-size: 0.82rem;
+  border: 1px solid var(--bar-border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
 }
 
-.draw-toolbar-name input::placeholder {
-  color: currentColor;
-  opacity: 0.5;
+.draw-item:hover > .draw-tip,
+.draw-tool:focus-visible ~ .draw-tip {
+  opacity: 1;
 }
 
-/* Floating hint pill centered under the tool pill. Carries its own backdrop (the toolbar shell is
-   transparent now) so it stays readable against any tile. */
+/* Inside a flyout the buttons sit shoulder to shoulder, so a right-hand tooltip would land on the
+   next sibling circle. Drop those underneath the row instead. */
+.draw-tip-below {
+  left: 50%;
+  top: calc(100% + 0.45rem);
+  transform: translateX(-50%);
+}
+
+/* While a group is open its flyout occupies exactly where that group's tooltip would render. */
+.draw-item.is-open > .draw-tip {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .draw-flyout {
+    animation: draw-flyout-in 0.14s ease both;
+  }
+}
+
+@keyframes draw-flyout-in {
+  from {
+    opacity: 0;
+    transform: translate(-0.4rem, -50%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+}
+
+/* Active-tool instructions, centered at the top of the map — the space the toolbar used to occupy.
+   Carries its own backdrop (the shell is transparent) so it stays readable against any tile.
+   `max-width: 46vw` keeps it clear of the POI search bar (top-left) on narrow viewports. */
 .draw-toolbar-hint {
+  position: absolute;
+  top: 0.8rem;
+  left: 50%;
+  transform: translateX(-50%);
   margin: 0;
-  max-width: 100%;
-  padding: 0.35rem 0.6rem;
+  max-width: min(46vw, 480px);
+  padding: 0.35rem 0.7rem;
   border-radius: 10px;
   background: var(--bar-bg);
   color: var(--bar-text);
