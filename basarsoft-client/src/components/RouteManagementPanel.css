@@ -152,6 +152,20 @@
   border: 1px solid rgba(0, 0, 0, 0.25);
 }
 
+.route-visibility {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.route-visibility input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #2563eb;
+}
+
 .route-name {
   flex: 1;
   min-width: 0;
@@ -182,6 +196,18 @@
   background: var(--bar-bg);
 }
 
+/* Destructive variant of the same button. Reads as ordinary until hovered, so a Delete sitting next
+   to an Edit on every row doesn't turn the list into a wall of red. */
+.route-edit-btn.is-danger {
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+.route-edit-btn.is-danger:hover {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: #dc2626;
+}
+
 /* The expanded route's stops, nested directly under its own row. The left spine is drawn in the
    route's color (set inline from route.color) and lines up under the caret, so the block reads as
    belonging to the route above it rather than as a separate section. */
@@ -197,7 +223,37 @@
 .route-stops-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.6rem;
+}
+
+.route-build-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
+
+.route-state {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--bar-border);
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.route-state-ready {
+  color: #16a34a;
+}
+
+.route-state-not-built {
+  color: #64748b;
+}
+
+.route-state-stale,
+.route-routing-error {
+  color: #dc2626;
 }
 
 .route-stops-add {

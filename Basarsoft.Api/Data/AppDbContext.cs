@@ -86,10 +86,11 @@ public class AppDbContext : DbContext
         ConfigureTransportation(modelBuilder);
     }
 
-    // Transportation module tables. A route is a name+color grouping with no geometry of its own; a
-    // stop is a point (IGeoFeature) that belongs to exactly one route and carries a per-route
+    // Transportation module tables. A route stores the latest OSRM LineString; a stop is a point
+    // (IGeoFeature) that belongs to exactly one route and carries a per-route
     // SequenceOrder the service manages. Stop's route FK is Restrict — a route can't vanish while stops
-    // still point at it (the module exposes no deletion anyway). Route and Stop share the geometry
+    // still point at it, which is why deleting a route soft-deletes its stops in the same save rather
+    // than removing the row (DeleteRouteAsync). Route and Stop share the geometry
     // tables' !IsDeleted && IsActive filter so the required stop->route relationship stays
     // filter-consistent (same pattern as tbl_location_analysis and its criteria).
     private static void ConfigureTransportation(ModelBuilder modelBuilder)
@@ -97,6 +98,8 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<TransportRoute>(e =>
         {
             e.ToTable("tbl_route");
+            e.Property(r => r.Geometry).HasColumnType("geometry(LineString,4326)");
+            e.Property(r => r.RoutingErrorCode).HasMaxLength(40);
             e.HasQueryFilter(r => !r.IsDeleted && r.IsActive);
             e.HasOne<User>().WithMany().HasForeignKey(r => r.UserId);
             e.HasOne<User>().WithMany().HasForeignKey(r => r.ModifiedUserId);

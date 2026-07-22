@@ -264,6 +264,101 @@
   opacity: 0.6;
 }
 
+/* ---- Transportation administration ---- */
+.transport-admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.transport-admin-route {
+  overflow: visible;
+}
+
+.transport-admin-route-head {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) minmax(300px, auto) auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.9rem;
+  border-bottom: 1px solid var(--bar-border);
+}
+
+.transport-admin-swatch {
+  width: 16px;
+  height: 36px;
+  border-radius: 5px;
+}
+
+.transport-admin-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.transport-admin-heading span,
+.transport-admin-metrics {
+  font-size: 0.73rem;
+  opacity: 0.72;
+}
+
+.transport-admin-metrics {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+}
+
+.transport-admin-state {
+  padding: 0.12rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-weight: 800;
+  opacity: 1;
+}
+
+.transport-admin-state.is-ready { color: #16a34a; }
+.transport-admin-state.is-not-built { color: #64748b; }
+.transport-admin-state.is-stale { color: #dc2626; }
+
+.transport-admin-stops {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.9rem 0.9rem;
+}
+
+.transport-admin-stops li {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) minmax(150px, auto) auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--bar-border);
+}
+
+.transport-admin-stops li:last-child {
+  border-bottom: 0;
+}
+
+.transport-admin-order {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.transport-admin-stop-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
 /* ---- Badges + status ---- */
 .admin-badge-list {
   display: flex;
@@ -580,5 +675,14 @@
   }
   .admin-main {
     padding: 1rem;
+  }
+  .transport-admin-route-head,
+  .transport-admin-stops li {
+    grid-template-columns: auto 1fr;
+  }
+  .transport-admin-metrics,
+  .transport-admin-route-head .admin-table-actions,
+  .transport-admin-stops .admin-table-actions {
+    grid-column: 1 / -1;
   }
 }

@@ -11,6 +11,17 @@ public class RouteResponse
     // The route's own color ("#rrggbb"), or null to use the client's default stop color.
     public string? Color { get; set; }
 
+    // Latest successful OSRM route line as EPSG:4326 WKT. Null until a route with 2+ stops is built.
+    public string? GeometryWkt { get; set; }
+
+    public double? DistanceMeters { get; set; }
+
+    public double? DurationSeconds { get; set; }
+
+    public bool IsGeometryStale { get; set; }
+
+    public string? RoutingErrorCode { get; set; }
+
     // How many live stops belong to this route — shown next to the route in the panel list.
     public int StopCount { get; set; }
 

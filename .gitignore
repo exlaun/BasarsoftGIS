@@ -28,3 +28,6 @@ appsettings.*.Local.json
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local OpenStreetMap extracts and generated OSRM graph artifacts (large, reproducible datasets)
+osrm/data/

@@ -14,7 +14,7 @@ public static class SeedData
 
     // POI module roles. Nothing in the code resolves roles by these names except the seeder itself.
     public const string OperatorRoleName = "Operator";
-    public const string OperatorRoleDescription = "Can add POIs on the map";
+    public const string OperatorRoleDescription = "Can manage transportation routes and stops";
     public const string ViewerRoleName = "Viewer";
     public const string ViewerRoleDescription = "View-only access to the map and POIs";
 
@@ -22,7 +22,7 @@ public static class SeedData
     // brand-new name added here later, topped up onto an existing Operator role too (AdminSeeder step
     // 5b) — the same targeted, can't-undo-a-removal rule the Admin role gets. After that the admin
     // panel owns the set.
-    public static readonly IReadOnlyList<string> OperatorPermissions = new[] { "add_poi", ManageTransportPermission };
+    public static readonly IReadOnlyList<string> OperatorPermissions = new[] { ManageTransportPermission };
 
     // The four management permission names, as constants so the per-resource authorization policies
     // (Program.cs / PermissionRequirement) and controllers reference the same spelling as the seed.
@@ -30,6 +30,7 @@ public static class SeedData
     public const string ManageRolesPermission = "manage_roles";
     public const string ManagePermissionsPermission = "manage_permissions";
     public const string ManagePoisPermission = "manage_pois";
+    public const string ManageTransportAdminPermission = "manage_transport_admin";
 
     // The transportation module's single permission. Deliberately NOT in AdminPermissions below: it
     // gates on-map operator actions (the Add-Stop tool + the Route panel's writes), not the admin
@@ -49,6 +50,7 @@ public static class SeedData
         ("add_poi",                 "Add POIs to the map"),
         (ManagePoisPermission,        "Manage POIs and POI categories"),
         (ManageTransportPermission,   "Create and manage transportation routes and stops"),
+        (ManageTransportAdminPermission, "Administer all transportation routes and stops"),
     };
 
     // Holding ANY of these effective permissions lets a user open the admin panel. Which sections
@@ -59,5 +61,6 @@ public static class SeedData
         ManageRolesPermission,
         ManagePermissionsPermission,
         ManagePoisPermission,
+        ManageTransportAdminPermission,
     };
 }

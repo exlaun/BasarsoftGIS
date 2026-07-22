@@ -1,0 +1,47 @@
+name: basarsoft-osrm
+
+x-osrm-image: &osrm-image ghcr.io/project-osrm/osrm-backend:v6.0.0
+x-osrm-data: &osrm-data
+  - ./data:/data
+
+services:
+  extract:
+    image: *osrm-image
+    profiles: [prepare]
+    volumes: *osrm-data
+    command:
+      - osrm-extract
+      - --threads
+      - ${OSRM_THREADS:-2}
+      - -p
+      - /opt/car.lua
+      - /data/${OSRM_DATASET:-turkey-latest}.osm.pbf
+
+  partition:
+    image: *osrm-image
+    profiles: [prepare]
+    volumes: *osrm-data
+    command:
+      - osrm-partition
+      - /data/${OSRM_DATASET:-turkey-latest}.osrm
+
+  customize:
+    image: *osrm-image
+    profiles: [prepare]
+    volumes: *osrm-data
+    command:
+      - osrm-customize
+      - /data/${OSRM_DATASET:-turkey-latest}.osrm
+
+  osrm:
+    image: *osrm-image
+    restart: unless-stopped
+    volumes:
+      - ./data:/data:ro
+    ports:
+      - 127.0.0.1:${OSRM_PORT:-5001}:5000
+    command:
+      - osrm-routed
+      - --algorithm
+      - mld
+      - /data/${OSRM_DATASET:-turkey-latest}.osrm

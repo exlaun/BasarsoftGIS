@@ -9,8 +9,8 @@ namespace Basarsoft.Api.Controllers;
 
 // The shared POI catalogue. Reading is open to every authenticated user (POIs are common reference
 // data, unlike the per-user drawing tables) and flows API -> GeoServer WFS (vw_poi) -> PostGIS, like
-// the geometry reads; creating requires the add_poi permission and stays on EF; deleting is
-// creator-or-admin. Category admin lives in AdminPoiCategoriesController.
+// the geometry reads; creating requires add_poi and stays on EF; deleting requires manage_pois.
+// Category admin lives in AdminPoiCategoriesController.
 [ApiController]
 [Authorize]
 [Route("api/poi")]
@@ -59,8 +59,8 @@ public class PoiController : ControllerBase
         catch (Exception ex) { return ServerError(ex, nameof(List)); }
     }
 
-    // GET /api/poi/categories -> the flat category list. Also readable by non-admins: operators need
-    // it for the add-POI dropdown and viewers for the info panel. Writes stay admin-only.
+    // GET /api/poi/categories -> the flat category list. Also readable by non-admins for search and
+    // the info panel; add_poi holders use it in the creation dropdown. Writes stay admin-only.
     [HttpGet("categories")]
     public async Task<ActionResult<IReadOnlyList<PoiCategoryResponse>>> Categories()
     {
@@ -103,8 +103,8 @@ public class PoiController : ControllerBase
         }
     }
 
-    // DELETE /api/poi/{id} -> soft-delete. Creators may remove their own POIs; holders of
-    // manage_pois (not just any admin permission) may remove anyone's.
+    // DELETE /api/poi/{id} -> soft-delete. POIs are strictly read-only outside POI administration:
+    // even a legacy creator needs manage_pois, so transportation-only operators cannot remove them.
     [HttpDelete("{id:int}")]
     public async Task<ActionResult> Delete(int id)
     {
@@ -115,7 +115,10 @@ public class PoiController : ControllerBase
 
             var canManagePois = await _userAdminService.HasPermissionAsync(
                 userId, Data.SeedData.ManagePoisPermission);
-            if (!await _pois.DeleteAsync(id, userId, canManagePois))
+            if (!canManagePois)
+                return Forbid();
+
+            if (!await _pois.DeleteAsync(id, userId, isAdmin: true))
                 return NotFound(new { message = "POI not found." });
 
             return NoContent();

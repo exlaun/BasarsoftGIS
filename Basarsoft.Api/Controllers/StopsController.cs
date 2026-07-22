@@ -9,9 +9,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace Basarsoft.Api.Controllers;
 
 // Transportation stops (points belonging to a route). GET is open to every authenticated user (it
-// feeds the map's stop layer); creating a stop requires the manage_transport permission (Operators).
-// The module exposes no stop edit/delete and no way to move a stop between routes. Reordering lives in
-// RoutesController (PUT /api/routes/{id}/stops/order). Reads stay on EF — nothing here touches GeoServer.
+// feeds the map's stop layer); creating and deleting a stop require the manage_transport permission
+// (Operators). This operational controller exposes no stop edit and no way to move a stop between
+// routes; admin may edit a stop's name and color. Reordering lives in RoutesController. Reads stay on EF.
 [ApiController]
 [Authorize]
 [Route("api/stops")]
@@ -52,7 +52,9 @@ public class StopsController : ControllerBase
 
     // POST /api/stops -> add a stop at the drawn point, appended to its route. Requires manage_transport.
     [HttpPost]
-    public async Task<ActionResult<StopResponse>> Create(StopCreateRequest request)
+    public async Task<ActionResult<StopCreateResponse>> Create(
+        StopCreateRequest request,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -61,7 +63,7 @@ public class StopsController : ControllerBase
             if (!await _userAdminService.HasPermissionAsync(userId, SeedData.ManageTransportPermission))
                 return Forbid();
 
-            var result = await _transport.CreateStopAsync(request, userId);
+            var result = await _transport.CreateStopAsync(request, userId, cancellationToken);
             return result.Status switch
             {
                 TransportWriteStatus.InvalidGeometry =>
@@ -71,9 +73,88 @@ public class StopsController : ControllerBase
                 // The `code` field lets the client tell this 403 apart from the permission 403 above.
                 TransportWriteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
                     new { message = "The stop is outside your authorized area.", code = "outside_authorized_area" }),
-                _ => Ok(result.Response),
+                TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>
+                    UnprocessableEntity(new
+                    {
+                        message = RoutingMessage(result.Status),
+                        code = TransportationService.RoutingErrorCode(result.Status),
+                        stopPersisted = result.StopPersisted,
+                        stop = result.Response,
+                        route = result.Route,
+                    }),
+                TransportWriteStatus.RoutingUnavailable => StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    new
+                    {
+                        message = RoutingMessage(result.Status),
+                        code = TransportationService.RoutingErrorCode(result.Status),
+                        stopPersisted = result.StopPersisted,
+                        stop = result.Response,
+                        route = result.Route,
+                    }),
+                _ => Ok(new StopCreateResponse { Stop = result.Response!, Route = result.Route! }),
             };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new EmptyResult();
         }
         catch (Exception ex) { return ServerError(ex, nameof(Create)); }
     }
+
+    // DELETE /api/stops/{id} -> remove a stop, renumber its route, rebuild geometry. Requires
+    // manage_transport. Answers with the route's surviving stops plus the route itself so the caller
+    // refreshes its list and the map line in one round trip instead of refetching both.
+    [HttpDelete("{id:int}")]
+    public async Task<ActionResult<RouteStopsResponse>> Delete(int id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+            if (!await _userAdminService.HasPermissionAsync(userId, SeedData.ManageTransportPermission))
+                return Forbid();
+
+            var result = await _transport.DeleteStopAsync(id, userId, cancellationToken);
+            return result.Status switch
+            {
+                TransportWriteStatus.StopNotFound => NotFound(new { message = "Stop not found." }),
+                TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
+                // The deletion itself is already committed, so these carry deletePersisted plus the
+                // fresh state — the same partial-success contract a failed reorder returns.
+                TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>
+                    UnprocessableEntity(DeleteError(result)),
+                TransportWriteStatus.RoutingUnavailable =>
+                    StatusCode(StatusCodes.Status503ServiceUnavailable, DeleteError(result)),
+                _ => Ok(new RouteStopsResponse { Stops = result.Stops!, Route = result.Route! }),
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new EmptyResult();
+        }
+        catch (Exception ex) { return ServerError(ex, nameof(Delete)); }
+    }
+
+    private static object DeleteError(StopOrderResult result) => new
+    {
+        message = DeleteRoutingMessage(result.Status),
+        code = TransportationService.RoutingErrorCode(result.Status),
+        deletePersisted = result.OrderPersisted,
+        stops = result.Stops,
+        route = result.Route,
+    };
+
+    private static string DeleteRoutingMessage(TransportWriteStatus status) => status switch
+    {
+        TransportWriteStatus.NoRoute => "The stop was deleted, but no road route connects the remaining stops.",
+        TransportWriteStatus.InvalidCoordinates => "The stop was deleted, but a remaining stop has invalid routing coordinates.",
+        _ => "The stop was deleted, but routing is unavailable; previous route geometry was preserved.",
+    };
+
+    private static string RoutingMessage(TransportWriteStatus status) => status switch
+    {
+        TransportWriteStatus.NoRoute => "The stop was saved, but no road route connects the ordered stops.",
+        TransportWriteStatus.InvalidCoordinates => "The stop was saved, but a stop has invalid routing coordinates.",
+        _ => "The stop was saved, but routing is unavailable; previous route geometry was preserved.",
+    };
 }

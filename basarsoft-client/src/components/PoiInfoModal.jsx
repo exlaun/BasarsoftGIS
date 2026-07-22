@@ -6,7 +6,7 @@ import PoiIconBadge from './PoiIconBadge'
 
 // Read-only info panel for a POI on the map (Select tool click), the POI counterpart of the shape
 // info popup. POIs are shared data, so there is no editing here — just the details plus a Delete
-// button when the caller may remove it (creator or admin). `poi` = { name, categoryPath, openTime,
+// button when the caller has manage_pois. `poi` = { name, categoryPath, openTime,
 // closeTime, createdBy, createdAt, categoryColor, categoryIconKey }.
 export default function PoiInfoModal({ poi, canDelete, onDelete, onClose }) {
   useEffect(() => {

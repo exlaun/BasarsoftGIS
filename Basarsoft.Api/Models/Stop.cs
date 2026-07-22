@@ -16,7 +16,7 @@ public class Stop : IGeoFeature
 
     public string? Name { get; set; }
 
-    // Unused for stops (they render in their route's color), but required by IGeoFeature.
+    // Optional "#rrggbb" override for this stop's marker; null means it inherits its route's color.
     public string? Color { get; set; }
 
     public Geometry Geom { get; set; } = default!;

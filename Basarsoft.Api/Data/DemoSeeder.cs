@@ -194,8 +194,8 @@ public static class DemoSeeder
         Require(rolePermissions.Count == 5, $"Expected five roles, found {rolePermissions.Count}.");
         Require(rolePermissions[SeedData.ViewerRoleName].Count == 0,
             "Viewer must remain permission-free.");
-        Require(rolePermissions[SeedData.OperatorRoleName].SetEquals(["add_poi", "manage_transport"]),
-            "Operator must inherit add_poi + manage_transport and no redundant drawing permission.");
+        Require(rolePermissions[SeedData.OperatorRoleName].SetEquals(["manage_transport"]),
+            "Operator must inherit manage_transport only and remain POI read-only.");
 
         var users = DemoData.Users.ToDictionary(u => u.Username, StringComparer.Ordinal);
         var effectiveAreas = new Dictionary<string, Geometry?>(StringComparer.Ordinal);
@@ -299,7 +299,7 @@ public static class DemoSeeder
                     $"Owner '{owner.Username}' cannot manage seeded {shape.Type} '{shape.Name}'.");
             }
 
-            if (effectiveAreas[owner.Username] is { } area)
+            if (effectiveAreas[owner!.Username] is { } area)
                 Require(area.Covers(geometry),
                     $"Restricted shape '{shape.Name}' falls outside '{owner.Username}' effective area.");
         }
@@ -375,14 +375,13 @@ public static class DemoSeeder
             Require(poi.DaysAgo >= 0 && poi.Close >= poi.Open,
                 $"POI '{poi.Name}' has invalid sample hours or age.");
             var geometry = Parse(poi.Wkt, OgcGeometryType.Point, poi.Name);
-            var effectivePermissions = rolePermissions[owner!.Role]
-                .Concat(owner.DirectPermissions)
-                .ToHashSet(StringComparer.Ordinal);
-            Require(effectivePermissions.Contains("add_poi"),
-                $"Owner '{owner.Username}' cannot create curated POI '{poi.Name}'.");
-            if (effectiveAreas[owner.Username] is { } area)
+            // Curated data may retain legacy Operator ownership even though that role is now strictly
+            // POI read-only. The destructive seeder inserts fixtures directly; runtime creation still
+            // requires add_poi and deletion requires manage_pois.
+            var poiOwner = owner!;
+            if (effectiveAreas[poiOwner.Username] is { } area)
                 Require(area.Covers(geometry),
-                    $"Restricted POI '{poi.Name}' falls outside '{owner.Username}' effective area.");
+                    $"Restricted POI '{poi.Name}' falls outside '{poiOwner.Username}' effective area.");
         }
 
         var poiOwners = DemoData.Pois
@@ -1203,7 +1202,7 @@ public static class DemoSeeder
                 .ToHashSet(StringComparer.Ordinal),
             [DemoData.RegionalManagerRoleName] = ["add_point", "add_line", "add_polygon"],
             [DemoData.EditorRoleName] = ["add_point", "add_line"],
-            [SeedData.OperatorRoleName] = ["add_poi", "manage_transport"],
+            [SeedData.OperatorRoleName] = ["manage_transport"],
             [SeedData.ViewerRoleName] = [],
         };
         foreach (var role in rolesById.Values)

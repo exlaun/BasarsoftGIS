@@ -22,6 +22,15 @@ const POI_NAV = [
   { to: '/admin/poi-categories', end: false, label: 'POI Categories', permission: 'manage_pois' },
 ]
 
+const TRANSPORT_NAV = [
+  {
+    to: '/admin/transportation',
+    end: false,
+    label: 'Routes & Stops',
+    permission: 'manage_transport_admin',
+  },
+]
+
 export default function AdminLayout() {
   const { logout, permissions } = useAuth()
   const navigate = useNavigate()
@@ -30,12 +39,13 @@ export default function AdminLayout() {
   const granted = new Set(permissions)
   const nav = NAV.filter((item) => granted.has(item.permission))
   const poiNav = POI_NAV.filter((item) => granted.has(item.permission))
+  const transportNav = TRANSPORT_NAV.filter((item) => granted.has(item.permission))
 
   // The /admin index is Users, so e.g. a manage_pois-only admin would land on a section they can't
   // use. Bounce them to their first permitted section instead. (AdminRoute already guarantees the
   // profile is loaded and that at least one manage_* permission exists.)
-  const allowed = [...nav, ...poiNav]
-  const current = [...NAV, ...POI_NAV].find((item) =>
+  const allowed = [...nav, ...poiNav, ...transportNav]
+  const current = [...NAV, ...POI_NAV, ...TRANSPORT_NAV].find((item) =>
     item.end ? location.pathname === item.to : location.pathname.startsWith(item.to),
   )
   if (allowed.length > 0 && current && !granted.has(current.permission)) {
@@ -84,6 +94,18 @@ export default function AdminLayout() {
 
             {poiNav.length > 0 && <div className="admin-nav-section">POI Management</div>}
             {poiNav.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) => `admin-nav-link${isActive ? ' is-active' : ''}`}
+              >
+                {item.label}
+              </NavLink>
+            ))}
+
+            {transportNav.length > 0 && <div className="admin-nav-section">Transportation</div>}
+            {transportNav.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}

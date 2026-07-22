@@ -289,7 +289,7 @@ public class DemoDataContractTests
         AssertSetEqual(["add_point", "add_line", "add_polygon"],
             rolePermissions[DemoData.RegionalManagerRoleName]);
         AssertSetEqual(["add_point", "add_line"], rolePermissions[DemoData.EditorRoleName]);
-        AssertSetEqual(["add_poi", "manage_transport"], rolePermissions[SeedData.OperatorRoleName]);
+        AssertSetEqual(["manage_transport"], rolePermissions[SeedData.OperatorRoleName]);
         Assert.Empty(rolePermissions[SeedData.ViewerRoleName]);
 
         foreach (var user in DemoData.Users)
@@ -307,7 +307,7 @@ public class DemoDataContractTests
                 "istanbul_editor" or "izmir_editor" or "antalya_editor" =>
                     Set("add_point", "add_line"),
                 "istanbul_operator" or "antalya_operator" or
-                    "gaziantep_operator" or "trabzon_operator" => Set("add_poi", "manage_transport"),
+                    "gaziantep_operator" or "trabzon_operator" => Set("manage_transport"),
                 "viewer" => Set(),
                 _ => Set("add_point", "add_line", "add_polygon"),
             };

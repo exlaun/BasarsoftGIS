@@ -25,9 +25,38 @@ public interface ITransportationService
 
     // Creates a stop at the drawn point, appended to the end of its route (SequenceOrder = max + 1).
     // Validates the WKT is a point, the route exists, and the point is inside the caller's area.
-    Task<StopWriteResult> CreateStopAsync(StopCreateRequest request, int userId);
+    Task<StopWriteResult> CreateStopAsync(
+        StopCreateRequest request,
+        int userId,
+        CancellationToken cancellationToken = default);
+
+    // Admin-only caller updates presentation metadata; stop movement is deliberately not exposed.
+    Task<StopWriteResult> UpdateStopAsync(int id, StopUpdateRequest request, int userId);
+
+    // Soft-deletes the route and, in the same save, every stop on it — a live stop must always have a
+    // live route. False when the route doesn't exist.
+    Task<bool> DeleteRouteAsync(int id, int userId);
+
+    // Soft-deletes one stop, renumbers its route's survivors back to 1..N, and rebuilds the geometry.
+    // Returns a reorder's shape (remaining stops + route) so one round trip refreshes the whole panel.
+    Task<StopOrderResult> DeleteStopAsync(
+        int id,
+        int userId,
+        CancellationToken cancellationToken = default);
 
     // Renumbers a route's stops to the submitted order (1..N). InvalidOrder when the id set doesn't
     // match the route's current stops exactly; RouteNotFound when the route doesn't exist.
-    Task<StopOrderResult> ReorderStopsAsync(int routeId, IReadOnlyList<int> orderedStopIds, int userId);
+    Task<StopOrderResult> ReorderStopsAsync(
+        int routeId,
+        IReadOnlyList<int> orderedStopIds,
+        int userId,
+        CancellationToken cancellationToken = default);
+
+    // One shared OSRM rebuild used by explicit build, stop creation, operational reorder, and admin.
+    Task<RouteBuildResult> RebuildRouteAsync(
+        int routeId,
+        int userId,
+        CancellationToken cancellationToken = default);
+
+    Task<AdminTransportationResponse> GetAdminSnapshotAsync();
 }

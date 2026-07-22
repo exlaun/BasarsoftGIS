@@ -12,6 +12,7 @@ public class PermissionRequirement : IAuthorizationRequirement
     public const string ManageRoles = "ManageRoles";
     public const string ManagePermissions = "ManagePermissions";
     public const string ManagePois = "ManagePois";
+    public const string ManageTransportAdmin = "ManageTransportAdmin";
 
     public PermissionRequirement(string permissionName) => PermissionName = permissionName;
 

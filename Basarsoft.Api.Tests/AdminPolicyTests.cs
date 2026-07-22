@@ -17,6 +17,7 @@ public class AdminPolicyTests
     [InlineData(typeof(AdminRolesController), PermissionRequirement.ManageRoles)]
     [InlineData(typeof(AdminPermissionsController), PermissionRequirement.ManagePermissions)]
     [InlineData(typeof(AdminPoiCategoriesController), PermissionRequirement.ManagePois)]
+    [InlineData(typeof(AdminTransportationController), PermissionRequirement.ManageTransportAdmin)]
     public void AdminController_DemandsItsOwnResourcePolicy(Type controller, string expectedPolicy)
     {
         var authorize = controller.GetCustomAttributes<AuthorizeAttribute>(inherit: false).ToList();
@@ -36,6 +37,7 @@ public class AdminPolicyTests
             SeedData.ManageRolesPermission,
             SeedData.ManagePermissionsPermission,
             SeedData.ManagePoisPermission,
+            SeedData.ManageTransportAdminPermission,
         };
 
         Assert.Equal(

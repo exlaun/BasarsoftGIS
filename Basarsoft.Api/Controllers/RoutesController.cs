@@ -9,9 +9,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace Basarsoft.Api.Controllers;
 
 // Transportation routes (name + color) and the ordered stops that belong to each. Reading is open to
-// every authenticated user (End Users browse routes read-only); creating/editing routes and reordering
-// their stops require the manage_transport permission (Operators). Stops themselves are created via
-// StopsController. Reads stay on EF — nothing here touches GeoServer.
+// every authenticated user (End Users browse routes read-only); creating/editing/deleting routes and
+// reordering their stops require the manage_transport permission (Operators). Stops themselves are
+// created and deleted via StopsController. Reads stay on EF — nothing here touches GeoServer.
 [ApiController]
 [Authorize]
 [Route("api/routes")]
@@ -98,9 +98,9 @@ public class RoutesController : ControllerBase
         catch (Exception ex) { return ServerError(ex, nameof(Update)); }
     }
 
-    // PUT /api/routes/{id}/stops/order -> persist a drag-reorder. Requires manage_transport.
-    [HttpPut("{id:int}/stops/order")]
-    public async Task<ActionResult<IReadOnlyList<StopResponse>>> ReorderStops(int id, StopOrderRequest request)
+    // DELETE /api/routes/{id} -> soft-delete a route and every stop on it. Requires manage_transport.
+    [HttpDelete("{id:int}")]
+    public async Task<ActionResult> Delete(int id)
     {
         try
         {
@@ -109,7 +109,30 @@ public class RoutesController : ControllerBase
             if (!await _userAdminService.HasPermissionAsync(userId, SeedData.ManageTransportPermission))
                 return Forbid();
 
-            var result = await _transport.ReorderStopsAsync(id, request.OrderedStopIds, userId);
+            if (!await _transport.DeleteRouteAsync(id, userId))
+                return NotFound(new { message = "Route not found." });
+
+            return NoContent();
+        }
+        catch (Exception ex) { return ServerError(ex, nameof(Delete)); }
+    }
+
+    // PUT /api/routes/{id}/stops/order -> persist a drag-reorder. Requires manage_transport.
+    [HttpPut("{id:int}/stops/order")]
+    public async Task<ActionResult<RouteStopsResponse>> ReorderStops(
+        int id,
+        StopOrderRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+            if (!await _userAdminService.HasPermissionAsync(userId, SeedData.ManageTransportPermission))
+                return Forbid();
+
+            var result = await _transport.ReorderStopsAsync(
+                id, request.OrderedStopIds, userId, cancellationToken);
             return result.Status switch
             {
                 TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
@@ -118,10 +141,48 @@ public class RoutesController : ControllerBase
                     message = "The submitted stop order doesn't match this route's stops.",
                     code = "invalid_order",
                 }),
-                _ => Ok(result.Stops),
+                TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>
+                    UnprocessableEntity(new
+                    {
+                        message = RoutingMessage(result.Status),
+                        code = TransportationService.RoutingErrorCode(result.Status),
+                        orderPersisted = result.OrderPersisted,
+                        stops = result.Stops,
+                        route = result.Route,
+                    }),
+                TransportWriteStatus.RoutingUnavailable => StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    new
+                    {
+                        message = RoutingMessage(result.Status),
+                        code = TransportationService.RoutingErrorCode(result.Status),
+                        orderPersisted = result.OrderPersisted,
+                        stops = result.Stops,
+                        route = result.Route,
+                    }),
+                _ => Ok(new RouteStopsResponse { Stops = result.Stops!, Route = result.Route! }),
             };
         }
         catch (Exception ex) { return ServerError(ex, nameof(ReorderStops)); }
+    }
+
+    // POST /api/routes/{id}/build -> rebuild the persisted road geometry in stop order.
+    [HttpPost("{id:int}/build")]
+    public async Task<ActionResult<RouteResponse>> Build(int id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!TryGetUserId(out var userId))
+                return Unauthorized();
+            if (!await _userAdminService.HasPermissionAsync(userId, SeedData.ManageTransportPermission))
+                return Forbid();
+
+            return MapBuildResult(await _transport.RebuildRouteAsync(id, userId, cancellationToken));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new EmptyResult();
+        }
+        catch (Exception ex) { return ServerError(ex, nameof(Build)); }
     }
 
     private ActionResult<RouteResponse> MapRouteResult(RouteWriteResult result) =>
@@ -132,4 +193,37 @@ public class RoutesController : ControllerBase
                 Conflict(new { message = "A route with that name already exists.", code = "duplicate_name" }),
             _ => Ok(result.Response),
         };
+
+    private ActionResult<RouteResponse> MapBuildResult(RouteBuildResult result) => result.Status switch
+    {
+        TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
+        TransportWriteStatus.InsufficientStops => Conflict(new
+        {
+            message = "At least two stops are required to build a route.",
+            code = "insufficient_stops",
+            route = result.Route,
+        }),
+        TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>
+            UnprocessableEntity(new
+            {
+                message = RoutingMessage(result.Status),
+                code = TransportationService.RoutingErrorCode(result.Status),
+                route = result.Route,
+            }),
+        TransportWriteStatus.RoutingUnavailable => StatusCode(StatusCodes.Status503ServiceUnavailable,
+            new
+            {
+                message = RoutingMessage(result.Status),
+                code = TransportationService.RoutingErrorCode(result.Status),
+                route = result.Route,
+            }),
+        _ => Ok(result.Route),
+    };
+
+    private static string RoutingMessage(TransportWriteStatus status) => status switch
+    {
+        TransportWriteStatus.NoRoute => "No road route connects the ordered stops.",
+        TransportWriteStatus.InvalidCoordinates => "One or more stops have invalid routing coordinates.",
+        _ => "Routing services are currently unavailable; the previous route geometry was preserved.",
+    };
 }

@@ -4,7 +4,8 @@ import './ShapeInfoModal.css'
 
 // Read-only info popup for a stop on the map (clicked with the Select tool), following the existing
 // GIS point-popup pattern (PoiInfoModal). Stops have no edit or delete in this module, so it is
-// view-only. `stop` = { name, routeName, routeColor, sequenceOrder, createdBy, createdAt }.
+// view-only. `stop` = { name, routeName, routeColor, stopColor, sequenceOrder, createdBy, createdAt }.
+// stopColor is the stop's own override or null when it inherits routeColor.
 export default function StopInfoModal({ stop, onClose }) {
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -41,6 +42,27 @@ export default function StopInfoModal({ stop, onClose }) {
               <span>{stop.routeName || '—'}</span>
             </dd>
           </div>
+          {/* Only shown when this stop overrides its route's color — otherwise the swatch above
+              already is its color, and a second identical swatch would just be noise. */}
+          {stop.stopColor && (
+            <div>
+              <dt>Stop color</dt>
+              <dd className="poi-info-category">
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: 'inline-block',
+                    width: 12,
+                    height: 12,
+                    borderRadius: 3,
+                    background: stop.stopColor,
+                    border: '1px solid rgba(0, 0, 0, 0.25)',
+                  }}
+                />
+                <span>{stop.stopColor}</span>
+              </dd>
+            </div>
+          )}
           <div>
             <dt>Stop order</dt>
             <dd>#{stop.sequenceOrder}</dd>

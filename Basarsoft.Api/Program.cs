@@ -82,6 +82,13 @@ builder.Services.AddScoped<ILocationAnalysisService, LocationAnalysisService>();
 
 // Transportation module: routes (name + color) and their ordered point stops.
 builder.Services.AddScoped<ITransportationService, TransportationService>();
+builder.Services.Configure<RoutingSettings>(builder.Configuration.GetSection("Routing"));
+builder.Services.AddHttpClient<IRoutingService, OsrmRoutingService>(client =>
+{
+    // OsrmRoutingService owns the configured per-attempt timeout so it can distinguish a timeout from
+    // caller cancellation and retry only the failures permitted by the fallback contract.
+    client.Timeout = Timeout.InfiniteTimeSpan;
+});
 
 // Global exception handling: a final safety net that converts any unhandled exception into a clean
 // 500 JSON response (the controllers also try-catch individually). AddProblemDetails() supplies the
@@ -155,6 +162,7 @@ builder.Services.AddAuthorization(options =>
                  (PermissionRequirement.ManageRoles, SeedData.ManageRolesPermission),
                  (PermissionRequirement.ManagePermissions, SeedData.ManagePermissionsPermission),
                  (PermissionRequirement.ManagePois, SeedData.ManagePoisPermission),
+                 (PermissionRequirement.ManageTransportAdmin, SeedData.ManageTransportAdminPermission),
              })
     {
         options.AddPolicy(policyName, policy =>

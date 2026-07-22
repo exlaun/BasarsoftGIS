@@ -1,9 +1,9 @@
+using NetTopologySuite.Geometries;
+
 namespace Basarsoft.Api.Models;
 
-// One transportation route -> tbl_route. A route is just a named, colored grouping of stops; it has
-// no geometry of its own (the line is not modeled). Every stop points at exactly one route. Modeled on
-// PoiCategory (a name + color reference row) minus the tree fields. Soft-deleted like the other tables,
-// though the module exposes no route deletion.
+// One transportation route -> tbl_route. Stops define its waypoint order; Geometry is the latest
+// successful OSRM road line in EPSG:4326. A failed rebuild never overwrites that last good line.
 //
 // Named TransportRoute (not Route) to avoid colliding with Microsoft.AspNetCore.Routing.Route, which
 // the web SDK's implicit usings bring into every file. The DB table, REST path, and UI all stay "route".
@@ -18,6 +18,19 @@ public class TransportRoute : IAuditable
     // default stop color.
     public string? Color { get; set; }
 
+    public LineString? Geometry { get; set; }
+
+    public double? DistanceMeters { get; set; }
+
+    public double? DurationSeconds { get; set; }
+
+    // True when the stop order/location changed but the most recent routing attempt did not produce a
+    // replacement. Geometry may still contain the last valid line so the map can render useful data.
+    public bool IsGeometryStale { get; set; }
+
+    // One of no_route / invalid_coordinates / routing_unavailable, or null after a successful build.
+    public string? RoutingErrorCode { get; set; }
+
     // FK -> users.id. The operator who created the route. Stamped from the JWT, never from the client.
     public int UserId { get; set; }
 
@@ -28,7 +41,7 @@ public class TransportRoute : IAuditable
 
     public bool IsActive { get; set; } = true;
 
-    // FK -> users.id. Who last changed the route (rename / recolor).
+    // FK -> users.id. Who last changed route presentation, stop order, or routing state.
     public int? ModifiedUserId { get; set; }
 
     public DateTime ModifiedDate { get; set; } = DateTime.UtcNow;

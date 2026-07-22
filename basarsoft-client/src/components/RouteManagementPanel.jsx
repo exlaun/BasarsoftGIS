@@ -22,9 +22,9 @@ const iconProps = {
 // the right edge (and its geometry) with QueryPanel — MapPage slides one out as the other opens.
 // Presentational about the map: the routes/stops data, selection, and every API call live in MapPage;
 // this renders the lists and raises intent through props, owning only the drag-in-progress UI state.
-// Visible to every authenticated user; the write controls (New / Edit / Add stop / drag-reorder)
-// render only when canManage (the manage_transport permission) is true, so End Users get a read-only
-// browser.
+// Visible to every authenticated user; the write controls (New / Edit / Delete / Add stop /
+// drag-reorder) render only when canManage (the manage_transport permission) is true, so End Users get
+// a read-only browser. Deletion is confirmed in MapPage, not here — this only raises the intent.
 //
 // The list is an accordion: selecting a route expands it in place and its stops render nested
 // directly beneath that route's own row, indented behind a spine in the route's color. Only the
@@ -44,6 +44,12 @@ export default function RouteManagementPanel({
   onAddStopToRoute,
   onReorderStops,
   onStopClick,
+  onDeleteRoute,
+  onDeleteStop,
+  visibility,
+  buildingRouteId,
+  onToggleVisibility,
+  onBuildRoute,
   onClose,
 }) {
   // Native HTML5 drag: index of the row being dragged and the row it's currently over.
@@ -104,6 +110,12 @@ export default function RouteManagementPanel({
             {routes.map((route) => {
               const expanded = route.id === selectedRouteId
               const routeColor = route.color || DEFAULT_ROUTE_COLOR
+              const visible = visibility?.[route.id] !== false
+              const routeState = route.isGeometryStale
+                ? 'Stale'
+                : route.geometryWkt
+                  ? 'Ready'
+                  : 'Not built'
               return (
                 <li key={route.id} className="route-item">
                   <div
@@ -132,24 +144,56 @@ export default function RouteManagementPanel({
                       style={{ background: routeColor }}
                       aria-hidden="true"
                     />
+                    <label
+                      className="route-visibility"
+                      title={visible ? 'Hide route and stops' : 'Show route and stops'}
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={visible}
+                        onChange={(event) => onToggleVisibility(route.id, event.target.checked)}
+                        aria-label={`${visible ? 'Hide' : 'Show'} ${route.name}`}
+                      />
+                    </label>
                     <span className="route-name" title={route.name}>
                       {route.name}
                     </span>
                     <span className="route-stop-count">
                       {route.stopCount} {route.stopCount === 1 ? 'stop' : 'stops'}
                     </span>
+                    {/* The row itself is the route's select target, and it answers Enter/Space as well
+                        as clicks. So every control sitting on it has to stop BOTH — a bare onClick
+                        guard still lets a keyboard activation bubble up and expand the row too. Same
+                        pattern as the visibility checkbox above. */}
                     {canManage && (
-                      <button
-                        type="button"
-                        className="route-edit-btn"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          onEditRoute(route)
-                        }}
-                        title="Edit route"
-                      >
-                        Edit
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="route-edit-btn"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onEditRoute(route)
+                          }}
+                          onKeyDown={(event) => event.stopPropagation()}
+                          title="Edit route"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="route-edit-btn is-danger"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onDeleteRoute(route)
+                          }}
+                          onKeyDown={(event) => event.stopPropagation()}
+                          title="Delete route and its stops"
+                        >
+                          Delete
+                        </button>
+                      </>
                     )}
                   </div>
 
@@ -157,6 +201,22 @@ export default function RouteManagementPanel({
                       list is visually tied to the route it belongs to. */}
                   {expanded && (
                     <div className="route-stops" style={{ borderLeftColor: routeColor }}>
+                      <div className="route-build-summary">
+                        <span className={`route-state route-state-${routeState.toLowerCase().replace(' ', '-')}`}>
+                          {routeState}
+                        </span>
+                        {route.distanceMeters != null && (
+                          <span>{(route.distanceMeters / 1000).toFixed(1)} km</span>
+                        )}
+                        {route.durationSeconds != null && (
+                          <span>{Math.round(route.durationSeconds / 60)} min</span>
+                        )}
+                        {route.routingErrorCode && (
+                          <span className="route-routing-error" title={route.routingErrorCode}>
+                            {route.routingErrorCode}
+                          </span>
+                        )}
+                      </div>
                       {stopsLoading ? (
                         <p className="route-panel-hint">Loading stops…</p>
                       ) : stops.length === 0 ? (
@@ -204,12 +264,30 @@ export default function RouteManagementPanel({
                                   ⠿
                                 </span>
                               )}
-                              <span className="stop-order" style={{ background: routeColor }}>
+                              <span
+                                className="stop-order"
+                                style={{ background: stop.color || routeColor }}
+                              >
                                 {stop.sequenceOrder}
                               </span>
                               <span className="stop-name" title={stop.name}>
                                 {stop.name || 'Unnamed'}
                               </span>
+                              {canManage && (
+                                <button
+                                  type="button"
+                                  className="route-edit-btn is-danger"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    onDeleteStop(stop)
+                                  }}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                  title="Delete stop"
+                                  aria-label={`Delete ${stop.name || 'stop'}`}
+                                >
+                                  Delete
+                                </button>
+                              )}
                             </li>
                           ))}
                         </ol>
@@ -223,6 +301,14 @@ export default function RouteManagementPanel({
                             onClick={() => onAddStopToRoute(route)}
                           >
                             + Add stop
+                          </button>
+                          <button
+                            type="button"
+                            className="route-btn route-stops-add"
+                            disabled={stops.length < 2 || buildingRouteId != null}
+                            onClick={() => onBuildRoute(route.id)}
+                          >
+                            {buildingRouteId === route.id ? 'Rebuilding…' : 'Rebuild'}
                           </button>
                           {stops.length > 1 && (
                             <span className="route-panel-hint">Drag stops to reorder.</span>

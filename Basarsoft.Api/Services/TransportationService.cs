@@ -11,15 +11,20 @@ public class TransportationService : ITransportationService
 {
     private readonly AppDbContext _db;
     private readonly IGeoAuthorizationService _geoAuth;
+    private readonly IRoutingService _routing;
     private readonly WKTReader _wktReader = new();
 
     // Same storage CRS as every other geometry table: EPSG:4326 (WGS84 lon-lat).
     private const int Srid = 4326;
 
-    public TransportationService(AppDbContext db, IGeoAuthorizationService geoAuth)
+    public TransportationService(
+        AppDbContext db,
+        IGeoAuthorizationService geoAuth,
+        IRoutingService routing)
     {
         _db = db;
         _geoAuth = geoAuth;
+        _routing = routing;
     }
 
     public async Task<IReadOnlyList<RouteResponse>> ListRoutesAsync()
@@ -112,7 +117,28 @@ public class TransportationService : ITransportationService
             .ToList();
     }
 
-    public async Task<StopWriteResult> CreateStopAsync(StopCreateRequest request, int userId)
+    public async Task<AdminTransportationResponse> GetAdminSnapshotAsync()
+    {
+        var routes = await ListRoutesAsync();
+        var stops = await ListAllStopsAsync();
+        var stopsByRoute = stops
+            .GroupBy(stop => stop.RouteId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<StopResponse>)group.ToList());
+
+        return new AdminTransportationResponse
+        {
+            Routes = routes.Select(route => new AdminTransportationRouteResponse
+            {
+                Route = route,
+                Stops = stopsByRoute.GetValueOrDefault(route.Id, Array.Empty<StopResponse>()),
+            }).ToList(),
+        };
+    }
+
+    public async Task<StopWriteResult> CreateStopAsync(
+        StopCreateRequest request,
+        int userId,
+        CancellationToken cancellationToken = default)
     {
         // Parse the WKT the client drew. Bad text -> InvalidGeometry -> the controller returns 400.
         Geometry geom;
@@ -159,12 +185,120 @@ public class TransportationService : ITransportationService
             ModifiedUserId = userId,
         };
         _db.Stops.Add(stop);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
 
-        return StopWriteResult.Ok(ToStopResponse(stop, route, await UsernameAsync(userId)));
+        RouteBuildResult rebuild;
+        if (stop.SequenceOrder >= 2)
+        {
+            rebuild = await RebuildRouteCoreAsync(route, userId, cancellationToken);
+        }
+        else
+        {
+            rebuild = RouteBuildResult.From(
+                TransportWriteStatus.InsufficientStops,
+                ToRouteResponse(route, 1, await UsernameAsync(route.UserId)));
+        }
+
+        var response = ToStopResponse(stop, route, await UsernameAsync(userId));
+        var status = rebuild.Status == TransportWriteStatus.InsufficientStops
+            ? TransportWriteStatus.Success
+            : rebuild.Status;
+        return new StopWriteResult(status, response, rebuild.Route, StopPersisted: true);
     }
 
-    public async Task<StopOrderResult> ReorderStopsAsync(int routeId, IReadOnlyList<int> orderedStopIds, int userId)
+    public async Task<StopWriteResult> UpdateStopAsync(int id, StopUpdateRequest request, int userId)
+    {
+        var stop = await _db.Stops.FirstOrDefaultAsync(s => s.Id == id);
+        if (stop is null)
+            return StopWriteResult.StopNotFound;
+
+        var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == stop.RouteId);
+        if (route is null)
+            return StopWriteResult.RouteNotFound;
+
+        stop.Name = request.Name.Trim();
+        // Presentation only, like the name — clearing it back to null re-inherits the route color, and
+        // neither field changes the stop's position, so this still never needs an OSRM rebuild.
+        stop.Color = request.Color;
+        stop.ModifiedUserId = userId;
+        await _db.SaveChangesAsync();
+
+        var stopCount = await _db.Stops.CountAsync(s => s.RouteId == route.Id);
+        return StopWriteResult.Ok(
+            ToStopResponse(stop, route, await UsernameAsync(stop.UserId)),
+            ToRouteResponse(route, stopCount, await UsernameAsync(route.UserId)));
+    }
+
+    public async Task<bool> DeleteRouteAsync(int id, int userId)
+    {
+        var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == id);
+        if (route is null)
+            return false;
+
+        // Cascade to the stops in the same save. The module's invariant is that a live stop always has
+        // a live route (ListAllStopsAsync relies on it), and the FK is Restrict, so leaving the stops
+        // behind would strand rows that no query can reach.
+        var stops = await _db.Stops.Where(s => s.RouteId == id).ToListAsync();
+        foreach (var stop in stops)
+        {
+            stop.IsDeleted = true;
+            stop.ModifiedUserId = userId;
+        }
+
+        route.IsDeleted = true;
+        route.ModifiedUserId = userId;
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<StopOrderResult> DeleteStopAsync(
+        int id,
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        var stop = await _db.Stops.FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+        if (stop is null)
+            return StopOrderResult.StopNotFound;
+
+        var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == stop.RouteId, cancellationToken);
+        if (route is null)
+            return StopOrderResult.RouteNotFound;
+
+        stop.IsDeleted = true;
+        stop.ModifiedUserId = userId;
+
+        // SequenceOrder is 1..N with no gaps, so the survivors close the hole the removal leaves —
+        // otherwise a route ends up numbered 1, 2, 4 on both the panel list and the map markers.
+        var remaining = await _db.Stops
+            .Where(s => s.RouteId == route.Id && s.Id != id)
+            .OrderBy(s => s.SequenceOrder)
+            .ToListAsync(cancellationToken);
+        for (var i = 0; i < remaining.Count; i++)
+        {
+            remaining[i].SequenceOrder = i + 1;
+            remaining[i].ModifiedUserId = userId;
+        }
+        await _db.SaveChangesAsync(cancellationToken);
+
+        // Committed before the network call, exactly like a reorder: a routing failure marks the route
+        // stale but must never resurrect a stop the user deleted.
+        var rebuild = await RebuildRouteCoreAsync(route, userId, cancellationToken);
+
+        var usernames = await UsernameMapAsync(remaining.Select(s => s.UserId));
+        var ordered = remaining
+            .Select(s => ToStopResponse(s, route, usernames.GetValueOrDefault(s.UserId, string.Empty)))
+            .ToList();
+        var status = rebuild.Status == TransportWriteStatus.InsufficientStops
+            ? TransportWriteStatus.Success
+            : rebuild.Status;
+        return new StopOrderResult(status, ordered, rebuild.Route, OrderPersisted: true);
+    }
+
+    public async Task<StopOrderResult> ReorderStopsAsync(
+        int routeId,
+        IReadOnlyList<int> orderedStopIds,
+        int userId,
+        CancellationToken cancellationToken = default)
     {
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == routeId);
         if (route is null)
@@ -189,14 +323,106 @@ public class TransportationService : ITransportationService
             stop.SequenceOrder = i + 1;
             stop.ModifiedUserId = userId;
         }
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
+
+        // The order is intentionally committed before the network call. A routing failure marks the
+        // route stale but must never roll back the user's valid new order.
+        var rebuild = await RebuildRouteCoreAsync(route, userId, cancellationToken);
 
         var usernames = await UsernameMapAsync(stops.Select(s => s.UserId));
         var ordered = orderedStopIds
             .Select(id => ToStopResponse(byId[id], route, usernames.GetValueOrDefault(byId[id].UserId, string.Empty)))
             .ToList();
-        return StopOrderResult.Ok(ordered);
+        var status = rebuild.Status == TransportWriteStatus.InsufficientStops
+            ? TransportWriteStatus.Success
+            : rebuild.Status;
+        return new StopOrderResult(status, ordered, rebuild.Route, OrderPersisted: true);
     }
+
+    public async Task<RouteBuildResult> RebuildRouteAsync(
+        int routeId,
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == routeId, cancellationToken);
+        return route is null
+            ? RouteBuildResult.RouteNotFound
+            : await RebuildRouteCoreAsync(route, userId, cancellationToken);
+    }
+
+    private async Task<RouteBuildResult> RebuildRouteCoreAsync(
+        TransportRoute route,
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        var stops = await _db.Stops
+            .Where(s => s.RouteId == route.Id)
+            .OrderBy(s => s.SequenceOrder)
+            .ToListAsync(cancellationToken);
+        var username = await UsernameAsync(route.UserId);
+
+        if (stops.Count < 2)
+        {
+            // A route that drops below two stops has nothing left to connect, so any line it still
+            // carries runs to a stop that no longer exists. Clearing is only needed after a deletion —
+            // a never-built route has no geometry — so the common case stays a pure read.
+            if (route.Geometry is not null)
+            {
+                route.Geometry = null;
+                route.DistanceMeters = null;
+                route.DurationSeconds = null;
+                route.IsGeometryStale = false;
+                route.RoutingErrorCode = null;
+                route.ModifiedUserId = userId;
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
+            return RouteBuildResult.From(
+                TransportWriteStatus.InsufficientStops,
+                ToRouteResponse(route, stops.Count, username));
+        }
+
+        var routing = await _routing.BuildRouteAsync(
+            stops.Select(stop => stop.Geom.Coordinate).ToList(), cancellationToken);
+        var status = routing.Status == RoutingStatus.Success && routing.Geometry is null
+            ? TransportWriteStatus.RoutingUnavailable
+            : MapRoutingStatus(routing.Status);
+
+        if (status == TransportWriteStatus.Success)
+        {
+            route.Geometry = routing.Geometry!;
+            route.DistanceMeters = routing.DistanceMeters;
+            route.DurationSeconds = routing.DurationSeconds;
+            route.IsGeometryStale = false;
+            route.RoutingErrorCode = null;
+        }
+        else
+        {
+            // Geometry/distance/duration deliberately stay untouched: they are the last valid build.
+            route.IsGeometryStale = route.Geometry is not null;
+            route.RoutingErrorCode = RoutingErrorCode(status);
+        }
+
+        route.ModifiedUserId = userId;
+        await _db.SaveChangesAsync(cancellationToken);
+        return RouteBuildResult.From(status, ToRouteResponse(route, stops.Count, username));
+    }
+
+    private static TransportWriteStatus MapRoutingStatus(RoutingStatus status) => status switch
+    {
+        RoutingStatus.Success => TransportWriteStatus.Success,
+        RoutingStatus.NoRoute => TransportWriteStatus.NoRoute,
+        RoutingStatus.InvalidCoordinates => TransportWriteStatus.InvalidCoordinates,
+        _ => TransportWriteStatus.RoutingUnavailable,
+    };
+
+    public static string? RoutingErrorCode(TransportWriteStatus status) => status switch
+    {
+        TransportWriteStatus.NoRoute => "no_route",
+        TransportWriteStatus.InvalidCoordinates => "invalid_coordinates",
+        TransportWriteStatus.RoutingUnavailable => "routing_unavailable",
+        _ => null,
+    };
 
     // Usernames for a set of creator ids. IgnoreQueryFilters so a soft-deleted creator's name still
     // resolves (mirrors the POI list). The id list is a concrete array, so EF translates Contains.
@@ -222,6 +448,11 @@ public class TransportationService : ITransportationService
             Id = route.Id,
             Name = route.Name,
             Color = route.Color,
+            GeometryWkt = route.Geometry?.AsText(),
+            DistanceMeters = route.DistanceMeters,
+            DurationSeconds = route.DurationSeconds,
+            IsGeometryStale = route.IsGeometryStale,
+            RoutingErrorCode = route.RoutingErrorCode,
             StopCount = stopCount,
             UserId = route.UserId,
             CreatedBy = createdBy,
@@ -238,6 +469,7 @@ public class TransportationService : ITransportationService
             RouteId = stop.RouteId,
             RouteName = route.Name,
             RouteColor = route.Color,
+            Color = stop.Color,
             SequenceOrder = stop.SequenceOrder,
             UserId = stop.UserId,
             CreatedBy = createdBy,

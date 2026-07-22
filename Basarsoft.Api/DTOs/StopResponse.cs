@@ -15,8 +15,15 @@ public class StopResponse
 
     public string RouteName { get; set; } = string.Empty;
 
-    // The owning route's color ("#rrggbb") or null — the client tints the marker with it.
+    // The owning route's color ("#rrggbb") or null — the inherited tint, and still what the popup
+    // shows as "the route this belongs to".
     public string? RouteColor { get; set; }
+
+    // This stop's own "#rrggbb" override, or null to inherit RouteColor. Kept separate from
+    // RouteColor (rather than pre-resolved server-side) so the client can tell an explicit choice
+    // apart from inheritance — that distinction is what lets a route recolor flow through to stops
+    // that never set their own color while leaving the ones that did alone.
+    public string? Color { get; set; }
 
     // Position within the route, 1..N with no gaps.
     public int SequenceOrder { get; set; }

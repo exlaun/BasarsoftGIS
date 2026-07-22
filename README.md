@@ -9,7 +9,7 @@ GeoServer WFS/WMS rendering, and weighted location analysis over all 81 Turkish 
 | Client | React 19, Vite, OpenLayers |
 | API | ASP.NET Core 8, EF Core, JWT, BCrypt |
 | Database | PostgreSQL + PostGIS, EPSG:4326 |
-| Map services | GeoServer 3, WFS/WMS, `vec:Heatmap` |
+| Map services | GeoServer 3 (WFS/WMS) and OSRM 6.0.0 (road routing, MLD) |
 
 ## Scenario at a glance
 
@@ -44,10 +44,10 @@ This common password is for a local demonstration only.
 | 10 | `istanbul_editor` | Editor | İstanbul; role point/line |
 | 11 | `izmir_editor` | Editor | İzmir; role point/line |
 | 12 | `antalya_editor` | Editor | Antalya; role point/line |
-| 13 | `istanbul_operator` | Operator | İstanbul; inherits `add_poi` |
-| 14 | `antalya_operator` | Operator | Antalya; inherits `add_poi` |
-| 15 | `gaziantep_operator` | Operator | Gaziantep; inherits `add_poi` |
-| 16 | `trabzon_operator` | Operator | Trabzon; inherits `add_poi` |
+| 13 | `istanbul_operator` | Operator | İstanbul; transportation management, POI read-only |
+| 14 | `antalya_operator` | Operator | Antalya; transportation management, POI read-only |
+| 15 | `gaziantep_operator` | Operator | Gaziantep; transportation management, POI read-only |
+| 16 | `trabzon_operator` | Operator | Trabzon; transportation management, POI read-only |
 | 17 | `viewer` | Viewer | Permission-free, genuinely read-only |
 
 The five roles remain Admin, Regional Manager, Editor, Operator, and Viewer. There are 15
@@ -57,6 +57,10 @@ areas. A user area overrides a role area; otherwise role areas are inherited.
 Drawing visibility remains private. Admin does **not** see other users' drawings merely because it
 is Admin: it owns a separate 100-shape inventory. POIs are the shared catalogue and are visible to
 all authenticated users.
+
+The Operator role now has only `manage_transport`. Operators, Viewers, and ordinary users cannot
+create or delete POIs; deletion requires the effective `manage_pois` permission. The migration
+removes the legacy Operator-role `add_poi` link once, without touching explicit direct user grants.
 
 Creating, updating, moving, and deleting a private drawing all require the matching
 `add_point`, `add_line`, or `add_polygon` permission. The Viewer can inspect its three legacy
@@ -106,7 +110,8 @@ The exact total is 139:
 - 58 curated demonstration hotspots — real landmarks (Anıtkabir, Galata Kulesi, Sümela Manastırı…)
   and plausible businesses concentrated in the demo personas' cities.
 - Ownership: Admin 106 (81 generated + 25 curated); istanbul_operator 12; the other three
-  operators 7 each.
+  operators 7 each. Operator-owned rows remain preseeded read-only sample data; current Operator
+  permissions do not allow adding or deleting them.
 
 POI names and daily hours are demo/sample content. They are not guaranteed to be current business
 names, live opening times, or travel advice.
@@ -129,8 +134,38 @@ a stop that renders but refuses every edit. The two Trabzon routes deliberately 
 Değirmendere, the way real lines share a transfer point.
 
 Unlike private drawings, routes and stops are visible to every authenticated user; only the
-`manage_transport` permission, held by the Operator role, allows creating, editing, or reordering
-them. Route and stop names are demo/sample content on the same terms as the POI names above.
+`manage_transport` permission, held by the Operator role, allows creating, editing, reordering, or
+deleting them. Deleting a route deletes its stops with it; deleting one stop renumbers the rest of
+its route to a contiguous `1..N` and rebuilds the road geometry without it. Route and stop names are
+demo/sample content on the same terms as the POI names above.
+
+Routes store the last successful OSRM `LineString` plus distance and duration. Adding the second or
+later stop, changing the exact stop order, or choosing Rebuild calls OSRM in stop order. A routing
+failure preserves both the committed stop/order and the previous geometry, marking that geometry
+stale and retaining a routing error code. Existing and demo routes start without geometry and need
+one successful rebuild before a road line and direction arrows appear.
+
+Route visibility is session-local and synchronizes the line, approximately 1 km direction arrows,
+and stop markers. The overlays stay visible in both WFS and WMS display modes. Transportation
+administrators have a separate `/admin/transportation` route/stop view gated by
+`manage_transport_admin`; this permission is granted to Admin, not Operator.
+
+### Transportation API contracts
+
+- Route responses include nullable `geometryWkt`, `distanceMeters`, `durationSeconds`,
+  `isGeometryStale`, and `routingErrorCode`.
+- `POST /api/routes/{id}/build` requires `manage_transport`: success is `200`; fewer than two stops
+  is `409 insufficient_stops`; routing problems are `422 no_route` / `invalid_coordinates` or
+  `503 routing_unavailable`, always carrying the current route state.
+- Stop creation returns `{ stop, route }`; exact-set reorder and stop deletion both return
+  `{ stops, route }`. If OSRM fails after the database commit, the corresponding `422`/`503` carries
+  `stopPersisted: true`, `orderPersisted: true`, or `deletePersisted: true` and the committed state
+  instead of rolling it back.
+- `DELETE /api/routes/{id}` requires `manage_transport`: `204` on success (its stops are deleted with
+  it), `404` if the route doesn't exist. `DELETE /api/stops/{id}` requires `manage_transport` and
+  returns the route's renumbered remaining stops plus the rebuilt route.
+- `/api/admin/transportation` provides the grouped snapshot, presentation edits, exact-set reorder,
+  deletion, and rebuild endpoints under the `manage_transport_admin` policy.
 
 ## POI categories and icons
 
@@ -170,6 +205,10 @@ the POI SLD. The small Lucide-compatible asset subset and ISC attribution live i
 - Private point, line, and polygon drawing with names, colors, audit details, and geographic limits.
 - RBAC administration showing inherited versus direct permissions.
 - Shared POI search, details, category administration, opening hours, colors, and icons.
+- Persisted OSRM road routes with distance/duration, direction arrows, visibility controls, and
+  state-aware recovery when routing fails after a stop/order/deletion commit.
+- Policy-protected transportation administration for route/stop presentation, ordering, deletion, and
+  rebuilds.
 - WFS editable vectors and WMS server-rendered display layers.
 - Shape query, intersection analysis, and per-user shape heat map.
 - Location analysis over a selected province or drawn polygon, with 2–5 weighted POI-category
@@ -181,7 +220,7 @@ The schema migration, destructive demo seed, and live GeoServer provisioning are
 actions. Run them in this order when you intentionally want to replace the current demo data:
 
 ```bash
-# 1. Apply EF migrations, including tbl_poi_category.icon_key
+# 1. Apply EF migrations, including route geometry/metrics and Operator-role cleanup
 cd Basarsoft.Api
 dotnet ef database update
 
@@ -216,6 +255,11 @@ npm run dev                       # client: http://localhost:5173
 
 GeoServer is expected at `http://localhost:8080/geoserver`, with workspace `basarsoft` and PostGIS
 store `pg_basarsoft`. See [geoserver/README.md](geoserver/README.md).
+
+OSRM is expected at `http://localhost:5001`. Download the Turkey PBF, run the pinned Docker MLD
+extract/partition/customize stages, and start the router by following [osrm/README.md](osrm/README.md).
+The API's `Routing` section defaults to the local service, the `driving` profile, a 10-second timeout,
+and no fallback. An opt-in fallback is tried only for a connection error, timeout, or primary 5xx.
 
 ## Security notes
 
@@ -255,6 +299,7 @@ npm run build
 cd ..
 
 ./geoserver/setup-poi.sh --check
+docker compose --profile prepare -f osrm/compose.yml config
 git diff --check
 ```
 
@@ -264,6 +309,11 @@ git diff --check
 - Password recovery is not implemented.
 - POIs use one daily opening/closing pair, not editable weekly schedules.
 - Curated names and hours are sample data, not live information.
+- Existing/demo routes contain no road geometry until OSRM completes a rebuild successfully.
+- Transportation has no stop movement between routes and no undelete: a soft-deleted route or stop
+  stays in the database but nothing in the app restores it.
+- No OSM PBF or generated OSRM graph is committed; local routing needs the preparation in
+  [osrm/README.md](osrm/README.md).
 - Dynamic relative GeoServer `ExternalGraphic` resolution must be smoke-tested against the target
   GeoServer after provisioning; the offline package check cannot render a live WMS response.
 
@@ -274,4 +324,5 @@ Basarsoft.Api/          ASP.NET Core API, EF model/migrations, deterministic dem
 Basarsoft.Api.Tests/    API, seed-contract, authorization, and WFS parsing tests
 basarsoft-client/       React/OpenLayers client and canonical public POI icon assets
 geoserver/              Virtual-table XML, SLD styles, and idempotent provisioning/check scripts
+osrm/                   Pinned Docker Compose MLD preparation/runtime workflow (datasets ignored)
 ```
