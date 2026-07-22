@@ -118,10 +118,13 @@ public class PoiController : ControllerBase
             if (!canManagePois)
                 return Forbid();
 
-            if (!await _pois.DeleteAsync(id, userId, isAdmin: true))
-                return NotFound(new { message = "POI not found." });
-
-            return NoContent();
+            return await _pois.DeleteAsync(id, userId, isAdmin: true) switch
+            {
+                DeleteStatus.NotFound => NotFound(new { message = "POI not found." }),
+                DeleteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
+                    new { message = "That POI is outside your authorized area.", code = "outside_authorized_area" }),
+                _ => NoContent(),
+            };
         }
         catch (Exception ex)
         {

@@ -34,8 +34,9 @@ public interface ITransportationService
     Task<StopWriteResult> UpdateStopAsync(int id, StopUpdateRequest request, int userId);
 
     // Soft-deletes the route and, in the same save, every stop on it — a live stop must always have a
-    // live route. False when the route doesn't exist.
-    Task<bool> DeleteRouteAsync(int id, int userId);
+    // live route. NotFound when the route doesn't exist; OutsideAuthorizedArea when an area-restricted
+    // caller is not entitled to the whole route (its line, or its stops when it has never been built).
+    Task<DeleteStatus> DeleteRouteAsync(int id, int userId);
 
     // Soft-deletes one stop, renumbers its route's survivors back to 1..N, and rebuilds the geometry.
     // Returns a reorder's shape (remaining stops + route) so one round trip refreshes the whole panel.

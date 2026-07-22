@@ -112,10 +112,10 @@ public class PoiAuthorizationTests
             return Task.FromResult(PoiWriteResult.InvalidGeometry);
         }
 
-        public Task<bool> DeleteAsync(int id, int userId, bool isAdmin)
+        public Task<DeleteStatus> DeleteAsync(int id, int userId, bool isAdmin)
         {
             DeleteCalls++;
-            return Task.FromResult(true);
+            return Task.FromResult(DeleteStatus.Success);
         }
     }
 

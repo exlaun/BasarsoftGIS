@@ -24,6 +24,8 @@ public record RouteWriteResult(TransportWriteStatus Status, RouteResponse? Respo
 {
     public static readonly RouteWriteResult NotFound = new(TransportWriteStatus.RouteNotFound, null);
     public static readonly RouteWriteResult DuplicateName = new(TransportWriteStatus.DuplicateName, null);
+    public static readonly RouteWriteResult OutsideAuthorizedArea =
+        new(TransportWriteStatus.OutsideAuthorizedArea, null);
     public static RouteWriteResult Ok(RouteResponse response) => new(TransportWriteStatus.Success, response);
 }
 
@@ -53,6 +55,8 @@ public record StopOrderResult(
     public static readonly StopOrderResult RouteNotFound = new(TransportWriteStatus.RouteNotFound, null);
     public static readonly StopOrderResult InvalidOrder = new(TransportWriteStatus.InvalidOrder, null);
     public static readonly StopOrderResult StopNotFound = new(TransportWriteStatus.StopNotFound, null);
+    public static readonly StopOrderResult OutsideAuthorizedArea =
+        new(TransportWriteStatus.OutsideAuthorizedArea, null);
     public static StopOrderResult Ok(IReadOnlyList<StopResponse> stops, RouteResponse route) =>
         new(TransportWriteStatus.Success, stops, route, true);
 }
@@ -60,5 +64,7 @@ public record StopOrderResult(
 public record RouteBuildResult(TransportWriteStatus Status, RouteResponse? Route)
 {
     public static readonly RouteBuildResult RouteNotFound = new(TransportWriteStatus.RouteNotFound, null);
+    public static readonly RouteBuildResult OutsideAuthorizedArea =
+        new(TransportWriteStatus.OutsideAuthorizedArea, null);
     public static RouteBuildResult From(TransportWriteStatus status, RouteResponse route) => new(status, route);
 }

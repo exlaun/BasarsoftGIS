@@ -9,6 +9,9 @@
   --bar-text: #ffffff;
   --bar-border: rgba(255, 255, 255, 0.5);
   --bar-hover: rgba(255, 255, 255, 0.15);
+  /* Accent used for primary/active affordances (also matches modal Save + checkboxes).
+     Defined once here; light theme intentionally reuses the same blue. */
+  --accent: #2563eb;
 }
 
 /* Light theme overrides, activated by ThemeProvider via <html data-theme="light">. */

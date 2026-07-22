@@ -12,5 +12,7 @@ public interface IPoiService
 
     // Soft-deletes a POI after the controller's manage_pois gate. The ownership argument remains for
     // service-level compatibility, but the HTTP endpoint now always calls this as an administrator.
-    Task<bool> DeleteAsync(int id, int userId, bool isAdmin);
+    // NotFound when it doesn't exist (or isn't theirs for a non-admin call); OutsideAuthorizedArea
+    // when the POI sits outside an area-restricted caller's boundary.
+    Task<DeleteStatus> DeleteAsync(int id, int userId, bool isAdmin);
 }

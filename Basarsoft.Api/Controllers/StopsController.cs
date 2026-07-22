@@ -119,6 +119,10 @@ public class StopsController : ControllerBase
             {
                 TransportWriteStatus.StopNotFound => NotFound(new { message = "Stop not found." }),
                 TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
+                // Refused before anything was committed, so unlike the routing failures below this
+                // carries no partial-success payload.
+                TransportWriteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
+                    new { message = "That stop is outside your authorized area.", code = "outside_authorized_area" }),
                 // The deletion itself is already committed, so these carry deletePersisted plus the
                 // fresh state — the same partial-success contract a failed reorder returns.
                 TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>

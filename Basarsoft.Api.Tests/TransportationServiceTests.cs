@@ -158,6 +158,97 @@ public class TransportationServiceTests
         Assert.Equal(TransportWriteStatus.OutsideAuthorizedArea, outside.Status);
     }
 
+    // The area binds removal as well as placement. Each case seeds through an UNRESTRICTED service and
+    // then acts through a restricted one over the same DbContext — what happens in production when an
+    // admin assigns or shrinks an operator's area after the data already exists.
+    private const string UnitSquare = "POLYGON((0 0, 0 1, 1 1, 1 0, 0 0))";
+
+    [Fact]
+    public async Task DeleteStop_OutsideAuthorizedArea_IsRejectedAndNothingIsCommitted()
+    {
+        var db = NewDb();
+        var seeder = NewService(db);
+        var routeId = await SeedRouteAsync(seeder);
+        await seeder.CreateStopAsync(StopAt("POINT(0.2 0.2)", routeId, "Inside"), userId: 1);
+        var stranded = await seeder.CreateStopAsync(StopAt("POINT(10 10)", routeId, "Outside"), userId: 1);
+
+        var restricted = NewService(db, new FixedAreaGeoAuthorizationService(UnitSquare));
+        var result = await restricted.DeleteStopAsync(stranded.Response!.Id, userId: 1);
+
+        Assert.Equal(TransportWriteStatus.OutsideAuthorizedArea, result.Status);
+        // Refused before the soft delete and the renumbering, so there is no partial success to report.
+        Assert.False(result.OrderPersisted);
+        var stops = await seeder.ListRouteStopsAsync(routeId);
+        Assert.Equal(["Inside", "Outside"], stops!.Select(stop => stop.Name));
+        Assert.Equal([1, 2], stops!.Select(stop => stop.SequenceOrder));
+    }
+
+    [Fact]
+    public async Task DeleteRoute_WhoseLineEscapesTheArea_IsRejectedAndCascadesNothing()
+    {
+        var db = NewDb();
+        var seeder = NewService(db);
+        var routeId = await SeedRouteAsync(seeder, "Nationwide");
+        await seeder.CreateStopAsync(StopAt("POINT(0.2 0.2)", routeId), userId: 1);
+        await seeder.CreateStopAsync(StopAt("POINT(10 10)", routeId), userId: 1);
+
+        // Two stops, so the route carries a built line that runs well outside the unit square.
+        var restricted = NewService(db, new FixedAreaGeoAuthorizationService(UnitSquare));
+        Assert.Equal(
+            DeleteStatus.OutsideAuthorizedArea,
+            await restricted.DeleteRouteAsync(routeId, userId: 1));
+
+        // The cascade is the reason this matters: neither the route nor either stop may be touched.
+        Assert.Equal([routeId], (await seeder.ListRoutesAsync()).Select(route => route.Id));
+        Assert.Equal(2, (await seeder.ListRouteStopsAsync(routeId))!.Count);
+    }
+
+    [Fact]
+    public async Task DeleteRoute_NeverBuilt_FallsBackToItsStops()
+    {
+        var db = NewDb();
+        var seeder = NewService(db);
+        var restricted = NewService(db, new FixedAreaGeoAuthorizationService(UnitSquare));
+
+        // A single stop leaves the route's geometry null, so the rule falls back to the stop positions.
+        var stranded = await SeedRouteAsync(seeder, "Unbuilt far");
+        await seeder.CreateStopAsync(StopAt("POINT(10 10)", stranded), userId: 1);
+        Assert.Equal(
+            DeleteStatus.OutsideAuthorizedArea,
+            await restricted.DeleteRouteAsync(stranded, userId: 1));
+
+        // ...and a route entirely inside the area is still deletable through that same fallback.
+        var local = await SeedRouteAsync(seeder, "Unbuilt local");
+        await seeder.CreateStopAsync(StopAt("POINT(0.4 0.4)", local), userId: 1);
+        Assert.Equal(DeleteStatus.Success, await restricted.DeleteRouteAsync(local, userId: 1));
+    }
+
+    [Fact]
+    public async Task RouteLevelWrites_OutsideTheArea_AreRejected()
+    {
+        var db = NewDb();
+        var seeder = NewService(db);
+        var routeId = await SeedRouteAsync(seeder, "Nationwide");
+        var first = await seeder.CreateStopAsync(StopAt("POINT(0.2 0.2)", routeId), userId: 1);
+        var second = await seeder.CreateStopAsync(StopAt("POINT(10 10)", routeId), userId: 1);
+
+        var restricted = NewService(db, new FixedAreaGeoAuthorizationService(UnitSquare));
+
+        var renamed = await restricted.UpdateRouteAsync(
+            routeId, new RouteSaveRequest { Name = "Renamed" }, userId: 1);
+        Assert.Equal(TransportWriteStatus.OutsideAuthorizedArea, renamed.Status);
+
+        var reordered = await restricted.ReorderStopsAsync(
+            routeId, [second.Response!.Id, first.Response!.Id], userId: 1);
+        Assert.Equal(TransportWriteStatus.OutsideAuthorizedArea, reordered.Status);
+
+        var rebuilt = await restricted.RebuildRouteAsync(routeId, userId: 1);
+        Assert.Equal(TransportWriteStatus.OutsideAuthorizedArea, rebuilt.Status);
+
+        // Nothing moved: the original order survives every refusal.
+        Assert.Equal([1, 2], (await seeder.ListRouteStopsAsync(routeId))!.Select(stop => stop.SequenceOrder));
+    }
+
     [Fact]
     public async Task BuildRoute_FewerThanTwoStops_DoesNotCallRouting()
     {
@@ -361,7 +452,7 @@ public class TransportationServiceTests
         await service.CreateStopAsync(StopAt("POINT(2 2)", doomed), 1);
         await service.CreateStopAsync(StopAt("POINT(3 3)", survivor), 1);
 
-        Assert.True(await service.DeleteRouteAsync(doomed, userId: 1));
+        Assert.Equal(DeleteStatus.Success, await service.DeleteRouteAsync(doomed, userId: 1));
 
         // A live stop must always have a live route, so the cascade is what keeps ListAllStopsAsync's
         // assumption true instead of leaving stops no query can reach.
@@ -371,18 +462,18 @@ public class TransportationServiceTests
     }
 
     [Fact]
-    public async Task DeleteRoute_FreesItsNameAndUnknownIdIsFalse()
+    public async Task DeleteRoute_FreesItsNameAndUnknownIdIsNotFound()
     {
         var db = NewDb();
         var service = NewService(db);
         var routeId = await SeedRouteAsync(service, "Line 12");
 
-        Assert.True(await service.DeleteRouteAsync(routeId, userId: 1));
+        Assert.Equal(DeleteStatus.Success, await service.DeleteRouteAsync(routeId, userId: 1));
 
         // Uniqueness is checked among live routes only, so the name comes free with the deletion.
         var recreated = await service.CreateRouteAsync(new RouteSaveRequest { Name = "Line 12" }, userId: 1);
         Assert.Equal(TransportWriteStatus.Success, recreated.Status);
-        Assert.False(await service.DeleteRouteAsync(999, userId: 1));
+        Assert.Equal(DeleteStatus.NotFound, await service.DeleteRouteAsync(999, userId: 1));
     }
 
     // Geo-auth stub: no area assigned, so placement is unrestricted. Only GetEffectiveAreaAsync is

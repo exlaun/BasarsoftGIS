@@ -37,46 +37,20 @@
   gap: 0.6rem;
 }
 
-/* Separates the theme toggle (a setting) from the display and workspace actions. */
-.map-bar-divider {
-  width: 1px;
-  align-self: stretch;
-  margin: 0.15rem 0.25rem;
-  background: var(--bar-border);
-}
-
 .map-timer {
   font-size: 0.9rem;
   opacity: 0.9;
   font-variant-numeric: tabular-nums;
 }
 
-.map-logout {
-  padding: 0.45rem 0.9rem;
-  border: 1px solid var(--bar-border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--bar-text);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.map-logout:hover {
-  background: var(--bar-hover);
-}
-
-/* GeoServer display-source toggle: WFS (editable vectors) vs WMS (rendered image). */
-.map-mode-toggle {
+/* One button style for every bar control: Logout, WFS/WMS, Admin/Routes/Shapes, Return to map. */
+.map-bar-btn {
   display: inline-flex;
-  border: 1px solid var(--bar-border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.map-mode-btn {
-  padding: 0.45rem 0.8rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: 2.1rem;
+  padding: 0 0.85rem;
   border: none;
   background: transparent;
   color: var(--bar-text);
@@ -86,17 +60,35 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.map-mode-btn + .map-mode-btn {
-  border-left: 1px solid var(--bar-border);
-}
-
-.map-mode-btn:hover {
+.map-bar-btn:hover {
   background: var(--bar-hover);
 }
 
-.map-mode-btn.active {
-  background: var(--accent, #2563eb);
+/* Active = current display source (WFS/WMS) or an open panel (Routes/Shapes, via aria-pressed). */
+.map-bar-btn.active,
+.map-bar-btn[aria-pressed='true'] {
+  background: var(--accent);
   color: #fff;
+}
+
+/* A lone button carries its own pill outline (Logout, Return to map page). */
+.map-bar-btn.is-solo {
+  border: 1px solid var(--bar-border);
+  border-radius: 8px;
+}
+
+/* Fuses related buttons into one rounded pill with hairline internal dividers
+   (WFS/WMS display source; Admin/Routes/Shapes workspace actions). */
+.map-bar-group {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--bar-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.map-bar-group .map-bar-btn + .map-bar-btn {
+  border-left: 1px solid var(--bar-border);
 }
 
 /* Shown in place of the draw toolbar while in WMS (display-only) mode. */

@@ -109,10 +109,13 @@ public class RoutesController : ControllerBase
             if (!await _userAdminService.HasPermissionAsync(userId, SeedData.ManageTransportPermission))
                 return Forbid();
 
-            if (!await _transport.DeleteRouteAsync(id, userId))
-                return NotFound(new { message = "Route not found." });
-
-            return NoContent();
+            return await _transport.DeleteRouteAsync(id, userId) switch
+            {
+                DeleteStatus.NotFound => NotFound(new { message = "Route not found." }),
+                DeleteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
+                    new { message = RouteOutsideAreaMessage, code = "outside_authorized_area" }),
+                _ => NoContent(),
+            };
         }
         catch (Exception ex) { return ServerError(ex, nameof(Delete)); }
     }
@@ -136,6 +139,8 @@ public class RoutesController : ControllerBase
             return result.Status switch
             {
                 TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
+                TransportWriteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
+                    new { message = RouteOutsideAreaMessage, code = "outside_authorized_area" }),
                 TransportWriteStatus.InvalidOrder => BadRequest(new
                 {
                     message = "The submitted stop order doesn't match this route's stops.",
@@ -185,18 +190,26 @@ public class RoutesController : ControllerBase
         catch (Exception ex) { return ServerError(ex, nameof(Build)); }
     }
 
+    // A route-level write is bound by the route's whole extent, so the same wording serves update,
+    // delete, reorder and build.
+    internal const string RouteOutsideAreaMessage = "That route is outside your authorized area.";
+
     private ActionResult<RouteResponse> MapRouteResult(RouteWriteResult result) =>
         result.Status switch
         {
             TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
             TransportWriteStatus.DuplicateName =>
                 Conflict(new { message = "A route with that name already exists.", code = "duplicate_name" }),
+            TransportWriteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
+                new { message = RouteOutsideAreaMessage, code = "outside_authorized_area" }),
             _ => Ok(result.Response),
         };
 
     private ActionResult<RouteResponse> MapBuildResult(RouteBuildResult result) => result.Status switch
     {
         TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
+        TransportWriteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
+            new { message = RouteOutsideAreaMessage, code = "outside_authorized_area" }),
         TransportWriteStatus.InsufficientStops => Conflict(new
         {
             message = "At least two stops are required to build a route.",

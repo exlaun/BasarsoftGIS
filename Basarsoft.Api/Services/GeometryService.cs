@@ -47,9 +47,8 @@ public class GeometryService : IGeometryService
         geom.SRID = Srid;
 
         // Geographic authorization: a user with an assigned area may only draw fully inside it.
-        // Covers (not Within) so a shape touching the boundary still counts as inside. Runs in
-        // memory on the two NTS geometries — no SQL round-trip.
-        if (await GetBlockingAreaAsync(geom, userId))
+        // Runs in memory on the two NTS geometries — no SQL round-trip.
+        if (await _geoAuth.IsOutsideAreaAsync(userId, geom))
             return GeometryUpdateResult.OutsideAuthorizedArea;
 
         GeometryResponse? saved;
@@ -77,13 +76,6 @@ public class GeometryService : IGeometryService
         return saved is null ? GeometryUpdateResult.InvalidGeometry : GeometryUpdateResult.Ok(saved);
     }
 
-    // True when the caller has an effective authorization area and `geom` is not fully inside it.
-    private async Task<bool> GetBlockingAreaAsync(Geometry geom, int userId)
-    {
-        var area = await _geoAuth.GetEffectiveAreaAsync(userId);
-        return area is not null && !area.Covers(geom);
-    }
-
     public Task<IReadOnlyList<GeometryResponse>> ListAsync(string type, int userId) =>
         type.ToLowerInvariant() switch
         {
@@ -102,13 +94,13 @@ public class GeometryService : IGeometryService
             _ => Task.FromResult(GeometryUpdateResult.NotFound),
         };
 
-    public Task<bool> DeleteAsync(string type, int id, int userId) =>
+    public Task<DeleteStatus> DeleteAsync(string type, int id, int userId) =>
         type.ToLowerInvariant() switch
         {
             "point" => SoftDeleteAsync(_db.Points, id, userId),
             "line" => SoftDeleteAsync(_db.Lines, id, userId),
             "polygon" => SoftDeleteAsync(_db.Polygons, id, userId),
-            _ => Task.FromResult(false),
+            _ => Task.FromResult(DeleteStatus.NotFound),
         };
 
     private async Task<GeometryResponse?> AddAsync<T>(DbSet<T> set, Geometry geom, GeometryCreateRequest request, int userId)
@@ -140,19 +132,24 @@ public class GeometryService : IGeometryService
         return rows.Select(ToResponse).ToList();
     }
 
-    private async Task<bool> SoftDeleteAsync<T>(DbSet<T> set, int id, int userId)
+    private async Task<DeleteStatus> SoftDeleteAsync<T>(DbSet<T> set, int id, int userId)
         where T : class, IGeoFeature
     {
         // Ownership check baked in: you can only delete your own shape.
         var entity = await set.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId);
         if (entity is null)
-            return false;
+            return DeleteStatus.NotFound;
+
+        // Removing a shape is bound by the same area as drawing it: an area-restricted caller may
+        // not delete a shape that lies outside their boundary.
+        if (await _geoAuth.IsOutsideAreaAsync(userId, entity.Geom))
+            return DeleteStatus.OutsideAuthorizedArea;
 
         entity.IsDeleted = true;
         // A soft delete is a modification of the row, so it's audited like any other edit.
         entity.ModifiedUserId = userId;
         await _db.SaveChangesAsync();
-        return true;
+        return DeleteStatus.Success;
     }
 
     // Counts the caller's existing shapes that fall fully INSIDE a polygon being saved. This is
@@ -178,6 +175,12 @@ public class GeometryService : IGeometryService
         if (entity is null)
             return GeometryUpdateResult.NotFound;
 
+        // You must be allowed to touch the shape where it currently sits. This covers attribute-only
+        // edits, which carry no WKT at all, and blocks relocating a shape that already lies outside
+        // the caller's area.
+        if (await _geoAuth.IsOutsideAreaAsync(userId, entity.Geom))
+            return GeometryUpdateResult.OutsideAuthorizedArea;
+
         if (!string.IsNullOrWhiteSpace(request.Wkt))
         {
             Geometry geom;
@@ -195,9 +198,9 @@ public class GeometryService : IGeometryService
 
             geom.SRID = Srid;
 
-            // Moving/reshaping a shape is bound by the same geographic authorization as drawing it;
-            // attribute-only edits (no WKT in the request) stay unrestricted.
-            if (await GetBlockingAreaAsync(geom, userId))
+            // The destination is checked as well: the shape must end up inside the area, not merely
+            // have started there.
+            if (await _geoAuth.IsOutsideAreaAsync(userId, geom))
                 return GeometryUpdateResult.OutsideAuthorizedArea;
 
             entity.Geom = geom;

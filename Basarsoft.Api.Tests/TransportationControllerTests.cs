@@ -220,10 +220,10 @@ public class TransportationControllerTests
             int userId,
             CancellationToken cancellationToken = default) => Task.FromResult(BuildResult);
 
-        public Task<bool> DeleteRouteAsync(int id, int userId)
+        public Task<DeleteStatus> DeleteRouteAsync(int id, int userId)
         {
             DeleteCallCount++;
-            return Task.FromResult(RouteDeleted);
+            return Task.FromResult(RouteDeleted ? DeleteStatus.Success : DeleteStatus.NotFound);
         }
 
         public Task<StopOrderResult> DeleteStopAsync(

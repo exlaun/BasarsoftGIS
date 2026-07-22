@@ -276,10 +276,13 @@ public class GeometryController : ControllerBase
             if (!await _userAdminService.HasPermissionAsync(userId, permissionName))
                 return Forbid();
 
-            if (!await _geometryService.DeleteAsync(type, id, userId))
-                return NotFound(new { message = "Shape not found." });
-
-            return NoContent();
+            return await _geometryService.DeleteAsync(type, id, userId) switch
+            {
+                DeleteStatus.NotFound => NotFound(new { message = "Shape not found." }),
+                DeleteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
+                    new { message = "That shape is outside your authorized area.", code = "outside_authorized_area" }),
+                _ => NoContent(),
+            };
         }
         catch (Exception ex)
         {

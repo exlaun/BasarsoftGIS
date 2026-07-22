@@ -66,11 +66,36 @@ public class TransportationService : ITransportationService
         return RouteWriteResult.Ok(ToRouteResponse(route, 0, await UsernameAsync(userId)));
     }
 
+    // A route-level operation is bound by the route's full extent, not by any single stop: its built
+    // road line, or — when it has never been built — the stops that are the only positions it
+    // actually occupies. The area is fetched once and compared in memory against every geometry.
+    // Null area (nobody assigned the caller one) means unrestricted, so this is a no-op for admins.
+    private async Task<bool> IsRouteOutsideAreaAsync(
+        TransportRoute route,
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        var area = await _geoAuth.GetEffectiveAreaAsync(userId);
+        if (area is null)
+            return false;
+
+        if (route.Geometry is not null)
+            return !area.Covers(route.Geometry);
+
+        var stops = await _db.Stops
+            .Where(s => s.RouteId == route.Id)
+            .ToListAsync(cancellationToken);
+        return stops.Any(stop => !area.Covers(stop.Geom));
+    }
+
     public async Task<RouteWriteResult> UpdateRouteAsync(int id, RouteSaveRequest request, int userId)
     {
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == id);
         if (route is null)
             return RouteWriteResult.NotFound;
+
+        if (await IsRouteOutsideAreaAsync(route, userId))
+            return RouteWriteResult.OutsideAuthorizedArea;
 
         var name = request.Name.Trim();
         if (await _db.Routes.AnyAsync(r => r.Id != id && r.Name == name))
@@ -162,9 +187,8 @@ public class TransportationService : ITransportationService
             return StopWriteResult.RouteNotFound;
 
         // Same geographic authorization as every other draw tool: with an assigned area, stops may
-        // only be placed inside it (Covers keeps boundary points legal).
-        var area = await _geoAuth.GetEffectiveAreaAsync(userId);
-        if (area is not null && !area.Covers(geom))
+        // only be placed inside it.
+        if (await _geoAuth.IsOutsideAreaAsync(userId, geom))
             return StopWriteResult.OutsideAuthorizedArea;
 
         // Append to the end of the route: next order is the current max + 1 (1 for the first stop).
@@ -216,6 +240,10 @@ public class TransportationService : ITransportationService
         if (route is null)
             return StopWriteResult.RouteNotFound;
 
+        // Stop-level, like placing or deleting one: a name/color edit is still a write to that stop.
+        if (await _geoAuth.IsOutsideAreaAsync(userId, stop.Geom))
+            return StopWriteResult.OutsideAuthorizedArea;
+
         stop.Name = request.Name.Trim();
         // Presentation only, like the name — clearing it back to null re-inherits the route color, and
         // neither field changes the stop's position, so this still never needs an OSRM rebuild.
@@ -229,11 +257,16 @@ public class TransportationService : ITransportationService
             ToRouteResponse(route, stopCount, await UsernameAsync(route.UserId)));
     }
 
-    public async Task<bool> DeleteRouteAsync(int id, int userId)
+    public async Task<DeleteStatus> DeleteRouteAsync(int id, int userId)
     {
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == id);
         if (route is null)
-            return false;
+            return DeleteStatus.NotFound;
+
+        // Checked before the cascade below: deleting a route takes every one of its stops with it, so
+        // an area-restricted caller must be entitled to the whole route, not just part of it.
+        if (await IsRouteOutsideAreaAsync(route, userId))
+            return DeleteStatus.OutsideAuthorizedArea;
 
         // Cascade to the stops in the same save. The module's invariant is that a live stop always has
         // a live route (ListAllStopsAsync relies on it), and the FK is Restrict, so leaving the stops
@@ -248,7 +281,7 @@ public class TransportationService : ITransportationService
         route.IsDeleted = true;
         route.ModifiedUserId = userId;
         await _db.SaveChangesAsync();
-        return true;
+        return DeleteStatus.Success;
     }
 
     public async Task<StopOrderResult> DeleteStopAsync(
@@ -263,6 +296,12 @@ public class TransportationService : ITransportationService
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == stop.RouteId, cancellationToken);
         if (route is null)
             return StopOrderResult.RouteNotFound;
+
+        // A stop-level operation is bound by the stop's own position, symmetric with placing one.
+        // Checked before the removal and renumbering below, which are committed ahead of the rebuild
+        // and so must not run at all for a refused call.
+        if (await _geoAuth.IsOutsideAreaAsync(userId, stop.Geom))
+            return StopOrderResult.OutsideAuthorizedArea;
 
         stop.IsDeleted = true;
         stop.ModifiedUserId = userId;
@@ -303,6 +342,10 @@ public class TransportationService : ITransportationService
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == routeId);
         if (route is null)
             return StopOrderResult.RouteNotFound;
+
+        // Reordering renumbers every stop and rewrites the route's line, so it is route-level.
+        if (await IsRouteOutsideAreaAsync(route, userId, cancellationToken))
+            return StopOrderResult.OutsideAuthorizedArea;
 
         var stops = await _db.Stops.Where(s => s.RouteId == routeId).ToListAsync();
 
@@ -345,9 +388,16 @@ public class TransportationService : ITransportationService
         CancellationToken cancellationToken = default)
     {
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == routeId, cancellationToken);
-        return route is null
-            ? RouteBuildResult.RouteNotFound
-            : await RebuildRouteCoreAsync(route, userId, cancellationToken);
+        if (route is null)
+            return RouteBuildResult.RouteNotFound;
+
+        // Rebuilding rewrites the route's line, distance and duration, so it is route-level too. Only
+        // this public entry point checks: the internal RebuildRouteCoreAsync is also reached from the
+        // stop-level paths, which have already applied their own (stop-scoped) rule.
+        if (await IsRouteOutsideAreaAsync(route, userId, cancellationToken))
+            return RouteBuildResult.OutsideAuthorizedArea;
+
+        return await RebuildRouteCoreAsync(route, userId, cancellationToken);
     }
 
     private async Task<RouteBuildResult> RebuildRouteCoreAsync(

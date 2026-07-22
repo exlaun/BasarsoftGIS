@@ -58,7 +58,7 @@ export default function AdminLayout() {
           "Return to map page" button, since this is already the admin panel. */}
       <header className="map-bar">
         <div className="map-bar-left">
-          <button className="map-logout" type="button" onClick={logout}>
+          <button className="map-bar-btn is-solo" type="button" onClick={logout}>
             Logout
           </button>
           <SessionTimer />
@@ -66,8 +66,7 @@ export default function AdminLayout() {
         <span className="map-title">BasarsoftGIS · Turkey Explorer</span>
         <div className="map-bar-right">
           <ThemeToggle />
-          <span className="map-bar-divider" aria-hidden="true" />
-          <button className="map-logout" type="button" onClick={() => navigate('/map')}>
+          <button className="map-bar-btn is-solo" type="button" onClick={() => navigate('/map')}>
             Return to map page
           </button>
         </div>

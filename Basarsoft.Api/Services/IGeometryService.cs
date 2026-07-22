@@ -15,12 +15,14 @@ public interface IGeometryService
     Task<IReadOnlyList<GeometryResponse>> ListAsync(string type, int userId);
 
     // Updates the caller's own shape: its name/color always, and its geometry when the request
-    // carries WKT. Returns Success (with the updated row), NotFound (missing or not theirs), or
-    // InvalidGeometry (bad WKT / wrong geometry type for this shape).
+    // carries WKT. Returns Success (with the updated row), NotFound (missing or not theirs),
+    // InvalidGeometry (bad WKT / wrong geometry type for this shape), or OutsideAuthorizedArea when
+    // the shape's current location — or, for a move, its destination — falls outside the caller's area.
     Task<GeometryUpdateResult> UpdateAsync(string type, int id, GeometryUpdateRequest request, int userId);
 
-    // Soft-deletes the caller's own shape. Returns false if it doesn't exist or isn't theirs.
-    Task<bool> DeleteAsync(string type, int id, int userId);
+    // Soft-deletes the caller's own shape. NotFound if it doesn't exist or isn't theirs;
+    // OutsideAuthorizedArea when it sits outside the caller's geographic authorization area.
+    Task<DeleteStatus> DeleteAsync(string type, int id, int userId);
 
     // Counts how many of the caller's shapes (points + lines + polygons) intersect the polygon given
     // as WKT — even a small overlap counts (ST_Intersects). The polygon is NOT saved. Returns null if

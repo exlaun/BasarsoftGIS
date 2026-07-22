@@ -53,6 +53,7 @@ public class AdminTransportationController : ControllerBase
             return result.Status switch
             {
                 TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
+                TransportWriteStatus.OutsideAuthorizedArea => OutsideArea(RoutesController.RouteOutsideAreaMessage),
                 TransportWriteStatus.DuplicateName => Conflict(new
                 {
                     message = "A route with that name already exists.",
@@ -76,6 +77,7 @@ public class AdminTransportationController : ControllerBase
             return result.Status switch
             {
                 TransportWriteStatus.StopNotFound => NotFound(new { message = "Stop not found." }),
+                TransportWriteStatus.OutsideAuthorizedArea => OutsideArea(StopOutsideAreaMessage),
                 _ => Ok(result.Response),
             };
         }
@@ -91,10 +93,12 @@ public class AdminTransportationController : ControllerBase
             if (!TryGetUserId(out var userId))
                 return Unauthorized();
 
-            if (!await _transport.DeleteRouteAsync(id, userId))
-                return NotFound(new { message = "Route not found." });
-
-            return NoContent();
+            return await _transport.DeleteRouteAsync(id, userId) switch
+            {
+                DeleteStatus.NotFound => NotFound(new { message = "Route not found." }),
+                DeleteStatus.OutsideAuthorizedArea => OutsideArea(RoutesController.RouteOutsideAreaMessage),
+                _ => NoContent(),
+            };
         }
         catch (Exception ex) { return ServerError(ex, nameof(DeleteRoute)); }
     }
@@ -116,6 +120,7 @@ public class AdminTransportationController : ControllerBase
             {
                 TransportWriteStatus.StopNotFound => NotFound(new { message = "Stop not found." }),
                 TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
+                TransportWriteStatus.OutsideAuthorizedArea => OutsideArea(StopOutsideAreaMessage),
                 TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>
                     UnprocessableEntity(DeleteError(result)),
                 TransportWriteStatus.RoutingUnavailable =>
@@ -171,9 +176,16 @@ public class AdminTransportationController : ControllerBase
         catch (Exception ex) { return ServerError(ex, nameof(BuildRoute)); }
     }
 
+    // Stop-level writes are bound by the stop's own position; route-level ones by the whole route.
+    private const string StopOutsideAreaMessage = "That stop is outside your authorized area.";
+
+    private ObjectResult OutsideArea(string message) => StatusCode(
+        StatusCodes.Status403Forbidden, new { message, code = "outside_authorized_area" });
+
     private ActionResult<RouteStopsResponse> MapOrderResult(StopOrderResult result) => result.Status switch
     {
         TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
+        TransportWriteStatus.OutsideAuthorizedArea => OutsideArea(RoutesController.RouteOutsideAreaMessage),
         TransportWriteStatus.InvalidOrder => BadRequest(new
         {
             message = "The submitted stop order doesn't match this route's stops.",
@@ -189,6 +201,7 @@ public class AdminTransportationController : ControllerBase
     private ActionResult<RouteResponse> MapBuildResult(RouteBuildResult result) => result.Status switch
     {
         TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
+        TransportWriteStatus.OutsideAuthorizedArea => OutsideArea(RoutesController.RouteOutsideAreaMessage),
         TransportWriteStatus.InsufficientStops => Conflict(new
         {
             message = "At least two stops are required to build a route.",

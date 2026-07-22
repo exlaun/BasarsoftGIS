@@ -46,9 +46,8 @@ public class PoiService : IPoiService
             return PoiWriteResult.CategoryNotFound;
 
         // Operators are bound by the same geographic authorization as the drawing tools: with an
-        // assigned area, POIs may only be placed inside it (Covers keeps boundary points legal).
-        var area = await _geoAuth.GetEffectiveAreaAsync(userId);
-        if (area is not null && !area.Covers(geom))
+        // assigned area, POIs may only be placed inside it.
+        if (await _geoAuth.IsOutsideAreaAsync(userId, geom))
             return PoiWriteResult.OutsideAuthorizedArea;
 
         var poi = new Poi
@@ -75,18 +74,24 @@ public class PoiService : IPoiService
         return PoiWriteResult.Ok(ToResponse(poi, categories, new Dictionary<int, string> { [userId] = username }));
     }
 
-    public async Task<bool> DeleteAsync(int id, int userId, bool isAdmin)
+    public async Task<DeleteStatus> DeleteAsync(int id, int userId, bool isAdmin)
     {
         // Ownership is part of the WHERE clause for non-admins, so "not yours" and "doesn't exist"
         // are indistinguishable to the caller (both 404) — no information leak about others' rows.
         var poi = await _db.Pois.FirstOrDefaultAsync(p => p.Id == id && (isAdmin || p.UserId == userId));
         if (poi is null)
-            return false;
+            return DeleteStatus.NotFound;
+
+        // Removing a POI is bound by the same area as placing one. manage_pois is an admin-tier
+        // permission, and an admin with no assigned area is unrestricted, so this only bites a
+        // holder who has been given a boundary.
+        if (await _geoAuth.IsOutsideAreaAsync(userId, poi.Geom))
+            return DeleteStatus.OutsideAuthorizedArea;
 
         poi.IsDeleted = true;
         poi.ModifiedUserId = userId;
         await _db.SaveChangesAsync();
-        return true;
+        return DeleteStatus.Success;
     }
 
     private async Task<Dictionary<int, PoiCategory>> CategoryMapAsync() =>

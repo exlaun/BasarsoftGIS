@@ -73,7 +73,7 @@ import {
   syncStopRoutePresentation,
   upsertRoute,
 } from '../utils/transportationMap'
-import { canDeletePoi, disabledMapTools } from '../utils/mapPermissions'
+import { canDeletePoi, disabledMapTools, isInsideAuthorizedArea } from '../utils/mapPermissions'
 import './MapPage.css'
 
 // Approximate geographic center of Turkey (lon, lat).
@@ -507,8 +507,34 @@ export default function MapPage() {
     return Boolean(requiredPermission && permissions.includes(requiredPermission))
   }, [permissions])
 
+  // The authorization boundary as an OL geometry in map projection: derived from the profile rather
+  // than stored, so the Delete gating below re-renders the moment an admin redraws the area. Null =
+  // unrestricted, matching the server, where a user with no assigned area is unrestricted.
+  const authGeom = useMemo(() => {
+    if (!authorizedAreaWkt) return null
+    try {
+      return wkt.readGeometry(authorizedAreaWkt, {
+        dataProjection: DATA_PROJ,
+        featureProjection: MAP_PROJ,
+      })
+    } catch {
+      // A malformed area must not break the map; the server still enforces on every write.
+      return null
+    }
+  }, [authorizedAreaWkt])
+
   const canWriteSelectedShape = Boolean(
     selectedShape && canWriteShapeType(selectedShape.feature.get('apiType')),
+  )
+
+  // Predictive mirror of the server's area rule so a Delete that is certain to 403 isn't offered.
+  // Deleting needs the permission AND the feature to sit inside the caller's boundary; the API
+  // re-checks both and remains the authority.
+  const canDeleteSelectedShape = Boolean(
+    canWriteSelectedShape && isInsideAuthorizedArea(selectedShape?.feature.getGeometry(), authGeom),
+  )
+  const canDeleteSelectedPoi = Boolean(
+    canDeletePoi(permissions) && isInsideAuthorizedArea(selectedPoi?.feature.getGeometry(), authGeom),
   )
 
   // The transportation write gate: Operators (manage_transport) create/edit routes, place stops, and
@@ -724,11 +750,14 @@ export default function MapPage() {
       }
       flashStatus('success', `Route "${route.name}" deleted.`)
     } catch (error) {
+      // The area rejection is also a 403, so the specific `code` must be checked first.
       flashStatus(
         'error',
-        error.response?.status === 403
-          ? 'You do not have permission to delete routes.'
-          : error.response?.data?.message ?? 'Could not delete the route.',
+        error.response?.data?.code === 'outside_authorized_area'
+          ? 'That route is outside your authorized area.'
+          : error.response?.status === 403
+            ? 'You do not have permission to delete routes.'
+            : error.response?.data?.message ?? 'Could not delete the route.',
       )
     }
   }, [commitRoutes, removeRouteStopFeatures, flashStatus])
@@ -757,11 +786,15 @@ export default function MapPage() {
         flashStatus('error', error.response?.data?.message ?? 'The stop was deleted, but routing failed.', 5000)
         return
       }
+      // The area rejection is also a 403, so the specific `code` must be checked first. It is
+      // refused before anything is committed, so there is no partial state to reconcile.
       flashStatus(
         'error',
-        error.response?.status === 403
-          ? 'You do not have permission to delete stops.'
-          : error.response?.data?.message ?? 'Could not delete the stop.',
+        error.response?.data?.code === 'outside_authorized_area'
+          ? 'That stop is outside your authorized area.'
+          : error.response?.status === 403
+            ? 'You do not have permission to delete stops.'
+            : error.response?.data?.message ?? 'Could not delete the stop.',
       )
     }
   }, [applyStopOrderToMap, commitRoute, flashStatus])
@@ -798,10 +831,16 @@ export default function MapPage() {
   // (same idiom as the admin pages' toast cleanup).
   useEffect(() => () => window.clearTimeout(statusTimerRef.current), [])
 
-  // A permission can be revoked while the details or move UI is already open. Immediately return to
-  // read-only details and restore any unsaved movement; the API independently enforces the same rule.
+  // A permission can be revoked — or the authorized area redrawn around the shape — while the details
+  // or move UI is already open. Immediately return to read-only details and restore any unsaved
+  // movement; the API independently enforces both rules.
   useEffect(() => {
-    if (!selectedShape || canWriteSelectedShape || (!confirmingDelete && !editingGeom)) return undefined
+    if (
+      !selectedShape ||
+      (canWriteSelectedShape && canDeleteSelectedShape) ||
+      (!confirmingDelete && !editingGeom)
+    )
+      return undefined
 
     const timer = window.setTimeout(() => {
       if (confirmingDelete) setConfirmingDelete(false)
@@ -813,11 +852,12 @@ export default function MapPage() {
       setEditingGeom(false)
       originalGeomRef.current = null
       pendingEditAttrsRef.current = null
-      flashStatus('error', 'Your permission changed. Unsaved shape edits were cancelled.')
+      flashStatus('error', 'Your access changed. Unsaved shape edits were cancelled.')
     }, 0)
 
     return () => window.clearTimeout(timer)
   }, [
+    canDeleteSelectedShape,
     canWriteSelectedShape,
     confirmingDelete,
     editingGeom,
@@ -1096,19 +1136,11 @@ export default function MapPage() {
     const source = authAreaSourceRef.current
     if (!source) return
     source.clear()
-    authGeomRef.current = null
-    if (!authorizedAreaWkt) return
-    try {
-      const geom = wkt.readGeometry(authorizedAreaWkt, {
-        dataProjection: DATA_PROJ,
-        featureProjection: MAP_PROJ,
-      })
-      authGeomRef.current = geom
-      source.addFeature(new Feature(geom))
-    } catch {
-      // A malformed area must not break the map; the server still enforces on save.
-    }
-  }, [authorizedAreaWkt])
+    // Mirrored into a ref as well, because the OpenLayers drawend closure reads the boundary without
+    // re-subscribing every time it changes.
+    authGeomRef.current = authGeom
+    if (authGeom) source.addFeature(new Feature(authGeom))
+  }, [authGeom])
 
   // Apply the display mode + layer-control checkboxes. GeoServer-backed shape/POI layers retain the
   // WFS/WMS behavior, while transportation stays client-rendered in both modes because it is not in
@@ -1283,25 +1315,13 @@ export default function MapPage() {
         const feature = event.feature
         const geometry = feature.getGeometry()
 
-        // Geographic authorization pre-check: every vertex must fall inside the boundary. A vertex
-        // test can miss an edge that dips outside between two inside vertices, so this is fast
-        // feedback only — the server re-checks with full geometry containment on save.
-        const authGeom = authGeomRef.current
-        if (authGeom) {
-          const geomType = geometry.getType()
-          const vertices =
-            geomType === 'Point'
-              ? [geometry.getCoordinates()]
-              : geomType === 'LineString'
-                ? geometry.getCoordinates()
-                : geometry.getCoordinates()[0] // Polygon outer ring
-          if (vertices.some((coord) => !authGeom.intersectsCoordinate(coord))) {
-            // drawend fires BEFORE OpenLayers adds the feature to the source, so remove on the
-            // next tick — a synchronous removeFeature here would be a no-op.
-            window.setTimeout(() => sourcesRef.current?.[apiType].removeFeature(feature), 0)
-            flashStatus('error', 'The shape is outside your authorized area.')
-            return
-          }
+        // Geographic authorization pre-check, sharing the helper the Delete gating uses.
+        if (!isInsideAuthorizedArea(geometry, authGeomRef.current)) {
+          // drawend fires BEFORE OpenLayers adds the feature to the source, so remove on the
+          // next tick — a synchronous removeFeature here would be a no-op.
+          window.setTimeout(() => sourcesRef.current?.[apiType].removeFeature(feature), 0)
+          flashStatus('error', 'The shape is outside your authorized area.')
+          return
         }
 
         // Transform from the map projection (3857) down to storage projection (4326) as WKT.
@@ -1573,7 +1593,8 @@ export default function MapPage() {
     }
   }
 
-  // POI confirm dialog — Delete: manage_pois only, enforced both by button visibility and the API.
+  // POI confirm dialog — Delete: manage_pois only, enforced both by button visibility and the API,
+  // which also refuses a POI outside an area-restricted caller's boundary.
   const handlePoiDelete = async () => {
     if (!selectedPoi) return
     const { feature } = selectedPoi
@@ -1583,8 +1604,13 @@ export default function MapPage() {
       setPoiFeatures((current) => current.filter((candidate) => candidate !== feature))
       flashStatus('success', 'POI deleted.')
       setSelectedPoi(null)
-    } catch {
-      flashStatus('error', 'Could not delete the POI.')
+    } catch (error) {
+      flashStatus(
+        'error',
+        error.response?.data?.code === 'outside_authorized_area'
+          ? 'That POI is outside your authorized area.'
+          : 'Could not delete the POI.',
+      )
     } finally {
       setConfirmingPoiDelete(false)
     }
@@ -1709,8 +1735,14 @@ export default function MapPage() {
       setRefreshKey((key) => key + 1)
       flashStatus('success', 'Shape deleted.')
       setSelectedShape(null)
-    } catch {
-      flashStatus('error', 'Could not delete shape.')
+    } catch (error) {
+      // The area rejection is a 403 like the permission one, so check the specific `code` first.
+      flashStatus(
+        'error',
+        error.response?.data?.code === 'outside_authorized_area'
+          ? 'That shape is outside your authorized area.'
+          : 'Could not delete shape.',
+      )
     } finally {
       setConfirmingDelete(false)
     }
@@ -1855,7 +1887,7 @@ export default function MapPage() {
     <div className="map-page">
       <header className="map-bar">
         <div className="map-bar-left">
-          <button className="map-logout" type="button" onClick={logout}>
+          <button className="map-bar-btn is-solo" type="button" onClick={logout}>
             Logout
           </button>
           <SessionTimer />
@@ -1863,11 +1895,10 @@ export default function MapPage() {
         <span className="map-title">BasarsoftGIS · Turkey Explorer</span>
         <div className="map-bar-right">
           <ThemeToggle />
-          <span className="map-bar-divider" aria-hidden="true" />
-          <div className="map-mode-toggle" role="group" aria-label="Display source">
+          <div className="map-bar-group" role="group" aria-label="Display source">
             <button
               type="button"
-              className={`map-mode-btn${displayMode === 'vector' ? ' active' : ''}`}
+              className={`map-bar-btn${displayMode === 'vector' ? ' active' : ''}`}
               onClick={() => handleDisplayMode('vector')}
               aria-pressed={displayMode === 'vector'}
               title="Editable WFS vector layer"
@@ -1876,7 +1907,7 @@ export default function MapPage() {
             </button>
             <button
               type="button"
-              className={`map-mode-btn${displayMode === 'wms' ? ' active' : ''}`}
+              className={`map-bar-btn${displayMode === 'wms' ? ' active' : ''}`}
               onClick={() => handleDisplayMode('wms')}
               aria-pressed={displayMode === 'wms'}
               title="GeoServer WMS display layer"
@@ -1884,41 +1915,42 @@ export default function MapPage() {
               WMS
             </button>
           </div>
-          <span className="map-bar-divider" aria-hidden="true" />
-          {isAdmin && (
-            <button className="map-logout" type="button" onClick={() => navigate('/admin')}>
-              Admin Panel
-            </button>
-          )}
-          <button
-            className="map-logout"
-            type="button"
-            onClick={handleToggleRoutePanel}
-            aria-pressed={routePanelOpen}
-          >
-            Routes
-          </button>
-          <button
-            className="map-logout"
-            type="button"
-            onClick={handleToggleDrawer}
-            aria-pressed={drawerOpen}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+          <div className="map-bar-group">
+            {isAdmin && (
+              <button className="map-bar-btn" type="button" onClick={() => navigate('/admin')}>
+                Admin Panel
+              </button>
+            )}
+            <button
+              className="map-bar-btn"
+              type="button"
+              onClick={handleToggleRoutePanel}
+              aria-pressed={routePanelOpen}
             >
-              <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-            </svg>{' '}
-            Shapes
-          </button>
+              Routes
+            </button>
+            <button
+              className="map-bar-btn"
+              type="button"
+              onClick={handleToggleDrawer}
+              aria-pressed={drawerOpen}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+              </svg>
+              Shapes
+            </button>
+          </div>
         </div>
       </header>
       <div className="map-body">
@@ -2019,7 +2051,7 @@ export default function MapPage() {
             onCancel={() => setRouteForm(null)}
           />
         )}
-        {selectedShape && !editingGeom && (!confirmingDelete || !canWriteSelectedShape) && (
+        {selectedShape && !editingGeom && (!confirmingDelete || !canDeleteSelectedShape) && (
           <ShapeInfoModal
             type={selectedShape.feature.get('apiType')}
             initialName={selectedShape.feature.get('name')}
@@ -2027,13 +2059,14 @@ export default function MapPage() {
             modifiedDate={selectedShape.feature.get('modifiedDate')}
             modifiedUserId={selectedShape.feature.get('modifiedUserId')}
             canEdit={canWriteSelectedShape}
+            canDelete={canDeleteSelectedShape}
             onSave={handleInfoSave}
             onEditLocation={handleEditLocation}
             onDelete={() => setConfirmingDelete(true)}
             onCancel={handleInfoCancel}
           />
         )}
-        {selectedShape && confirmingDelete && canWriteSelectedShape && (
+        {selectedShape && confirmingDelete && canDeleteSelectedShape && (
           <ConfirmModal
             title="Delete shape"
             message={`Delete "${selectedShape.feature.get('name') ?? 'this shape'}"? It will be hidden from the map but kept in the database (soft delete).`}
@@ -2064,7 +2097,7 @@ export default function MapPage() {
               createdBy: selectedPoi.feature.get('createdBy'),
               createdAt: selectedPoi.feature.get('createdAt'),
             }}
-            canDelete={canDeletePoi(permissions)}
+            canDelete={canDeleteSelectedPoi}
             onDelete={() => setConfirmingPoiDelete(true)}
             onClose={() => setSelectedPoi(null)}
           />

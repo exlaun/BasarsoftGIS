@@ -130,10 +130,10 @@ public class GeometryAuthorizationTests
             return Task.FromResult(GeometryUpdateResult.NotFound);
         }
 
-        public Task<bool> DeleteAsync(string type, int id, int userId)
+        public Task<DeleteStatus> DeleteAsync(string type, int id, int userId)
         {
             WriteCalls++;
-            return Task.FromResult(false);
+            return Task.FromResult(DeleteStatus.NotFound);
         }
 
         public Task<IReadOnlyList<GeometryResponse>> ListAsync(string type, int userId) =>

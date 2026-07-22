@@ -5,8 +5,11 @@ import './ShapeInfoModal.css'
 const DEFAULT_COLOR = '#2563eb'
 
 // Popup shown when an existing shape is clicked (Select tool). Everyone can inspect the details.
-// Callers that still hold the matching geometry permission also get the name/color, move, and delete
-// controls; Viewer and users whose permission was removed get a genuinely read-only detail view.
+// Callers that still hold the matching geometry permission also get the name/color and move controls;
+// Viewer and users whose permission was removed get a genuinely read-only detail view.
+// `canDelete` is separate from `canEdit` because deletion carries the extra geographic-authorization
+// rule: a shape outside the caller's area cannot be removed even with the right permission. It
+// defaults to `canEdit` so callers that don't distinguish the two keep the old behavior.
 export default function ShapeInfoModal({
   type,
   initialName,
@@ -14,6 +17,7 @@ export default function ShapeInfoModal({
   modifiedDate,
   modifiedUserId,
   canEdit,
+  canDelete = canEdit,
   onSave,
   onEditLocation,
   onDelete,
@@ -127,7 +131,7 @@ export default function ShapeInfoModal({
         )}
 
         <div className="attr-modal-actions">
-          {canEdit && (
+          {canDelete && (
             <button
               type="button"
               className="attr-modal-btn attr-modal-danger shape-info-delete"
