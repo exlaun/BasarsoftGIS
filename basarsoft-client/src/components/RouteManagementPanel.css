@@ -327,3 +327,43 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.route-panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.route-panel-total,
+.route-panel-page-label {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.route-panel-pager {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.route-panel-page-btn {
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid var(--bar-border);
+  background: transparent;
+  color: var(--bar-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.route-panel-page-btn:hover:not(:disabled) {
+  background: var(--bar-hover);
+}
+
+.route-panel-page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

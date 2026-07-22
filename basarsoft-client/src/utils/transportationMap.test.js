@@ -103,6 +103,17 @@ test('state-carrying routing errors are recognized without treating ordinary err
   assert.equal(persistedRoutingMutation(partial, 'orderPersisted').route.id, 1)
   assert.equal(persistedRoutingMutation({ response: { data: {} } }, 'orderPersisted'), null)
 
+  const relocated = {
+    response: {
+      data: {
+        locationPersisted: true,
+        stop: { id: 9, wkt: 'POINT (30 40)' },
+        route: { id: 1, isGeometryStale: true },
+      },
+    },
+  }
+  assert.equal(persistedRoutingMutation(relocated, 'locationPersisted').stop.id, 9)
+
   const reconciled = upsertRoute(
     [{ id: 1, isGeometryStale: false, geometryWkt: 'LINESTRING(0 0,1 1)' }],
     { ...partial.response.data.route, isGeometryStale: true, geometryWkt: 'LINESTRING(0 0,1 1)' },

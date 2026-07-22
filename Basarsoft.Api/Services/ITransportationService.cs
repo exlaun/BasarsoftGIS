@@ -30,7 +30,15 @@ public interface ITransportationService
         int userId,
         CancellationToken cancellationToken = default);
 
-    // Admin-only caller updates presentation metadata; stop movement is deliberately not exposed.
+    // Moves one stop after checking both its current and destination points against the caller's
+    // effective area. The point commits before the route rebuild, matching create/reorder semantics.
+    Task<StopWriteResult> MoveStopAsync(
+        int id,
+        StopMoveRequest request,
+        int userId,
+        CancellationToken cancellationToken = default);
+
+    // Admin-only metadata update; operational relocation stays a separate position-only call.
     Task<StopWriteResult> UpdateStopAsync(int id, StopUpdateRequest request, int userId);
 
     // Soft-deletes the route and, in the same save, every stop on it — a live stop must always have a

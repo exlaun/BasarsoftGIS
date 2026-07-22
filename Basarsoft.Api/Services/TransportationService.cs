@@ -230,6 +230,59 @@ public class TransportationService : ITransportationService
         return new StopWriteResult(status, response, rebuild.Route, StopPersisted: true);
     }
 
+    public async Task<StopWriteResult> MoveStopAsync(
+        int id,
+        StopMoveRequest request,
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        Geometry destination;
+        try
+        {
+            destination = _wktReader.Read(request.Wkt);
+        }
+        catch
+        {
+            return StopWriteResult.InvalidGeometry;
+        }
+
+        if (destination is null || destination.IsEmpty ||
+            destination.OgcGeometryType != OgcGeometryType.Point)
+            return StopWriteResult.InvalidGeometry;
+
+        destination.SRID = Srid;
+
+        var stop = await _db.Stops.FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+        if (stop is null)
+            return StopWriteResult.StopNotFound;
+
+        var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == stop.RouteId, cancellationToken);
+        if (route is null)
+            return StopWriteResult.RouteNotFound;
+
+        // Movement is authorized at both ends: assigning/shrinking an area must not let an operator
+        // pull an existing out-of-area stop into their area, nor push an allowed stop beyond it.
+        if (await _geoAuth.IsOutsideAreaAsync(userId, stop.Geom) ||
+            await _geoAuth.IsOutsideAreaAsync(userId, destination))
+            return StopWriteResult.OutsideAuthorizedArea;
+
+        stop.Geom = destination;
+        stop.ModifiedUserId = userId;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        // The valid position is committed before routing. If OSRM fails, RebuildRouteCoreAsync keeps
+        // the prior line/metrics and marks them stale while this new stop point remains authoritative.
+        var rebuild = await RebuildRouteCoreAsync(route, userId, cancellationToken);
+        var status = rebuild.Status == TransportWriteStatus.InsufficientStops
+            ? TransportWriteStatus.Success
+            : rebuild.Status;
+        return new StopWriteResult(
+            status,
+            ToStopResponse(stop, route, await UsernameAsync(stop.UserId)),
+            rebuild.Route,
+            StopPersisted: true);
+    }
+
     public async Task<StopWriteResult> UpdateStopAsync(int id, StopUpdateRequest request, int userId)
     {
         var stop = await _db.Stops.FirstOrDefaultAsync(s => s.Id == id);

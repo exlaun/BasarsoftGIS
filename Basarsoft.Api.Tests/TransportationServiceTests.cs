@@ -29,6 +29,8 @@ public class TransportationServiceTests
     private static StopCreateRequest StopAt(string wkt, int routeId, string name = "Stop") =>
         new() { Wkt = wkt, Name = name, RouteId = routeId };
 
+    private static StopMoveRequest MoveTo(string wkt) => new() { Wkt = wkt };
+
     private static async Task<int> SeedRouteAsync(TransportationService service, string name = "Route A")
     {
         var result = await service.CreateRouteAsync(new RouteSaveRequest { Name = name }, userId: 1);
@@ -72,6 +74,69 @@ public class TransportationServiceTests
         var db = NewDb();
         var result = await NewService(db).CreateStopAsync(StopAt("POINT(1 1)", routeId: 999), userId: 1);
         Assert.Equal(TransportWriteStatus.RouteNotFound, result.Status);
+    }
+
+    [Theory]
+    [InlineData("NOT WKT")]
+    [InlineData("LINESTRING(0 0, 1 1)")]
+    [InlineData("POINT EMPTY")]
+    public async Task MoveStop_InvalidWkt_IsRejectedWithoutMutation(string wkt)
+    {
+        var db = NewDb();
+        var service = NewService(db);
+        var routeId = await SeedRouteAsync(service);
+        var stopId = (await service.CreateStopAsync(StopAt("POINT(1 1)", routeId), 1)).Response!.Id;
+
+        var result = await service.MoveStopAsync(stopId, MoveTo(wkt), userId: 2);
+
+        Assert.Equal(TransportWriteStatus.InvalidGeometry, result.Status);
+        Assert.Equal("POINT (1 1)", (await db.Stops.SingleAsync(s => s.Id == stopId)).Geom.AsText());
+    }
+
+    [Fact]
+    public async Task MoveStop_UpdatesPointAuditAndRebuildsInSequenceOrder()
+    {
+        var db = NewDb();
+        var routing = new RecordingRoutingService();
+        var service = NewService(db, routing: routing);
+        var routeId = await SeedRouteAsync(service);
+        await service.CreateStopAsync(StopAt("POINT(1 1)", routeId), 1);
+        var movedId = (await service.CreateStopAsync(StopAt("POINT(2 2)", routeId), 1)).Response!.Id;
+
+        var result = await service.MoveStopAsync(movedId, MoveTo("POINT(4 4)"), userId: 2);
+
+        Assert.Equal(TransportWriteStatus.Success, result.Status);
+        Assert.True(result.StopPersisted);
+        Assert.Equal("POINT (4 4)", result.Response!.Wkt);
+        Assert.Equal([1d, 4d], routing.LastCoordinates.Select(coordinate => coordinate.X));
+        var stored = await db.Stops.SingleAsync(stop => stop.Id == movedId);
+        Assert.Equal("POINT (4 4)", stored.Geom.AsText());
+        Assert.Equal(2, stored.ModifiedUserId);
+        Assert.False(result.Route!.IsGeometryStale);
+    }
+
+    [Fact]
+    public async Task MoveStop_SingleStopPersistsWithoutCallingRouting()
+    {
+        var db = NewDb();
+        var routing = new RecordingRoutingService();
+        var service = NewService(db, routing: routing);
+        var routeId = await SeedRouteAsync(service);
+        var stopId = (await service.CreateStopAsync(StopAt("POINT(1 1)", routeId), 1)).Response!.Id;
+
+        var result = await service.MoveStopAsync(stopId, MoveTo("POINT(3 3)"), userId: 1);
+
+        Assert.Equal(TransportWriteStatus.Success, result.Status);
+        Assert.Equal(0, routing.CallCount);
+        Assert.Null(result.Route!.GeometryWkt);
+        Assert.Equal("POINT (3 3)", result.Response!.Wkt);
+    }
+
+    [Fact]
+    public async Task MoveStop_UnknownId_IsStopNotFound()
+    {
+        var result = await NewService(NewDb()).MoveStopAsync(999, MoveTo("POINT(1 1)"), userId: 1);
+        Assert.Equal(TransportWriteStatus.StopNotFound, result.Status);
     }
 
     [Fact]
@@ -156,6 +221,29 @@ public class TransportationServiceTests
 
         var outside = await service.CreateStopAsync(StopAt("POINT(10 10)", routeId), userId: 1);
         Assert.Equal(TransportWriteStatus.OutsideAuthorizedArea, outside.Status);
+    }
+
+    [Fact]
+    public async Task MoveStop_RequiresBothSourceAndDestinationInsideAuthorizedArea()
+    {
+        var db = NewDb();
+        var unrestricted = NewService(db);
+        var routeId = await SeedRouteAsync(unrestricted);
+        var insideId = (await unrestricted.CreateStopAsync(
+            StopAt("POINT(0.2 0.2)", routeId, "Inside"), 1)).Response!.Id;
+        var outsideId = (await unrestricted.CreateStopAsync(
+            StopAt("POINT(10 10)", routeId, "Outside"), 1)).Response!.Id;
+        var restricted = NewService(db, new FixedAreaGeoAuthorizationService(UnitSquare));
+
+        var destinationOutside = await restricted.MoveStopAsync(
+            insideId, MoveTo("POINT(20 20)"), userId: 1);
+        var sourceOutside = await restricted.MoveStopAsync(
+            outsideId, MoveTo("POINT(0.4 0.4)"), userId: 1);
+
+        Assert.Equal(TransportWriteStatus.OutsideAuthorizedArea, destinationOutside.Status);
+        Assert.Equal(TransportWriteStatus.OutsideAuthorizedArea, sourceOutside.Status);
+        Assert.Equal("POINT (0.2 0.2)", (await db.Stops.SingleAsync(s => s.Id == insideId)).Geom.AsText());
+        Assert.Equal("POINT (10 10)", (await db.Stops.SingleAsync(s => s.Id == outsideId)).Geom.AsText());
     }
 
     // The area binds removal as well as placement. Each case seeds through an UNRESTRICTED service and
@@ -346,6 +434,35 @@ public class TransportationServiceTests
         Assert.Equal(previousGeometry, route.Geometry!.AsText());
         Assert.True(route.IsGeometryStale);
         Assert.Equal("no_route", route.RoutingErrorCode);
+    }
+
+    [Theory]
+    [InlineData(RoutingStatus.NoRoute, TransportWriteStatus.NoRoute, "no_route")]
+    [InlineData(RoutingStatus.InvalidCoordinates, TransportWriteStatus.InvalidCoordinates, "invalid_coordinates")]
+    [InlineData(RoutingStatus.Unavailable, TransportWriteStatus.RoutingUnavailable, "routing_unavailable")]
+    public async Task MoveStop_FailedRebuildKeepsNewPointAndPreviousRoute(
+        RoutingStatus routingStatus,
+        TransportWriteStatus expectedStatus,
+        string expectedCode)
+    {
+        var db = NewDb();
+        var routing = new RecordingRoutingService();
+        var service = NewService(db, routing: routing);
+        var routeId = await SeedRouteAsync(service);
+        await service.CreateStopAsync(StopAt("POINT(1 1)", routeId), 1);
+        var stopId = (await service.CreateStopAsync(StopAt("POINT(2 2)", routeId), 1)).Response!.Id;
+        var previousGeometry = (await db.Routes.SingleAsync(route => route.Id == routeId)).Geometry!.AsText();
+        routing.Status = routingStatus;
+
+        var result = await service.MoveStopAsync(stopId, MoveTo("POINT(5 5)"), userId: 1);
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.True(result.StopPersisted);
+        Assert.Equal("POINT (5 5)", (await db.Stops.SingleAsync(stop => stop.Id == stopId)).Geom.AsText());
+        var route = await db.Routes.SingleAsync(candidate => candidate.Id == routeId);
+        Assert.Equal(previousGeometry, route.Geometry!.AsText());
+        Assert.True(route.IsGeometryStale);
+        Assert.Equal(expectedCode, route.RoutingErrorCode);
     }
 
     [Fact]

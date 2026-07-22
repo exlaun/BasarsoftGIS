@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { clampPage, pageForItem, pageSlice, rebasePage } from '../utils/adaptivePagination'
+import useAdaptivePageSize from '../utils/useAdaptivePageSize'
 import './RouteManagementPanel.css'
 
 // Fallback swatch/marker color for a route with no color set. Kept in sync with STOP_DEFAULT_COLOR in
@@ -55,6 +57,40 @@ export default function RouteManagementPanel({
   // Native HTML5 drag: index of the row being dragged and the row it's currently over.
   const [dragIndex, setDragIndex] = useState(null)
   const [overIndex, setOverIndex] = useState(null)
+  const [page, setPage] = useState(1)
+  const listWrapRef = useRef(null)
+  const rowRef = useRef(null)
+  const pageSize = useAdaptivePageSize({
+    containerRef: listWrapRef,
+    rowRef,
+    fallbackRowHeight: 38,
+    rowGap: 5,
+    measureKey: routes.length,
+  })
+  const previousPageSizeRef = useRef(pageSize)
+
+  useLayoutEffect(() => {
+    const previous = previousPageSizeRef.current
+    const selectedIndex = routes.findIndex((route) => route.id === selectedRouteId)
+    setPage((current) => clampPage(
+      selectedIndex >= 0
+        ? pageForItem(selectedIndex, pageSize)
+        : rebasePage(current, previous, pageSize),
+      routes.length,
+      pageSize,
+    ))
+    previousPageSizeRef.current = pageSize
+  }, [pageSize, routes, selectedRouteId])
+
+  const totalPages = Math.max(1, Math.ceil(routes.length / pageSize))
+  const visibleRoutes = pageSlice(routes, page, pageSize)
+
+  const changePage = (nextPage) => {
+    const clamped = clampPage(nextPage, routes.length, pageSize)
+    if (clamped === page) return
+    if (selectedRouteId != null) onSelectRoute(selectedRouteId)
+    setPage(clamped)
+  }
 
   const resetDrag = () => {
     setDragIndex(null)
@@ -98,7 +134,7 @@ export default function RouteManagementPanel({
         </button>
       )}
 
-      <div className="route-list-wrap">
+      <div className="route-list-wrap" ref={listWrapRef}>
         {loading ? (
           <p className="route-panel-hint">Loading routes…</p>
         ) : routes.length === 0 ? (
@@ -107,7 +143,7 @@ export default function RouteManagementPanel({
           </p>
         ) : (
           <ul className="route-list">
-            {routes.map((route) => {
+            {visibleRoutes.map((route, index) => {
               const expanded = route.id === selectedRouteId
               const routeColor = route.color || DEFAULT_ROUTE_COLOR
               const visible = visibility?.[route.id] !== false
@@ -119,6 +155,7 @@ export default function RouteManagementPanel({
               return (
                 <li key={route.id} className="route-item">
                   <div
+                    ref={index === 0 ? rowRef : undefined}
                     className={`route-row${expanded ? ' is-selected' : ''}`}
                     onClick={() => onSelectRoute(route.id)}
                     role="button"
@@ -322,6 +359,30 @@ export default function RouteManagementPanel({
             })}
           </ul>
         )}
+      </div>
+      <div className="route-panel-foot">
+        <span className="route-panel-total">
+          {routes.length} {routes.length === 1 ? 'route' : 'routes'}
+        </span>
+        <div className="route-panel-pager">
+          <button
+            type="button"
+            className="route-panel-page-btn"
+            disabled={page <= 1}
+            onClick={() => changePage(page - 1)}
+          >
+            Prev
+          </button>
+          <span className="route-panel-page-label">{page} / {totalPages}</span>
+          <button
+            type="button"
+            className="route-panel-page-btn"
+            disabled={page >= totalPages}
+            onClick={() => changePage(page + 1)}
+          >
+            Next
+          </button>
+        </div>
       </div>
     </aside>
   )

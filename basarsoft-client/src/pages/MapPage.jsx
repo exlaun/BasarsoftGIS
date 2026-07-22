@@ -52,6 +52,7 @@ import {
   deleteRoute,
   listStops,
   createStop,
+  moveStop,
   deleteStop,
   listRouteStops,
   reorderStops,
@@ -325,6 +326,7 @@ const stampStopFeature = (feature, item, visible = true) => {
   feature.set('sequenceOrder', item.sequenceOrder)
   feature.set('createdBy', item.createdBy)
   feature.set('createdAt', item.createdAt)
+  feature.set('modifiedDate', item.modifiedDate)
   feature.set('userId', item.userId)
   feature.set('transportVisible', visible)
 }
@@ -423,6 +425,8 @@ export default function MapPage() {
   const pendingStopRouteRef = useRef(null)
   // Geometry captured before an edit so a cancelled edit can restore the shape's original position.
   const originalGeomRef = useRef(null)
+  // Separate rollback snapshot for stop relocation; shape and transportation edits never overlap.
+  const originalStopGeomRef = useRef(null)
   // Name/color carried from the info popup into geometry-edit mode, saved together with the new location.
   const pendingEditAttrsRef = useRef(null)
   const { logout, isAdmin, permissions, authorizedAreaWkt } = useAuth()
@@ -446,6 +450,8 @@ export default function MapPage() {
   const [overlapChoices, setOverlapChoices] = useState(null)
   // True while the selected shape's geometry is being dragged (Modify/Translate active).
   const [editingGeom, setEditingGeom] = useState(false)
+  // True while an authorized stop marker is being repositioned before an explicit save/cancel.
+  const [editingStopLocation, setEditingStopLocation] = useState(false)
   // Latest inventory-analysis result { points, lines, polygons, total }, or null. Persists until cleared.
   const [analysisResult, setAnalysisResult] = useState(null)
   // Which geometry types are visible on the map (layer-control checkboxes). All shown by default.
@@ -540,6 +546,11 @@ export default function MapPage() {
   // The transportation write gate: Operators (manage_transport) create/edit routes, place stops, and
   // reorder them; End Users lack it and get a read-only panel. Mirrors the server's inline check.
   const hasManageTransport = useMemo(() => permissions.includes('manage_transport'), [permissions])
+  const canRelocateSelectedStop = Boolean(
+    selectedStop
+      && hasManageTransport
+      && isInsideAuthorizedArea(selectedStop.feature.getGeometry(), authGeom),
+  )
 
   // Stable so effects can depend on it without re-running; shows a transient toast. `duration` lets
   // an important message linger longer so it isn't missed.
@@ -814,6 +825,7 @@ export default function MapPage() {
 
   // Panel stop-row click: fly to the stop and open its read-only info popup (like the query panel row).
   const handleStopRowClick = useCallback((stopId) => {
+    if (editingStopLocation) return
     const feature = sourcesRef.current?.stop.getFeatures().find((f) => f.get('dbId') === stopId)
     if (!feature) return
     const view = mapRef.current?.getView()
@@ -825,7 +837,7 @@ export default function MapPage() {
       })
     }
     setSelectedStop({ feature })
-  }, [])
+  }, [editingStopLocation])
 
   // Clear any pending toast timer on unmount so it can't fire setStatus into an unmounted page
   // (same idiom as the admin pages' toast cleanup).
@@ -864,6 +876,28 @@ export default function MapPage() {
     flashStatus,
     selectedShape,
   ])
+
+  // Permission/area changes during a move invalidate the mode. Check the original point here: the
+  // destination may legitimately be outside temporarily while the user is still positioning it.
+  useEffect(() => {
+    if (!editingStopLocation || !selectedStop) return undefined
+    const originalAllowed = hasManageTransport && isInsideAuthorizedArea(
+      originalStopGeomRef.current,
+      authGeom,
+    )
+    if (originalAllowed) return undefined
+
+    const timer = window.setTimeout(() => {
+      if (originalStopGeomRef.current) {
+        selectedStop.feature.setGeometry(originalStopGeomRef.current)
+      }
+      setEditingStopLocation(false)
+      setSelectedStop(null)
+      originalStopGeomRef.current = null
+      flashStatus('error', 'Your access changed. The unsaved stop relocation was cancelled.')
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [authGeom, editingStopLocation, flashStatus, hasManageTransport, selectedStop])
 
   // Create the map once and load the user's saved shapes.
   useEffect(() => {
@@ -1218,6 +1252,9 @@ export default function MapPage() {
   // vectors — WMS is display-only, exactly the mentor's "you can't operate on WMS" point.
   const handleDisplayMode = (mode) => {
     if (mode === 'wms') {
+      if (editingStopLocation && selectedStop && originalStopGeomRef.current) {
+        selectedStop.feature.setGeometry(originalStopGeomRef.current)
+      }
       setActiveTool('none')
       setSelectedShape(null)
       setEditingGeom(false)
@@ -1225,6 +1262,8 @@ export default function MapPage() {
       setSelectedPoi(null)
       setConfirmingPoiDelete(false)
       setSelectedStop(null)
+      setEditingStopLocation(false)
+      originalStopGeomRef.current = null
       resetKonum()
       setPendingDraw((draw) => {
         if (draw) sourcesRef.current?.[draw.apiType].removeFeature(draw.feature)
@@ -1237,12 +1276,12 @@ export default function MapPage() {
   // Search-bar pick: fly to the POI and open its read-only info panel. Zoom 16 is deliberately past
   // the label threshold (~13.5), so the found POI arrives on screen with its name visible.
   const handlePoiSearchPick = useCallback((feature) => {
-    if (editingGeom) return // don't hijack an in-progress geometry edit
+    if (editingGeom || editingStopLocation) return // don't hijack an in-progress map edit
     const view = mapRef.current?.getView()
     if (!view) return
     view.animate({ center: feature.getGeometry().getCoordinates(), zoom: 16, duration: 600 })
     setSelectedPoi({ feature })
-  }, [editingGeom])
+  }, [editingGeom, editingStopLocation])
 
   // Route a clicked feature to the right panel: a POI opens its read-only info panel, a personal
   // shape the editable info popup. Used by both the single-hit click and the overlap picker.
@@ -1260,6 +1299,10 @@ export default function MapPage() {
   // Picking a draw tool re-enables that type's layer if it was unchecked, so a freshly
   // saved shape doesn't silently vanish into a hidden layer.
   const handleSelectTool = (tool) => {
+    if (editingStopLocation) {
+      flashStatus('error', 'Save or cancel the stop relocation first.')
+      return
+    }
     if (disabledDrawTools.has(tool)) {
       flashStatus('error', 'You do not have permission to use that draw tool.')
       return
@@ -1303,7 +1346,7 @@ export default function MapPage() {
   useEffect(() => {
     const map = mapRef.current
     const sources = sourcesRef.current
-    if (!map || !sources || editingGeom) return undefined
+    if (!map || !sources || editingGeom || editingStopLocation) return undefined
 
     if (activeTool in TOOL_CONFIG) {
       if (disabledDrawTools.has(activeTool)) return undefined
@@ -1408,7 +1451,7 @@ export default function MapPage() {
     }
 
     return undefined
-  }, [activeTool, disabledDrawTools, editingGeom, flashStatus, openHit, konumRegionMode, konumAnalysis])
+  }, [activeTool, disabledDrawTools, editingGeom, editingStopLocation, flashStatus, openHit, konumRegionMode, konumAnalysis])
 
   // Geometry-edit mode: attach Modify (drag individual vertices) + Translate (drag the whole shape)
   // to just the selected feature. Both are removed when editing ends.
@@ -1463,6 +1506,32 @@ export default function MapPage() {
       map.removeInteraction(translate)
     }
   }, [editingGeom, selectedShape])
+
+  // Stop relocation is point-only: drag the marker or click an empty map location to place it. A
+  // self-hit click is ignored so a simple grab never also jumps the point.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !editingStopLocation || !selectedStop) return undefined
+
+    const feature = selectedStop.feature
+    const translate = new Translate({ features: new Collection([feature]), hitTolerance: 8 })
+    map.addInteraction(translate)
+
+    const onClick = (event) => {
+      const hitSelf = map.forEachFeatureAtPixel(
+        event.pixel,
+        (candidate) => (candidate === feature ? candidate : undefined),
+        { hitTolerance: 8 },
+      )
+      if (!hitSelf) feature.getGeometry().setCoordinates(event.coordinate)
+    }
+    map.on('singleclick', onClick)
+
+    return () => {
+      map.un('singleclick', onClick)
+      map.removeInteraction(translate)
+    }
+  }, [editingStopLocation, selectedStop])
 
   // Attribute popup (new draw) — Save: persist the pending shape with its name + color.
   const handleModalSave = async (name, color) => {
@@ -1590,6 +1659,87 @@ export default function MapPage() {
       flashStatus('error', message)
     } finally {
       setPendingDraw(null)
+    }
+  }
+
+  const handleStartStopRelocation = () => {
+    if (!selectedStop || !canRelocateSelectedStop) {
+      flashStatus('error', 'You are not allowed to relocate this stop.')
+      return
+    }
+    originalStopGeomRef.current = selectedStop.feature.getGeometry().clone()
+    setActiveTool('none')
+    setEditingStopLocation(true)
+  }
+
+  const handleStopRelocationCancel = () => {
+    if (selectedStop && originalStopGeomRef.current) {
+      selectedStop.feature.setGeometry(originalStopGeomRef.current)
+    }
+    setEditingStopLocation(false)
+    setSelectedStop(null)
+    originalStopGeomRef.current = null
+  }
+
+  const handleStopRelocationSave = async () => {
+    if (!selectedStop || !originalStopGeomRef.current) return
+    const { feature } = selectedStop
+
+    if (!hasManageTransport || !isInsideAuthorizedArea(feature.getGeometry(), authGeom)) {
+      flashStatus('error', 'Place the stop inside your authorized area before saving.')
+      return
+    }
+
+    const geomWkt = wkt.writeGeometry(feature.getGeometry(), {
+      featureProjection: MAP_PROJ,
+      dataProjection: DATA_PROJ,
+    })
+
+    try {
+      let payload
+      let routingWarning = null
+      try {
+        payload = await moveStop(feature.get('dbId'), geomWkt)
+      } catch (error) {
+        const partial = persistedRoutingMutation(error, 'locationPersisted')
+        if (!partial) throw error
+        payload = partial
+        routingWarning = error.response?.data?.message ?? 'The stop moved, but routing failed.'
+      }
+
+      const saved = payload.stop
+      const savedGeometry = wkt.readGeometry(saved.wkt, {
+        dataProjection: DATA_PROJ,
+        featureProjection: MAP_PROJ,
+      })
+      feature.setGeometry(savedGeometry)
+      stampStopFeature(
+        feature,
+        saved,
+        isRouteVisible(routeVisibilityRef.current, saved.routeId),
+      )
+      feature.changed()
+      setRouteStops((current) => current.map((stop) => (stop.id === saved.id ? saved : stop)))
+      commitRoute(payload.route)
+      flashStatus(
+        routingWarning ? 'error' : 'success',
+        routingWarning ?? (saved.sequenceOrder >= 2
+          ? 'Stop relocated and route geometry rebuilt.'
+          : 'Stop relocated.'),
+        routingWarning ? 5000 : 2800,
+      )
+    } catch (error) {
+      feature.setGeometry(originalStopGeomRef.current)
+      const message = error.response?.data?.code === 'outside_authorized_area'
+        ? "The stop's current and new locations must be inside your authorized area."
+        : error.response?.status === 403
+          ? 'You do not have permission to relocate stops.'
+          : error.response?.data?.message ?? 'Could not relocate the stop.'
+      flashStatus('error', message)
+    } finally {
+      setEditingStopLocation(false)
+      setSelectedStop(null)
+      originalStopGeomRef.current = null
     }
   }
 
@@ -1835,7 +1985,7 @@ export default function MapPage() {
   // open underneath (the popup overlay has the higher z-index). The right padding keeps the shape
   // centered in the VISIBLE part of the map instead of under the 400px drawer.
   const handleRowClick = (item) => {
-    if (editingGeom) return // don't hijack an in-progress geometry edit
+    if (editingGeom || editingStopLocation) return // don't hijack an in-progress map edit
     const feature = sourcesRef.current?.[item.type]
       ?.getFeatures()
       .find((f) => f.get('dbId') === item.id)
@@ -2129,7 +2279,7 @@ export default function MapPage() {
             onCancel={() => setConfirmingTransportDelete(null)}
           />
         )}
-        {selectedStop && (
+        {selectedStop && !editingStopLocation && (
           <StopInfoModal
             stop={{
               name: selectedStop.feature.get('name'),
@@ -2140,6 +2290,8 @@ export default function MapPage() {
               createdBy: selectedStop.feature.get('createdBy'),
               createdAt: selectedStop.feature.get('createdAt'),
             }}
+            canRelocate={canRelocateSelectedStop}
+            onRelocate={handleStartStopRelocation}
             onClose={() => setSelectedStop(null)}
           />
         )}
@@ -2218,6 +2370,30 @@ export default function MapPage() {
                   Cancel
                 </button>
                 <button type="button" className="map-edit-btn map-edit-save" onClick={handleGeomSave}>
+                  Save location
+                </button>
+              </div>
+            </div>
+          )}
+
+          {editingStopLocation && (
+            <div className="map-edit-bar" role="status">
+              <span className="map-edit-hint">
+                Drag the stop marker or click the map to place it, then save.
+              </span>
+              <div className="map-edit-actions">
+                <button
+                  type="button"
+                  className="map-edit-btn map-edit-cancel"
+                  onClick={handleStopRelocationCancel}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="map-edit-btn map-edit-save"
+                  onClick={handleStopRelocationSave}
+                >
                   Save location
                 </button>
               </div>

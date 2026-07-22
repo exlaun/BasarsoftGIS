@@ -56,6 +56,13 @@ export async function createStop(wkt, name, routeId) {
   return data
 }
 
+// Position-only stop update. Success and partial routing failures both carry the stop + rebuilt/stale
+// route so MapPage can reconcile every overlay without refetching the transportation module.
+export async function moveStop(id, wkt) {
+  const { data } = await client.put(`/api/stops/${id}/location`, { wkt })
+  return data
+}
+
 // Returns { stops, route }: the route's surviving stops renumbered 1..N, plus the rebuilt route — the
 // same shape reorderStops answers with, so callers reconcile both through one path.
 export async function deleteStop(id) {

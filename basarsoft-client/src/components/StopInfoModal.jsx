@@ -3,10 +3,10 @@ import './AttributeModal.css'
 import './ShapeInfoModal.css'
 
 // Read-only info popup for a stop on the map (clicked with the Select tool), following the existing
-// GIS point-popup pattern (PoiInfoModal). Stops have no edit or delete in this module, so it is
-// view-only. `stop` = { name, routeName, routeColor, stopColor, sequenceOrder, createdBy, createdAt }.
+// GIS point-popup pattern (PoiInfoModal). Authorized transport managers can start an explicit map
+// relocation; all metadata remains read-only here.
 // stopColor is the stop's own override or null when it inherits routeColor.
-export default function StopInfoModal({ stop, onClose }) {
+export default function StopInfoModal({ stop, canRelocate = false, onRelocate, onClose }) {
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onClose()
@@ -78,6 +78,15 @@ export default function StopInfoModal({ stop, onClose }) {
         </dl>
 
         <div className="attr-modal-actions">
+          {canRelocate && (
+            <button
+              type="button"
+              className="attr-modal-btn shape-info-edit-location"
+              onClick={onRelocate}
+            >
+              Relocate
+            </button>
+          )}
           <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onClose}>
             Close
           </button>

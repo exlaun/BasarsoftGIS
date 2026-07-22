@@ -70,6 +70,83 @@ public class TransportationControllerTests
         Assert.Same(CurrentRoute, Property<RouteResponse>(objectResult.Value!, "route"));
     }
 
+    [Theory]
+    [InlineData(TransportWriteStatus.NoRoute, StatusCodes.Status422UnprocessableEntity)]
+    [InlineData(TransportWriteStatus.InvalidCoordinates, StatusCodes.Status422UnprocessableEntity)]
+    [InlineData(TransportWriteStatus.RoutingUnavailable, StatusCodes.Status503ServiceUnavailable)]
+    public async Task MoveFailure_ReturnsPersistedLocationAndRoute(
+        TransportWriteStatus status,
+        int expectedStatus)
+    {
+        var stop = new StopResponse { Id = 11, RouteId = 7, Wkt = "POINT (30 40)" };
+        var service = new TransportationStub
+        {
+            MoveResult = new StopWriteResult(status, stop, CurrentRoute, StopPersisted: true),
+        };
+        var controller = WithUser(new StopsController(
+            service, new PermissionStub(), NullLogger<StopsController>.Instance));
+
+        var result = await controller.Move(11, new StopMoveRequest(), CancellationToken.None);
+
+        var objectResult = Assert.IsAssignableFrom<ObjectResult>(result.Result);
+        Assert.Equal(expectedStatus, objectResult.StatusCode);
+        Assert.True(Property<bool>(objectResult.Value!, "locationPersisted"));
+        Assert.Same(stop, Property<StopResponse>(objectResult.Value!, "stop"));
+        Assert.Same(CurrentRoute, Property<RouteResponse>(objectResult.Value!, "route"));
+    }
+
+    [Theory]
+    [InlineData(TransportWriteStatus.InvalidGeometry, StatusCodes.Status400BadRequest)]
+    [InlineData(TransportWriteStatus.StopNotFound, StatusCodes.Status404NotFound)]
+    [InlineData(TransportWriteStatus.RouteNotFound, StatusCodes.Status404NotFound)]
+    [InlineData(TransportWriteStatus.OutsideAuthorizedArea, StatusCodes.Status403Forbidden)]
+    public async Task MoveMapsValidationFailures(TransportWriteStatus status, int expectedStatus)
+    {
+        var service = new TransportationStub
+        {
+            MoveResult = new StopWriteResult(status, null),
+        };
+        var controller = WithUser(new StopsController(
+            service, new PermissionStub(), NullLogger<StopsController>.Instance));
+
+        var result = await controller.Move(11, new StopMoveRequest(), CancellationToken.None);
+
+        Assert.Equal(expectedStatus, Assert.IsAssignableFrom<ObjectResult>(result.Result).StatusCode);
+    }
+
+    [Fact]
+    public async Task MoveWithoutPermissionIs403AndDoesNotReachService()
+    {
+        var service = new TransportationStub();
+        var controller = WithUser(new StopsController(
+            service,
+            new PermissionStub { Granted = false },
+            NullLogger<StopsController>.Instance));
+
+        Assert.IsType<ForbidResult>((await controller.Move(
+            11, new StopMoveRequest(), CancellationToken.None)).Result);
+        Assert.Equal(0, service.MoveCallCount);
+    }
+
+    [Fact]
+    public async Task MoveSuccessReturnsStopAndRoute()
+    {
+        var stop = new StopResponse { Id = 11, RouteId = 7, Wkt = "POINT (30 40)" };
+        var service = new TransportationStub
+        {
+            MoveResult = StopWriteResult.Ok(stop, CurrentRoute),
+        };
+        var controller = WithUser(new StopsController(
+            service, new PermissionStub(), NullLogger<StopsController>.Instance));
+
+        var result = await controller.Move(11, new StopMoveRequest(), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<StopCreateResponse>(ok.Value);
+        Assert.Same(stop, payload.Stop);
+        Assert.Same(CurrentRoute, payload.Route);
+    }
+
     [Fact]
     public async Task OperationalAndAdminReorderFailures_ReturnPersistedOrderState()
     {
@@ -198,16 +275,28 @@ public class TransportationControllerTests
         public RouteBuildResult BuildResult { get; init; } = RouteBuildResult.From(
             TransportWriteStatus.Success, CurrentRoute);
         public StopWriteResult StopResult { get; init; } = StopWriteResult.InvalidGeometry;
+        public StopWriteResult MoveResult { get; init; } = StopWriteResult.InvalidGeometry;
         public StopOrderResult OrderResult { get; init; } = StopOrderResult.InvalidOrder;
         public StopOrderResult DeleteStopResult { get; init; } = StopOrderResult.StopNotFound;
         public bool RouteDeleted { get; init; }
         // Proves a 403 short-circuits before the service is reached, rather than after a real delete.
         public int DeleteCallCount { get; private set; }
+        public int MoveCallCount { get; private set; }
 
         public Task<StopWriteResult> CreateStopAsync(
             StopCreateRequest request,
             int userId,
             CancellationToken cancellationToken = default) => Task.FromResult(StopResult);
+
+        public Task<StopWriteResult> MoveStopAsync(
+            int id,
+            StopMoveRequest request,
+            int userId,
+            CancellationToken cancellationToken = default)
+        {
+            MoveCallCount++;
+            return Task.FromResult(MoveResult);
+        }
 
         public Task<StopOrderResult> ReorderStopsAsync(
             int routeId,

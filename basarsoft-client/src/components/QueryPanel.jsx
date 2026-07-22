@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { queryGeometry } from '../api/geometry'
+import { rebasePage } from '../utils/adaptivePagination'
+import useAdaptivePageSize from '../utils/useAdaptivePageSize'
 import './QueryPanel.css'
 
 const TYPES = ['point', 'line', 'polygon']
 const DEFAULT_COLOR = '#2563eb'
-const PAGE_SIZE = 10
-
 // Trailing info-button column is a fixed width; Name/Type/Created share the rest by fraction so the
 // user can drag the dividers between them. INFO_W must match the col width rendered below.
 const INFO_W = 46
@@ -51,6 +51,25 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
   // Kept in state so the <col> widths render as concrete px — `calc()` on table columns is unreliable.
   const [avail, setAvail] = useState(360)
   const wrapRef = useRef(null)
+  const headerRef = useRef(null)
+  const rowRef = useRef(null)
+  const pageSize = useAdaptivePageSize({
+    containerRef: wrapRef,
+    headerRef,
+    rowRef,
+    fallbackRowHeight: 37,
+    max: 100,
+    measureKey: data?.items?.length ?? 0,
+  })
+  const previousPageSizeRef = useRef(pageSize)
+
+  // A taller/shorter viewport changes capacity without throwing the user back to the beginning.
+  useLayoutEffect(() => {
+    const previous = previousPageSizeRef.current
+    if (previous === pageSize) return
+    setPage((current) => rebasePage(current, previous, pageSize))
+    previousPageSizeRef.current = pageSize
+  }, [pageSize])
 
   // Debounce typing so we query once per pause, not once per keystroke.
   useEffect(() => {
@@ -69,7 +88,7 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
       sortBy,
       sortDir,
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
     })
       .then((result) => {
         if (cancelled) return
@@ -77,7 +96,7 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
         setError(false)
         // Deleting the last row of the last page leaves an empty page — clamp back to the new end.
         if (result.items.length === 0 && result.total > 0 && page > 1) {
-          setPage(Math.max(1, Math.ceil(result.total / PAGE_SIZE)))
+          setPage(Math.max(1, Math.ceil(result.total / pageSize)))
         }
       })
       .catch(() => {
@@ -86,7 +105,7 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
     return () => {
       cancelled = true
     }
-  }, [open, debouncedName, typesKey, sortBy, sortDir, page, refreshKey])
+  }, [open, debouncedName, typesKey, sortBy, sortDir, page, pageSize, refreshKey])
 
   const handleNameChange = (event) => {
     setName(event.target.value)
@@ -152,7 +171,7 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
   // Width of a resizable column in px: its fraction of the space left after the fixed info column.
   const colWidth = (key) => `${Math.round(colFracs[key] * avail)}px`
 
-  const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / pageSize)) : 1
   const showEmpty = typesKey && data && data.total === 0
   const rows = typesKey && data ? data.items : []
 
@@ -192,7 +211,7 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
             <col style={{ width: colWidth('created') }} />
             <col style={{ width: `${INFO_W}px` }} />
           </colgroup>
-          <thead>
+          <thead ref={headerRef}>
             <tr>
               <th>
                 <button type="button" className="query-panel-sort" onClick={() => handleSort('name')}>
@@ -225,9 +244,10 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
             </tr>
           </thead>
           <tbody>
-            {rows.map((item) => (
+            {rows.map((item, index) => (
               <tr
                 key={`${item.type}-${item.id}`}
+                ref={index === 0 ? rowRef : undefined}
                 className="query-panel-row"
                 onClick={() => onRowClick(item)}
                 title={`Last edited ${new Date(item.modifiedDate).toLocaleString()} — click to show on map`}
