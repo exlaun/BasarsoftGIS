@@ -65,10 +65,6 @@ export default function ShapeInfoModal({
         <h2 className="attr-modal-title">{canEdit ? 'Edit shape' : 'Shape details'}</h2>
 
         <dl className="shape-info-meta">
-          <div>
-            <dt>Type</dt>
-            <dd className="shape-info-type">{type}</dd>
-          </div>
           {!canEdit && (
             <>
               <div className="shape-info-name">
@@ -81,15 +77,19 @@ export default function ShapeInfoModal({
                   <span
                     className="shape-info-color-swatch"
                     style={{ backgroundColor: color }}
-                    aria-hidden="true"
+                    role="img"
+                    aria-label="Shape color"
                   />
-                  {color}
                 </dd>
               </div>
             </>
           )}
+          <div>
+            <dt>Type</dt>
+            <dd className="shape-info-type">{type}</dd>
+          </div>
           {modifiedText && (
-            <div>
+            <div className="shape-info-wide">
               <dt>Last edited</dt>
               <dd>{modifiedText}</dd>
             </div>

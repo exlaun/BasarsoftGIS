@@ -9,7 +9,9 @@
 }
 
 .attr-modal {
-  width: min(360px, calc(100% - 2rem));
+  width: min(440px, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
@@ -86,6 +88,7 @@
 
 .attr-modal-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.6rem;
   margin-top: 0.25rem;
@@ -103,6 +106,16 @@
 
 .attr-modal-btn:active {
   transform: scale(0.98);
+}
+
+/* Neutral hover for plain buttons; the filled save/danger variants below override it with their own. */
+.attr-modal-btn:hover:not(:disabled) {
+  background: var(--bar-hover);
+}
+
+.attr-modal-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .attr-modal-cancel {

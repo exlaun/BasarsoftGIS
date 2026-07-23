@@ -73,6 +73,7 @@ public class StopsController : ControllerBase
                 // The `code` field lets the client tell this 403 apart from the permission 403 above.
                 TransportWriteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
                     new { message = "The stop is outside your authorized area.", code = "outside_authorized_area" }),
+                TransportWriteStatus.SimulationRunning => SimulationConflict(),
                 TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>
                     UnprocessableEntity(new
                     {
@@ -129,6 +130,7 @@ public class StopsController : ControllerBase
                         message = "The stop's current and new locations must be inside your authorized area.",
                         code = "outside_authorized_area",
                     }),
+                TransportWriteStatus.SimulationRunning => SimulationConflict(),
                 TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>
                     UnprocessableEntity(MoveError(result)),
                 TransportWriteStatus.RoutingUnavailable =>
@@ -165,6 +167,7 @@ public class StopsController : ControllerBase
                 // carries no partial-success payload.
                 TransportWriteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
                     new { message = "That stop is outside your authorized area.", code = "outside_authorized_area" }),
+                TransportWriteStatus.SimulationRunning => SimulationConflict(),
                 // The deletion itself is already committed, so these carry deletePersisted plus the
                 // fresh state — the same partial-success contract a failed reorder returns.
                 TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>
@@ -219,4 +222,10 @@ public class StopsController : ControllerBase
         TransportWriteStatus.InvalidCoordinates => "The stop was saved, but a stop has invalid routing coordinates.",
         _ => "The stop was saved, but routing is unavailable; previous route geometry was preserved.",
     };
+
+    private ObjectResult SimulationConflict() => Conflict(new
+    {
+        message = "Stop the running simulation before changing this route's stops.",
+        code = "simulation_running",
+    });
 }

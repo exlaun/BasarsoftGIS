@@ -42,6 +42,8 @@ import RouteManagementPanel from '../components/RouteManagementPanel'
 import RouteFormModal from '../components/RouteFormModal'
 import StopFormModal from '../components/StopFormModal'
 import StopInfoModal from '../components/StopInfoModal'
+import VehicleInfoModal from '../components/VehicleInfoModal'
+import RouteInfoModal from '../components/RouteInfoModal'
 import { listAllGeometry, saveGeometry, updateGeometry, deleteGeometry, analyzeArea } from '../api/geometry'
 import { listPois, createPoi, deletePoi, listPoiCategories } from '../api/poi'
 import { listProvinces, getProvince, createLocationAnalysis } from '../api/locationAnalysis'
@@ -57,7 +59,13 @@ import {
   listRouteStops,
   reorderStops,
   buildRoute,
+  getRouteSimulation,
+  startRouteSimulation,
+  stopRouteSimulation,
+  resumeRouteSimulation,
+  endRouteSimulation,
 } from '../api/transportation'
+import { createRouteSimulationConnection } from '../api/transportationSignalR'
 import {
   DEFAULT_POI_COLOR,
   categoryBadgeAppearance,
@@ -72,8 +80,17 @@ import {
   reconcileRouteVisibility,
   syncRouteOverlaySources,
   syncStopRoutePresentation,
+  syncVehicleRoutePresentation,
+  upsertVehicleFeature,
+  removeVehicleFeature,
   upsertRoute,
 } from '../utils/transportationMap'
+import {
+  endSimulationErrorMessage,
+  reconcileSimulationState,
+  simulationForRoute,
+} from '../utils/routeSimulation'
+import { createVehicleAnimator } from '../utils/vehicleAnimator'
 import { canDeletePoi, disabledMapTools, isInsideAuthorizedArea } from '../utils/mapPermissions'
 import './MapPage.css'
 
@@ -309,6 +326,18 @@ const routeArrowStyleFn = (feature) => {
   })
 }
 
+const vehicleMarkerStyle = new Style({
+  image: new IconStyle({
+    src: `${import.meta.env.BASE_URL}vehicle-icon.svg`,
+    width: 38,
+    height: 38,
+    anchor: [0.5, 0.5],
+  }),
+})
+
+const vehicleStyleFn = (feature) =>
+  feature.get('transportVisible') === false ? null : vehicleMarkerStyle
+
 // Copy a stop's server fields onto its OpenLayers feature (used by the initial load and after a
 // create). `color` mirrors routeColor so the overlap-picker swatch matches the marker.
 const stampStopFeature = (feature, item, visible = true) => {
@@ -397,12 +426,24 @@ export default function MapPage() {
   const routeLineLayerRef = useRef(null)
   const routeArrowSourceRef = useRef(null)
   const routeArrowLayerRef = useRef(null)
+  // Live vehicles remain independent from route lines, arrows, and stops. Features are keyed by
+  // route id and updated in place by SignalR state reconciliation.
+  const vehicleSourceRef = useRef(null)
+  const vehicleLayerRef = useRef(null)
+  // Smooths the ~1s server position ticks into continuous motion. The animator eases progress; a
+  // requestAnimationFrame loop places each marker along its route line between server updates.
+  const animatorRef = useRef(null)
+  if (animatorRef.current == null) animatorRef.current = createVehicleAnimator()
+  const animationFrameRef = useRef(null)
   // selectedRouteId for the line style to read. A ref because the style function runs on every
   // render frame of the layer, long after the map effect that created it closed over its scope —
   // the same reason pendingStopRouteRef is a ref rather than state.
   const selectedRouteIdRef = useRef(null)
   const routesRef = useRef([])
   const routeVisibilityRef = useRef({})
+  const simulationStatesRef = useRef({})
+  const followedRouteIdsRef = useRef(new Set())
+  const simulationConnectionRef = useRef(null)
   // GeoServer heat map layer (vw_heat + vec:Heatmap style) + its source; visible only while the
   // 'heatmap' tool is active. Created once, so toggling can never stack duplicate layers.
   const heatLayerRef = useRef(null)
@@ -502,6 +543,13 @@ export default function MapPage() {
   // Pending delete awaiting confirmation from the panel: { type: 'route'|'stop', item } or null.
   // Deleting a route also deletes its stops, so both go through a confirmation.
   const [confirmingTransportDelete, setConfirmingTransportDelete] = useState(null)
+  const [simulationStates, setSimulationStates] = useState({})
+  const [followedRouteIds, setFollowedRouteIds] = useState(() => new Set())
+  const [simulationBusyRouteId, setSimulationBusyRouteId] = useState(null)
+  const [selectedVehicleRouteId, setSelectedVehicleRouteId] = useState(null)
+  // Route info popup (shape-style details + simulation controls), opened by a route map-click or the
+  // panel's per-row info button. Independent from panel selection so it works with the drawer closed.
+  const [routeInfoRouteId, setRouteInfoRouteId] = useState(null)
 
   const disabledDrawTools = useMemo(
     () => disabledMapTools(TOOL_CONFIG, permissions),
@@ -546,6 +594,7 @@ export default function MapPage() {
   // The transportation write gate: Operators (manage_transport) create/edit routes, place stops, and
   // reorder them; End Users lack it and get a read-only panel. Mirrors the server's inline check.
   const hasManageTransport = useMemo(() => permissions.includes('manage_transport'), [permissions])
+  const canControlSimulation = isAdmin || hasManageTransport
   const canRelocateSelectedStop = Boolean(
     selectedStop
       && hasManageTransport
@@ -559,6 +608,122 @@ export default function MapPage() {
     window.clearTimeout(statusTimerRef.current)
     statusTimerRef.current = window.setTimeout(() => setStatus(null), duration)
   }, [])
+
+  // Place one vehicle marker at its eased progress along its own route line (so it follows the road
+  // through curves). Falls back to the last server lon/lat when the route line isn't loaded/visible.
+  const positionVehicle = useCallback((routeId) => {
+    const feature = vehicleSourceRef.current?.getFeatureById(`vehicle-${routeId}`)
+    if (!feature) return
+    const progress = animatorRef.current.easedProgress(routeId, performance.now())
+    const line = routeLineSourceRef.current
+      ?.getFeatures()
+      .find((candidate) => candidate.get('apiType') === 'route' && candidate.get('routeId') === routeId)
+    let coordinate
+    if (line) {
+      coordinate = line.getGeometry().getCoordinateAt(Math.max(0, Math.min(1, progress / 100)))
+    } else {
+      const state = simulationStatesRef.current[routeId]
+      if (Number.isFinite(state?.longitude) && Number.isFinite(state?.latitude)) {
+        coordinate = fromLonLat([state.longitude, state.latitude])
+      }
+    }
+    if (coordinate) feature.getGeometry().setCoordinates(coordinate)
+  }, [])
+
+  // Start the per-frame loop if it isn't already running and something is actually easing. The frame
+  // callback is a hoisted inner function so it can re-schedule itself, and it stops once every vehicle
+  // has reached its target (or been removed), so an idle map requests no animation frames.
+  const kickAnimation = useCallback(() => {
+    if (animationFrameRef.current != null) return
+    if (animatorRef.current.animatingRouteIds().length === 0) return
+    function frame() {
+      const ids = animatorRef.current.animatingRouteIds()
+      for (const routeId of ids) positionVehicle(routeId)
+      animationFrameRef.current = ids.length > 0 ? requestAnimationFrame(frame) : null
+    }
+    animationFrameRef.current = requestAnimationFrame(frame)
+  }, [positionVehicle])
+
+  // Feed a new authoritative state into the animator and place the marker immediately (covers the
+  // terminal snap), then ensure the per-frame loop is running for the in-between easing.
+  const pushVehicleTarget = useCallback((routeId, state) => {
+    animatorRef.current.pushTarget(routeId, state, performance.now())
+    positionVehicle(routeId)
+    kickAnimation()
+  }, [positionVehicle, kickAnimation])
+
+  const commitSimulationState = useCallback((incoming) => {
+    if (!incoming?.routeId) return
+    const current = simulationStatesRef.current[incoming.routeId]
+    const reconciled = reconcileSimulationState(current, incoming)
+    if (reconciled === current) return
+
+    const next = { ...simulationStatesRef.current, [incoming.routeId]: reconciled }
+    simulationStatesRef.current = next
+    setSimulationStates(next)
+
+    const route = routesRef.current.find((candidate) => candidate.id === incoming.routeId)
+    if (followedRouteIdsRef.current.has(incoming.routeId) && reconciled.status !== 'NotStarted') {
+      upsertVehicleFeature(
+        vehicleSourceRef.current,
+        reconciled,
+        route,
+        routeVisibilityRef.current,
+      )
+      pushVehicleTarget(incoming.routeId, reconciled)
+    } else {
+      removeVehicleFeature(vehicleSourceRef.current, incoming.routeId)
+      animatorRef.current.remove(incoming.routeId)
+      if (reconciled.status === 'NotStarted') {
+        setSelectedVehicleRouteId((selected) => selected === incoming.routeId ? null : selected)
+      }
+    }
+  }, [pushVehicleTarget])
+
+  // One authenticated SignalR connection per map page. Membership is independent from panel
+  // selection, so users may follow several vehicles and closing the drawer never drops a group.
+  useEffect(() => {
+    const connection = createRouteSimulationConnection({
+      onState: commitSimulationState,
+      onMembershipChange: (nextIds) => {
+        const previous = followedRouteIdsRef.current
+        followedRouteIdsRef.current = nextIds
+        setFollowedRouteIds(nextIds)
+        for (const routeId of previous) {
+          if (!nextIds.has(routeId)) {
+            removeVehicleFeature(vehicleSourceRef.current, routeId)
+            animatorRef.current.remove(routeId)
+            setSelectedVehicleRouteId((selected) => selected === routeId ? null : selected)
+          }
+        }
+        for (const routeId of nextIds) {
+          if (previous.has(routeId)) continue
+          const state = simulationStatesRef.current[routeId]
+          const route = routesRef.current.find((candidate) => candidate.id === routeId)
+          if (state?.status && state.status !== 'NotStarted') {
+            upsertVehicleFeature(vehicleSourceRef.current, state, route, routeVisibilityRef.current)
+            pushVehicleTarget(routeId, state)
+          }
+        }
+      },
+    })
+    simulationConnectionRef.current = connection
+    return () => {
+      simulationConnectionRef.current = null
+      connection.dispose().catch(() => {})
+    }
+  }, [commitSimulationState, pushVehicleTarget])
+
+  const loadSimulationState = useCallback(async (routeId) => {
+    try {
+      const state = await getRouteSimulation(routeId)
+      commitSimulationState(state)
+      return state
+    } catch {
+      flashStatus('error', 'Could not load the route simulation state.')
+      return null
+    }
+  }, [commitSimulationState, flashStatus])
 
   // --- Transportation: route panel handlers ---
   const commitRoutes = useCallback((nextRoutes) => {
@@ -574,6 +739,13 @@ export default function MapPage() {
       arrowSource: routeArrowSourceRef.current,
     })
     syncStopRoutePresentation(sourcesRef.current?.stop, nextRoutes, nextVisibility)
+    syncVehicleRoutePresentation(vehicleSourceRef.current, nextRoutes, nextVisibility)
+    const routeIds = new Set(nextRoutes.map((route) => route.id))
+    for (const followedRouteId of followedRouteIdsRef.current) {
+      if (!routeIds.has(followedRouteId)) {
+        simulationConnectionRef.current?.unfollow(followedRouteId).catch(() => {})
+      }
+    }
   }, [])
 
   const commitRoute = useCallback((updatedRoute) => {
@@ -627,8 +799,9 @@ export default function MapPage() {
     if (next) {
       setDrawerOpen(false)
       loadRoutes()
+      if (selectedRouteIdRef.current != null) loadSimulationState(selectedRouteIdRef.current)
     }
-  }, [routePanelOpen, loadRoutes])
+  }, [routePanelOpen, loadRoutes, loadSimulationState])
 
   const handleToggleDrawer = useCallback(() => {
     const next = !drawerOpen
@@ -662,8 +835,18 @@ export default function MapPage() {
     setSelectedRouteId(next)
     loadRouteStops(next)
     // Only when selecting: re-clicking a route to deselect it leaves the view where the user put it.
-    if (next != null) zoomToRoute(next)
-  }, [selectedRouteId, loadRouteStops, zoomToRoute])
+    if (next != null) {
+      zoomToRoute(next)
+      loadSimulationState(next)
+    }
+  }, [selectedRouteId, loadRouteStops, zoomToRoute, loadSimulationState])
+
+  // Open the route info popup and refresh that route's live simulation state so the popup shows the
+  // current status/progress. Used by both a route map-click and the panel's per-row info button.
+  const handleRouteInfoClick = useCallback((routeId) => {
+    setRouteInfoRouteId(routeId)
+    loadSimulationState(routeId)
+  }, [loadSimulationState])
 
   // Create or edit a route from the panel's form modal. Throws on failure (e.g. a duplicate name ->
   // 409) so the modal can keep itself open and show the error; only a success closes it.
@@ -718,7 +901,7 @@ export default function MapPage() {
       }
       setRouteStops(previous)
       applyStopOrderToMap(previous)
-      flashStatus('error', 'Could not save the new stop order.')
+      flashStatus('error', error.response?.data?.message ?? 'Could not save the new stop order.')
     }
   }, [routeStops, applyStopOrderToMap, commitRoute, flashStatus])
 
@@ -735,6 +918,102 @@ export default function MapPage() {
       setBuildingRouteId(null)
     }
   }, [commitRoute, flashStatus])
+
+  const handleStartSimulation = useCallback(async (routeId) => {
+    if (!canControlSimulation) return
+    setSimulationBusyRouteId(routeId)
+    try {
+      const state = await startRouteSimulation(routeId)
+      commitSimulationState(state)
+      await simulationConnectionRef.current?.follow(routeId)
+      flashStatus('success', 'Simulation started.')
+    } catch (error) {
+      if (error.response?.data?.state) commitSimulationState(error.response.data.state)
+      flashStatus('error', error.response?.data?.message ?? 'Could not start the simulation.', 5000)
+    } finally {
+      setSimulationBusyRouteId(null)
+    }
+  }, [canControlSimulation, commitSimulationState, flashStatus])
+
+  const handleStopSimulation = useCallback(async (routeId) => {
+    if (!canControlSimulation) return
+    setSimulationBusyRouteId(routeId)
+    try {
+      const state = await stopRouteSimulation(routeId)
+      commitSimulationState(state)
+      flashStatus('success', 'Simulation stopped.')
+    } catch (error) {
+      if (error.response?.data?.state) commitSimulationState(error.response.data.state)
+      flashStatus('error', error.response?.data?.message ?? 'Could not stop the simulation.', 5000)
+    } finally {
+      setSimulationBusyRouteId(null)
+    }
+  }, [canControlSimulation, commitSimulationState, flashStatus])
+
+  // Resume keeps the same run and continues from its stopped route progress.
+  const handleResumeSimulation = useCallback(async (routeId) => {
+    if (!canControlSimulation) return
+    setSimulationBusyRouteId(routeId)
+    try {
+      const state = await resumeRouteSimulation(routeId)
+      commitSimulationState(state)
+      await simulationConnectionRef.current?.follow(routeId)
+      flashStatus('success', 'Simulation resumed.')
+    } catch (error) {
+      if (error.response?.data?.state) commitSimulationState(error.response.data.state)
+      flashStatus('error', error.response?.data?.message ?? 'Could not resume the simulation.', 5000)
+    } finally {
+      setSimulationBusyRouteId(null)
+    }
+  }, [canControlSimulation, commitSimulationState, flashStatus])
+
+  // End stays server-authoritative: only a successful HTTP response clears local state. Explicitly leave
+  // the SignalR group as well, so cleanup does not depend on a broadcast racing the HTTP response.
+  const handleEndSimulation = useCallback(async (routeId) => {
+    if (!canControlSimulation) return
+    setSimulationBusyRouteId(routeId)
+    try {
+      const state = await endRouteSimulation(routeId)
+      commitSimulationState(state)
+      try {
+        await simulationConnectionRef.current?.unfollow(routeId)
+      } catch {
+        // The run is already ended on the server and local marker/state are cleared. A disconnected
+        // SignalR client has no group membership left to clean up, so this must not turn success into
+        // a misleading End failure.
+      }
+      flashStatus('success', 'Simulation ended.')
+    } catch (error) {
+      flashStatus('error', endSimulationErrorMessage(error), 7000)
+    } finally {
+      setSimulationBusyRouteId(null)
+    }
+  }, [canControlSimulation, commitSimulationState, flashStatus])
+
+  // Single dispatcher the panel and the route info popup both call with the derived action name.
+  const handleSimulationAction = useCallback((action, routeId) => {
+    if (action === 'start') return handleStartSimulation(routeId)
+    if (action === 'stop') return handleStopSimulation(routeId)
+    if (action === 'resume') return handleResumeSimulation(routeId)
+    if (action === 'end') return handleEndSimulation(routeId)
+    return undefined
+  }, [handleStartSimulation, handleStopSimulation, handleResumeSimulation, handleEndSimulation])
+
+  const handleFollowRoute = useCallback(async (routeId) => {
+    try {
+      await simulationConnectionRef.current?.follow(routeId)
+    } catch {
+      flashStatus('error', 'Could not connect to live vehicle updates.', 5000)
+    }
+  }, [flashStatus])
+
+  const handleUnfollowRoute = useCallback(async (routeId) => {
+    try {
+      await simulationConnectionRef.current?.unfollow(routeId)
+    } catch {
+      flashStatus('error', 'Could not leave live vehicle updates.')
+    }
+  }, [flashStatus])
 
   // Drop every stop marker belonging to a route from the map source. Used by route deletion, where
   // the stops go with their route, and shared with nothing else — the module has no other way to
@@ -753,6 +1032,7 @@ export default function MapPage() {
   const handleDeleteRoute = useCallback(async (route) => {
     try {
       await deleteRoute(route.id)
+      await simulationConnectionRef.current?.unfollow(route.id)
       removeRouteStopFeatures(route.id)
       commitRoutes(routesRef.current.filter((candidate) => candidate.id !== route.id))
       if (selectedRouteIdRef.current === route.id) {
@@ -820,7 +1100,7 @@ export default function MapPage() {
       lineSource: routeLineSourceRef.current,
       arrowSource: routeArrowSourceRef.current,
     })
-    applyRouteVisibility(routeId, visible, sourcesRef.current?.stop)
+    applyRouteVisibility(routeId, visible, sourcesRef.current?.stop, vehicleSourceRef.current)
   }, [])
 
   // Panel stop-row click: fly to the stop and open its read-only info popup (like the query panel row).
@@ -942,6 +1222,13 @@ export default function MapPage() {
       style: routeArrowStyleFn,
     })
     routeArrowLayerRef.current = routeArrowLayer
+    const vehicleSource = new VectorSource()
+    vehicleSourceRef.current = vehicleSource
+    const vehicleLayer = new VectorLayer({
+      source: vehicleSource,
+      style: vehicleStyleFn,
+    })
+    vehicleLayerRef.current = vehicleLayer
     const analysisSource = new VectorSource()
     analysisSourceRef.current = analysisSource
     const authAreaSource = new VectorSource()
@@ -1012,6 +1299,8 @@ export default function MapPage() {
         poiLayer,
         // Transportation stops above the POIs; a client vector layer (direct /api/stops, no GeoServer).
         stopLayer,
+        // Followed live vehicles are the topmost transportation marker and keep their own hit target.
+        vehicleLayer,
         // Heat map raster above the shapes (its alpha ramp keeps them readable underneath), below the
         // temporary analysis polygon so that overlay always stays on top.
         heatLayer,
@@ -1027,6 +1316,21 @@ export default function MapPage() {
       }),
     })
     mapRef.current = map
+
+    // Normally following starts after the map is ready. This also covers a very fast connection
+    // completing during initialization without losing its already-reconciled state.
+    for (const routeId of followedRouteIdsRef.current) {
+      const live = simulationStatesRef.current[routeId]
+      if (live?.status && live.status !== 'NotStarted') {
+        upsertVehicleFeature(
+          vehicleSource,
+          live,
+          routesRef.current.find((route) => route.id === routeId),
+          routeVisibilityRef.current,
+        )
+        pushVehicleTarget(routeId, live)
+      }
+    }
 
     // Hover tooltip: show a shape's saved name when the cursor is over it. Named features only.
     const tooltipEl = tooltipElementRef.current
@@ -1149,6 +1453,12 @@ export default function MapPage() {
       routeLineLayerRef.current = null
       routeArrowSourceRef.current = null
       routeArrowLayerRef.current = null
+      if (animationFrameRef.current != null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+      vehicleSourceRef.current = null
+      vehicleLayerRef.current = null
       wmsLayerRef.current = null
       wmsSourceRef.current = null
       heatLayerRef.current = null
@@ -1291,10 +1601,16 @@ export default function MapPage() {
       setSelectedPoi({ feature })
     } else if (apiType === 'stop') {
       setSelectedStop({ feature })
+    } else if (apiType === 'route') {
+      // Clicking a route on the map opens its info popup (with Start/Follow), not the whole panel —
+      // the panel stays reachable from its top-bar toggle for browsing.
+      handleRouteInfoClick(feature.get('routeId'))
+    } else if (apiType === 'vehicle') {
+      setSelectedVehicleRouteId(feature.get('routeId'))
     } else {
       setSelectedShape({ feature })
     }
-  }, [])
+  }, [handleRouteInfoClick])
 
   // Picking a draw tool re-enables that type's layer if it was unchecked, so a freshly
   // saved shape doesn't silently vanish into a hidden layer.
@@ -1655,7 +1971,7 @@ export default function MapPage() {
           ? 'That route no longer exists. Pick another one.'
           : error.response?.status === 403
             ? 'You do not have permission to add stops.'
-            : 'Could not save the stop.'
+            : data?.message ?? 'Could not save the stop.'
       flashStatus('error', message)
     } finally {
       setPendingDraw(null)
@@ -2169,6 +2485,14 @@ export default function MapPage() {
           buildingRouteId={buildingRouteId}
           onToggleVisibility={handleRouteVisibility}
           onBuildRoute={handleBuildRoute}
+          canControlSimulation={canControlSimulation}
+          simulationStates={simulationStates}
+          followedRouteIds={followedRouteIds}
+          simulationBusyRouteId={simulationBusyRouteId}
+          onSimulationAction={handleSimulationAction}
+          onFollowRoute={handleFollowRoute}
+          onUnfollowRoute={handleUnfollowRoute}
+          onRouteInfoClick={handleRouteInfoClick}
           onClose={() => setRoutePanelOpen(false)}
         />
 
@@ -2293,6 +2617,26 @@ export default function MapPage() {
             canRelocate={canRelocateSelectedStop}
             onRelocate={handleStartStopRelocation}
             onClose={() => setSelectedStop(null)}
+          />
+        )}
+        {selectedVehicleRouteId != null && (
+          <VehicleInfoModal
+            route={routes.find((route) => route.id === selectedVehicleRouteId)}
+            simulation={simulationForRoute(simulationStates, selectedVehicleRouteId)}
+            onClose={() => setSelectedVehicleRouteId(null)}
+          />
+        )}
+        {routeInfoRouteId != null && routes.some((route) => route.id === routeInfoRouteId) && (
+          <RouteInfoModal
+            route={routes.find((route) => route.id === routeInfoRouteId)}
+            simulation={simulationForRoute(simulationStates, routeInfoRouteId)}
+            followed={followedRouteIds.has(routeInfoRouteId)}
+            canControl={canControlSimulation}
+            busy={simulationBusyRouteId === routeInfoRouteId}
+            onSimulationAction={handleSimulationAction}
+            onFollow={handleFollowRoute}
+            onUnfollow={handleUnfollowRoute}
+            onClose={() => setRouteInfoRouteId(null)}
           />
         )}
         {infoItem && <InventoryInfoModal info={infoItem} onClose={() => setInfoItem(null)} />}

@@ -9,4 +9,5 @@ public enum DeleteStatus
     Success,
     NotFound,
     OutsideAuthorizedArea,
+    SimulationRunning,
 }

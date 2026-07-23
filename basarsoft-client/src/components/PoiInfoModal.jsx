@@ -23,7 +23,7 @@ export default function PoiInfoModal({ poi, canDelete, onDelete, onClose }) {
         <h2 className="attr-modal-title">POI info</h2>
 
         <dl className="shape-info-meta">
-          <div>
+          <div className="shape-info-wide">
             <dt>Name</dt>
             <dd>{poi.name || 'Unnamed'}</dd>
           </div>

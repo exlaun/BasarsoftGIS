@@ -1,6 +1,7 @@
 using System.Text;
 using System.Threading.RateLimiting;
 using Basarsoft.Api.Data;
+using Basarsoft.Api.Hubs;
 using Basarsoft.Api.Middleware;
 using Basarsoft.Api.Security;
 using Basarsoft.Api.Serialization;
@@ -90,6 +91,31 @@ builder.Services.AddHttpClient<IRoutingService, OsrmRoutingService>(client =>
     client.Timeout = Timeout.InfiniteTimeSpan;
 });
 
+// Server-authoritative vehicle simulation. Runtime state is deliberately process-local for this
+// single-instance version; the store/publisher/route-loader contracts keep persistence or a worker
+// process replaceable later without changing the REST/SignalR surface.
+builder.Services.AddSignalR();
+builder.Services.AddOptions<RouteSimulationSettings>()
+    .Bind(builder.Configuration.GetSection(RouteSimulationSettings.SectionName))
+    .Validate(settings => settings.UpdateIntervalMilliseconds > 0,
+        "RouteSimulation:UpdateIntervalMilliseconds must be positive.")
+    .Validate(settings => double.IsFinite(settings.TimeScale) && settings.TimeScale > 0,
+        "RouteSimulation:TimeScale must be positive.")
+    .Validate(settings => double.IsFinite(settings.FallbackSpeedMetersPerSecond) &&
+                          settings.FallbackSpeedMetersPerSecond > 0,
+        "RouteSimulation:FallbackSpeedMetersPerSecond must be positive.")
+    .ValidateOnStart();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IRouteSimulationStateStore, InMemoryRouteSimulationStateStore>();
+builder.Services.AddSingleton<IRouteSimulationStateReader>(provider =>
+    provider.GetRequiredService<IRouteSimulationStateStore>());
+builder.Services.AddSingleton<IRouteSimulationRouteLoader, RouteSimulationRouteLoader>();
+builder.Services.AddSingleton<IRouteSimulationPublisher, SignalRRouteSimulationPublisher>();
+builder.Services.AddSingleton<RouteSimulationService>();
+builder.Services.AddSingleton<IRouteSimulationService>(provider =>
+    provider.GetRequiredService<RouteSimulationService>());
+builder.Services.AddHostedService<RouteSimulationWorker>();
+
 // Global exception handling: a final safety net that converts any unhandled exception into a clean
 // 500 JSON response (the controllers also try-catch individually). AddProblemDetails() supplies the
 // standard error body format that UseExceptionHandler() falls back to.
@@ -142,6 +168,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ClockSkew = TimeSpan.Zero,
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Key))
+        };
+        // Browsers cannot attach an Authorization header to the WebSocket upgrade. The official
+        // SignalR client supplies the same JWT as access_token; accept it only on our hub path.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var token = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(token) &&
+                    context.HttpContext.Request.Path.StartsWithSegments("/hubs/transportation"))
+                {
+                    context.Token = token;
+                }
+                return Task.CompletedTask;
+            },
         };
     });
 // Authorization with DB-backed policies. "AdminAccess" (any management permission) still answers
@@ -211,7 +252,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy(AllowReactApp, policy =>
         policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
-              .AllowAnyMethod());
+              .AllowAnyMethod()
+              .AllowCredentials());
 });
 
 var app = builder.Build();
@@ -265,6 +307,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<TransportationHub>("/hubs/transportation");
 
 app.Run();
 

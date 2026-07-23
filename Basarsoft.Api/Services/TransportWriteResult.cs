@@ -18,6 +18,7 @@ public enum TransportWriteStatus
     NoRoute,              // OSRM could not connect the ordered waypoints (422)
     InvalidCoordinates,   // a waypoint is invalid or cannot snap to the road graph (422)
     RoutingUnavailable,   // configured OSRM services failed transiently (503)
+    SimulationRunning,    // route topology is frozen while its vehicle is running (409)
 }
 
 public record RouteWriteResult(TransportWriteStatus Status, RouteResponse? Response)
@@ -26,6 +27,8 @@ public record RouteWriteResult(TransportWriteStatus Status, RouteResponse? Respo
     public static readonly RouteWriteResult DuplicateName = new(TransportWriteStatus.DuplicateName, null);
     public static readonly RouteWriteResult OutsideAuthorizedArea =
         new(TransportWriteStatus.OutsideAuthorizedArea, null);
+    public static readonly RouteWriteResult SimulationRunning =
+        new(TransportWriteStatus.SimulationRunning, null);
     public static RouteWriteResult Ok(RouteResponse response) => new(TransportWriteStatus.Success, response);
 }
 
@@ -39,6 +42,7 @@ public record StopWriteResult(
     public static readonly StopWriteResult RouteNotFound = new(TransportWriteStatus.RouteNotFound, null);
     public static readonly StopWriteResult StopNotFound = new(TransportWriteStatus.StopNotFound, null);
     public static readonly StopWriteResult OutsideAuthorizedArea = new(TransportWriteStatus.OutsideAuthorizedArea, null);
+    public static readonly StopWriteResult SimulationRunning = new(TransportWriteStatus.SimulationRunning, null);
     public static StopWriteResult Ok(StopResponse response, RouteResponse route) =>
         new(TransportWriteStatus.Success, response, route, true);
 }
@@ -57,6 +61,8 @@ public record StopOrderResult(
     public static readonly StopOrderResult StopNotFound = new(TransportWriteStatus.StopNotFound, null);
     public static readonly StopOrderResult OutsideAuthorizedArea =
         new(TransportWriteStatus.OutsideAuthorizedArea, null);
+    public static readonly StopOrderResult SimulationRunning =
+        new(TransportWriteStatus.SimulationRunning, null);
     public static StopOrderResult Ok(IReadOnlyList<StopResponse> stops, RouteResponse route) =>
         new(TransportWriteStatus.Success, stops, route, true);
 }
@@ -66,5 +72,7 @@ public record RouteBuildResult(TransportWriteStatus Status, RouteResponse? Route
     public static readonly RouteBuildResult RouteNotFound = new(TransportWriteStatus.RouteNotFound, null);
     public static readonly RouteBuildResult OutsideAuthorizedArea =
         new(TransportWriteStatus.OutsideAuthorizedArea, null);
+    public static readonly RouteBuildResult SimulationRunning =
+        new(TransportWriteStatus.SimulationRunning, null);
     public static RouteBuildResult From(TransportWriteStatus status, RouteResponse route) => new(status, route);
 }

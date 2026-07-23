@@ -164,6 +164,8 @@ administrators have a separate `/admin/transportation` route/stop view gated by
 - `DELETE /api/routes/{id}` requires `manage_transport`: `204` on success (its stops are deleted with
   it), `404` if the route doesn't exist. `DELETE /api/stops/{id}` requires `manage_transport` and
   returns the route's renumbered remaining stops plus the rebuilt route.
+- `POST /api/routes/{id}/simulation/end` requires route-control permission and idempotently returns
+  `200` with `status: "NotStarted"` whether the run is active, stopped, or already ended.
 - `/api/admin/transportation` provides the grouped snapshot, presentation edits, exact-set reorder,
   deletion, and rebuild endpoints under the `manage_transport_admin` policy.
 
@@ -245,13 +247,16 @@ If the existing location-analysis GeoServer layer has not been provisioned, foll
 ```bash
 # PostgreSQL/PostGIS must exist and match Basarsoft.Api/appsettings.json
 
-cd Basarsoft.Api
-dotnet run                         # API: http://localhost:5032
+dotnet watch --project Basarsoft.Api/Basarsoft.Api.csproj run  # API: http://localhost:5032
 
-cd ../basarsoft-client
+cd basarsoft-client
 npm install
 npm run dev                       # client: http://localhost:5173
 ```
+
+`dotnet watch` performs a build before launching and is the recommended API command while developing.
+If a newly added endpoint (for example End Simulation) returns `404`, stop the old API process and
+restart or redeploy from current source; do not keep an older `--no-build` process running.
 
 GeoServer is expected at `http://localhost:8080/geoserver`, with workspace `basarsoft` and PostGIS
 store `pg_basarsoft`. See [geoserver/README.md](geoserver/README.md).

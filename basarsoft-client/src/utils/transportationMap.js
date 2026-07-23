@@ -1,6 +1,7 @@
 import Feature from 'ol/Feature.js'
 import Point from 'ol/geom/Point.js'
 import WKT from 'ol/format/WKT.js'
+import { fromLonLat } from 'ol/proj.js'
 
 const format = new WKT()
 const DATA_PROJECTION = 'EPSG:4326'
@@ -31,7 +32,10 @@ export function parseRouteFeature(route, visibility = {}) {
     })
     if (feature.getGeometry()?.getType() !== 'LineString') return null
     feature.set('routeId', route.id)
+    feature.set('apiType', 'route')
+    feature.set('dbId', route.id)
     feature.set('routeColor', route.color)
+    feature.set('color', route.color)
     feature.set('name', route.name)
     feature.set('transportVisible', isRouteVisible(visibility, route.id))
     return feature
@@ -105,6 +109,60 @@ export function applyRouteVisibility(routeId, visible, ...sources) {
         feature.changed()
       }
     }
+  }
+}
+
+export function upsertVehicleFeature(source, simulation, route, visibility = {}) {
+  if (!source || !simulation) return null
+  const featureId = `vehicle-${simulation.routeId}`
+  const existing = source.getFeatureById(featureId)
+  if (
+    simulation.status === 'NotStarted' ||
+    !Number.isFinite(simulation.longitude) ||
+    !Number.isFinite(simulation.latitude)
+  ) {
+    if (existing) source.removeFeature(existing)
+    return null
+  }
+
+  const coordinate = fromLonLat([simulation.longitude, simulation.latitude])
+  const feature = existing ?? new Feature(new Point(coordinate))
+  if (existing) existing.getGeometry().setCoordinates(coordinate)
+  else {
+    feature.setId(featureId)
+    source.addFeature(feature)
+  }
+  feature.set('apiType', 'vehicle')
+  feature.set('dbId', simulation.routeId)
+  feature.set('routeId', simulation.routeId)
+  feature.set('name', `Vehicle · ${route?.name ?? `Route ${simulation.routeId}`}`)
+  feature.set('routeName', route?.name)
+  feature.set('simulationStatus', simulation.status)
+  feature.set('progressPercent', simulation.progressPercent)
+  feature.set('transportVisible', isRouteVisible(visibility, simulation.routeId))
+  feature.changed()
+  return feature
+}
+
+export function removeVehicleFeature(source, routeId) {
+  const feature = source?.getFeatureById(`vehicle-${routeId}`)
+  if (feature) source.removeFeature(feature)
+}
+
+export function syncVehicleRoutePresentation(source, routes, visibility = {}) {
+  if (!source) return
+  const routesById = new Map(routes.map((route) => [route.id, route]))
+  for (const feature of source.getFeatures()) {
+    const routeId = feature.get('routeId')
+    const route = routesById.get(routeId)
+    if (!route) {
+      source.removeFeature(feature)
+      continue
+    }
+    feature.set('routeName', route.name)
+    feature.set('name', `Vehicle · ${route.name}`)
+    feature.set('transportVisible', isRouteVisible(visibility, routeId))
+    feature.changed()
   }
 }
 

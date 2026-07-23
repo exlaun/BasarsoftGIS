@@ -13,6 +13,9 @@ import {
   reconcileRouteVisibility,
   syncStopRoutePresentation,
   syncRouteOverlaySources,
+  syncVehicleRoutePresentation,
+  upsertVehicleFeature,
+  removeVehicleFeature,
   upsertRoute,
 } from './transportationMap.js'
 
@@ -25,10 +28,61 @@ test('route WKT parses as a projected LineString and invalid geometry is ignored
   })
   assert.equal(feature.getGeometry().getType(), 'LineString')
   assert.equal(feature.get('routeId'), 7)
+  assert.equal(feature.get('apiType'), 'route')
+  assert.equal(feature.get('dbId'), 7)
   assert.equal(feature.get('routeColor'), '#ff0000')
   assert.equal(parseRouteFeature({ id: 8, geometryWkt: 'POINT(29 41)' }), null)
   assert.equal(parseRouteFeature({ id: 9, geometryWkt: 'broken' }), null)
   assert.equal(parseRouteFeature({ id: 10, geometryWkt: null }), null)
+})
+
+test('vehicle updates reuse one feature and respect route visibility', () => {
+  const source = new VectorSource()
+  const route = { id: 4, name: 'Live route' }
+  const first = upsertVehicleFeature(source, {
+    routeId: 4,
+    status: 'Running',
+    longitude: 29,
+    latitude: 41,
+    progressPercent: 10,
+  }, route, {})
+  const originalCoordinates = first.getGeometry().getCoordinates()
+
+  const second = upsertVehicleFeature(source, {
+    routeId: 4,
+    status: 'Running',
+    longitude: 30,
+    latitude: 42,
+    progressPercent: 50,
+  }, route, { 4: false })
+
+  assert.equal(source.getFeatures().length, 1)
+  assert.equal(second, first)
+  assert.notDeepEqual(second.getGeometry().getCoordinates(), originalCoordinates)
+  assert.equal(second.get('progressPercent'), 50)
+  assert.equal(second.get('transportVisible'), false)
+
+  syncVehicleRoutePresentation(source, [{ id: 4, name: 'Renamed route' }], { 4: true })
+  assert.equal(second.get('routeName'), 'Renamed route')
+  assert.equal(second.get('transportVisible'), true)
+
+  removeVehicleFeature(source, 4)
+  assert.equal(source.getFeatures().length, 0)
+})
+
+test('NotStarted simulation removes an existing vehicle instead of duplicating it', () => {
+  const source = new VectorSource()
+  upsertVehicleFeature(source, {
+    routeId: 8,
+    status: 'Completed',
+    longitude: 29,
+    latitude: 41,
+    progressPercent: 100,
+  }, { id: 8, name: 'Done' })
+  assert.equal(source.getFeatures().length, 1)
+
+  upsertVehicleFeature(source, { routeId: 8, status: 'NotStarted' }, { id: 8 })
+  assert.equal(source.getFeatures().length, 0)
 })
 
 test('new routes default visible while explicit visibility is preserved', () => {

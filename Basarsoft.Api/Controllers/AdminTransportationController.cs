@@ -97,6 +97,7 @@ public class AdminTransportationController : ControllerBase
             {
                 DeleteStatus.NotFound => NotFound(new { message = "Route not found." }),
                 DeleteStatus.OutsideAuthorizedArea => OutsideArea(RoutesController.RouteOutsideAreaMessage),
+                DeleteStatus.SimulationRunning => SimulationConflict(),
                 _ => NoContent(),
             };
         }
@@ -121,6 +122,7 @@ public class AdminTransportationController : ControllerBase
                 TransportWriteStatus.StopNotFound => NotFound(new { message = "Stop not found." }),
                 TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
                 TransportWriteStatus.OutsideAuthorizedArea => OutsideArea(StopOutsideAreaMessage),
+                TransportWriteStatus.SimulationRunning => SimulationConflict(),
                 TransportWriteStatus.NoRoute or TransportWriteStatus.InvalidCoordinates =>
                     UnprocessableEntity(DeleteError(result)),
                 TransportWriteStatus.RoutingUnavailable =>
@@ -186,6 +188,7 @@ public class AdminTransportationController : ControllerBase
     {
         TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
         TransportWriteStatus.OutsideAuthorizedArea => OutsideArea(RoutesController.RouteOutsideAreaMessage),
+        TransportWriteStatus.SimulationRunning => SimulationConflict(),
         TransportWriteStatus.InvalidOrder => BadRequest(new
         {
             message = "The submitted stop order doesn't match this route's stops.",
@@ -202,6 +205,7 @@ public class AdminTransportationController : ControllerBase
     {
         TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
         TransportWriteStatus.OutsideAuthorizedArea => OutsideArea(RoutesController.RouteOutsideAreaMessage),
+        TransportWriteStatus.SimulationRunning => SimulationConflict(),
         TransportWriteStatus.InsufficientStops => Conflict(new
         {
             message = "At least two stops are required to build a route.",
@@ -248,4 +252,10 @@ public class AdminTransportationController : ControllerBase
         TransportWriteStatus.InvalidCoordinates => "One or more stops have invalid routing coordinates.",
         _ => "Routing services are currently unavailable; the previous route geometry was preserved.",
     };
+
+    private ObjectResult SimulationConflict() => Conflict(new
+    {
+        message = "Stop the running simulation before changing this route.",
+        code = "simulation_running",
+    });
 }

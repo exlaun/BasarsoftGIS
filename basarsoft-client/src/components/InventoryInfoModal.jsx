@@ -28,7 +28,7 @@ export default function InventoryInfoModal({ info, onClose }) {
         <h2 className="attr-modal-title">Inventory info</h2>
 
         <dl className="shape-info-meta">
-          <div>
+          <div className="shape-info-wide">
             <dt>Name</dt>
             <dd>{info.name || 'Unnamed'}</dd>
           </div>
@@ -38,21 +38,15 @@ export default function InventoryInfoModal({ info, onClose }) {
           </div>
           <div>
             <dt>Color</dt>
-            <dd>
+            <dd className="shape-info-color">
               <span
-                aria-hidden="true"
+                className="shape-info-color-swatch"
+                role="img"
+                aria-label="Shape color"
                 style={{
-                  display: 'inline-block',
-                  width: 12,
-                  height: 12,
-                  borderRadius: 3,
-                  marginRight: 8,
                   background: color,
-                  border: '1px solid rgba(255,255,255,0.35)',
-                  verticalAlign: 'baseline',
                 }}
               />
-              {color}
             </dd>
           </div>
           <div>
@@ -60,13 +54,13 @@ export default function InventoryInfoModal({ info, onClose }) {
             <dd>{new Date(info.createdAt).toLocaleString()}</dd>
           </div>
           {modifiedText && (
-            <div>
+            <div className="shape-info-wide">
               <dt>Last edited</dt>
               <dd>{modifiedText}</dd>
             </div>
           )}
           {info.wkt && (
-            <div>
+            <div className="shape-info-wide">
               <dt>Coordinates (WKT)</dt>
               <dd>
                 <code

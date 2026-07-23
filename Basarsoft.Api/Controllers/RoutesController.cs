@@ -114,6 +114,7 @@ public class RoutesController : ControllerBase
                 DeleteStatus.NotFound => NotFound(new { message = "Route not found." }),
                 DeleteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
                     new { message = RouteOutsideAreaMessage, code = "outside_authorized_area" }),
+                DeleteStatus.SimulationRunning => SimulationConflict(),
                 _ => NoContent(),
             };
         }
@@ -141,6 +142,7 @@ public class RoutesController : ControllerBase
                 TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
                 TransportWriteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
                     new { message = RouteOutsideAreaMessage, code = "outside_authorized_area" }),
+                TransportWriteStatus.SimulationRunning => SimulationConflict(),
                 TransportWriteStatus.InvalidOrder => BadRequest(new
                 {
                     message = "The submitted stop order doesn't match this route's stops.",
@@ -210,6 +212,7 @@ public class RoutesController : ControllerBase
         TransportWriteStatus.RouteNotFound => NotFound(new { message = "Route not found." }),
         TransportWriteStatus.OutsideAuthorizedArea => StatusCode(StatusCodes.Status403Forbidden,
             new { message = RouteOutsideAreaMessage, code = "outside_authorized_area" }),
+        TransportWriteStatus.SimulationRunning => SimulationConflict(),
         TransportWriteStatus.InsufficientStops => Conflict(new
         {
             message = "At least two stops are required to build a route.",
@@ -239,4 +242,10 @@ public class RoutesController : ControllerBase
         TransportWriteStatus.InvalidCoordinates => "One or more stops have invalid routing coordinates.",
         _ => "Routing services are currently unavailable; the previous route geometry was preserved.",
     };
+
+    private ObjectResult SimulationConflict() => Conflict(new
+    {
+        message = "Stop the running simulation before changing this route.",
+        code = "simulation_running",
+    });
 }

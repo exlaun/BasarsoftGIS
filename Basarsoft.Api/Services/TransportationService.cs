@@ -12,6 +12,7 @@ public class TransportationService : ITransportationService
     private readonly AppDbContext _db;
     private readonly IGeoAuthorizationService _geoAuth;
     private readonly IRoutingService _routing;
+    private readonly IRouteSimulationStateReader _simulationStates;
     private readonly WKTReader _wktReader = new();
 
     // Same storage CRS as every other geometry table: EPSG:4326 (WGS84 lon-lat).
@@ -20,11 +21,13 @@ public class TransportationService : ITransportationService
     public TransportationService(
         AppDbContext db,
         IGeoAuthorizationService geoAuth,
-        IRoutingService routing)
+        IRoutingService routing,
+        IRouteSimulationStateReader simulationStates)
     {
         _db = db;
         _geoAuth = geoAuth;
         _routing = routing;
+        _simulationStates = simulationStates;
     }
 
     public async Task<IReadOnlyList<RouteResponse>> ListRoutesAsync()
@@ -185,6 +188,8 @@ public class TransportationService : ITransportationService
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == routeId);
         if (route is null)
             return StopWriteResult.RouteNotFound;
+        if (_simulationStates.IsRunning(routeId))
+            return StopWriteResult.SimulationRunning;
 
         // Same geographic authorization as every other draw tool: with an assigned area, stops may
         // only be placed inside it.
@@ -259,6 +264,8 @@ public class TransportationService : ITransportationService
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == stop.RouteId, cancellationToken);
         if (route is null)
             return StopWriteResult.RouteNotFound;
+        if (_simulationStates.IsRunning(route.Id))
+            return StopWriteResult.SimulationRunning;
 
         // Movement is authorized at both ends: assigning/shrinking an area must not let an operator
         // pull an existing out-of-area stop into their area, nor push an allowed stop beyond it.
@@ -320,6 +327,8 @@ public class TransportationService : ITransportationService
         // an area-restricted caller must be entitled to the whole route, not just part of it.
         if (await IsRouteOutsideAreaAsync(route, userId))
             return DeleteStatus.OutsideAuthorizedArea;
+        if (_simulationStates.IsRunning(route.Id))
+            return DeleteStatus.SimulationRunning;
 
         // Cascade to the stops in the same save. The module's invariant is that a live stop always has
         // a live route (ListAllStopsAsync relies on it), and the FK is Restrict, so leaving the stops
@@ -349,6 +358,8 @@ public class TransportationService : ITransportationService
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == stop.RouteId, cancellationToken);
         if (route is null)
             return StopOrderResult.RouteNotFound;
+        if (_simulationStates.IsRunning(route.Id))
+            return StopOrderResult.SimulationRunning;
 
         // A stop-level operation is bound by the stop's own position, symmetric with placing one.
         // Checked before the removal and renumbering below, which are committed ahead of the rebuild
@@ -395,6 +406,8 @@ public class TransportationService : ITransportationService
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == routeId);
         if (route is null)
             return StopOrderResult.RouteNotFound;
+        if (_simulationStates.IsRunning(routeId))
+            return StopOrderResult.SimulationRunning;
 
         // Reordering renumbers every stop and rewrites the route's line, so it is route-level.
         if (await IsRouteOutsideAreaAsync(route, userId, cancellationToken))
@@ -443,6 +456,8 @@ public class TransportationService : ITransportationService
         var route = await _db.Routes.FirstOrDefaultAsync(r => r.Id == routeId, cancellationToken);
         if (route is null)
             return RouteBuildResult.RouteNotFound;
+        if (_simulationStates.IsRunning(routeId))
+            return RouteBuildResult.SimulationRunning;
 
         // Rebuilding rewrites the route's line, distance and duration, so it is route-level too. Only
         // this public entry point checks: the internal RebuildRouteCoreAsync is also reached from the

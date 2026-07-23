@@ -23,13 +23,51 @@ public class TransportationServiceTests
     private static TransportationService NewService(
         AppDbContext db,
         IGeoAuthorizationService? geoAuth = null,
-        IRoutingService? routing = null) =>
-        new(db, geoAuth ?? new UnrestrictedGeoAuthorizationService(), routing ?? new RecordingRoutingService());
+        IRoutingService? routing = null,
+        IRouteSimulationStateReader? simulations = null) =>
+        new(
+            db,
+            geoAuth ?? new UnrestrictedGeoAuthorizationService(),
+            routing ?? new RecordingRoutingService(),
+            simulations ?? new InactiveSimulationStateReader());
 
     private static StopCreateRequest StopAt(string wkt, int routeId, string name = "Stop") =>
         new() { Wkt = wkt, Name = name, RouteId = routeId };
 
     private static StopMoveRequest MoveTo(string wkt) => new() { Wkt = wkt };
+
+    private sealed class InactiveSimulationStateReader : IRouteSimulationStateReader
+    {
+        public bool IsRunning(int routeId) => false;
+    }
+
+    private sealed class RunningSimulationStateReader : IRouteSimulationStateReader
+    {
+        public bool IsRunning(int routeId) => true;
+    }
+
+    [Fact]
+    public async Task RunningSimulationBlocksRouteTopologyChanges()
+    {
+        var db = NewDb();
+        var setup = NewService(db);
+        var routeId = await SeedRouteAsync(setup);
+        var stop = await setup.CreateStopAsync(StopAt("POINT(1 1)", routeId), userId: 1);
+        var running = NewService(db, simulations: new RunningSimulationStateReader());
+
+        Assert.Equal(TransportWriteStatus.SimulationRunning,
+            (await running.CreateStopAsync(StopAt("POINT(2 2)", routeId), 1)).Status);
+        Assert.Equal(TransportWriteStatus.SimulationRunning,
+            (await running.MoveStopAsync(stop.Response!.Id, MoveTo("POINT(2 2)"), 1)).Status);
+        Assert.Equal(TransportWriteStatus.SimulationRunning,
+            (await running.DeleteStopAsync(stop.Response.Id, 1)).Status);
+        Assert.Equal(TransportWriteStatus.SimulationRunning,
+            (await running.ReorderStopsAsync(routeId, [stop.Response.Id], 1)).Status);
+        Assert.Equal(TransportWriteStatus.SimulationRunning,
+            (await running.RebuildRouteAsync(routeId, 1)).Status);
+        Assert.Equal(DeleteStatus.SimulationRunning, await running.DeleteRouteAsync(routeId, 1));
+        Assert.Single(await db.Stops.Where(item => item.RouteId == routeId).ToListAsync());
+    }
 
     private static async Task<int> SeedRouteAsync(TransportationService service, string name = "Route A")
     {

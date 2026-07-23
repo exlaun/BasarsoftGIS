@@ -21,7 +21,7 @@ export default function StopInfoModal({ stop, canRelocate = false, onRelocate, o
         <h2 className="attr-modal-title">Stop info</h2>
 
         <dl className="shape-info-meta">
-          <div>
+          <div className="shape-info-wide">
             <dt>Name</dt>
             <dd>{stop.name || 'Unnamed'}</dd>
           </div>
@@ -29,15 +29,10 @@ export default function StopInfoModal({ stop, canRelocate = false, onRelocate, o
             <dt>Route</dt>
             <dd className="poi-info-category">
               <span
-                aria-hidden="true"
-                style={{
-                  display: 'inline-block',
-                  width: 12,
-                  height: 12,
-                  borderRadius: 3,
-                  background: stop.routeColor || '#2563eb',
-                  border: '1px solid rgba(0, 0, 0, 0.25)',
-                }}
+                className="shape-info-color-swatch"
+                style={{ background: stop.routeColor || '#2563eb' }}
+                role="img"
+                aria-label="Route color"
               />
               <span>{stop.routeName || '—'}</span>
             </dd>
@@ -47,19 +42,13 @@ export default function StopInfoModal({ stop, canRelocate = false, onRelocate, o
           {stop.stopColor && (
             <div>
               <dt>Stop color</dt>
-              <dd className="poi-info-category">
+              <dd className="shape-info-color">
                 <span
-                  aria-hidden="true"
-                  style={{
-                    display: 'inline-block',
-                    width: 12,
-                    height: 12,
-                    borderRadius: 3,
-                    background: stop.stopColor,
-                    border: '1px solid rgba(0, 0, 0, 0.25)',
-                  }}
+                  className="shape-info-color-swatch"
+                  style={{ background: stop.stopColor }}
+                  role="img"
+                  aria-label="Stop color"
                 />
-                <span>{stop.stopColor}</span>
               </dd>
             </div>
           )}

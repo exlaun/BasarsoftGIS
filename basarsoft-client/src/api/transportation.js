@@ -26,6 +26,33 @@ export async function buildRoute(id) {
   return data
 }
 
+export async function getRouteSimulation(routeId) {
+  const { data } = await client.get(`/api/routes/${routeId}/simulation`)
+  return data
+}
+
+export async function startRouteSimulation(routeId) {
+  const { data } = await client.post(`/api/routes/${routeId}/simulation/start`)
+  return data
+}
+
+export async function stopRouteSimulation(routeId) {
+  const { data } = await client.post(`/api/routes/${routeId}/simulation/stop`)
+  return data
+}
+
+export async function resumeRouteSimulation(routeId) {
+  const { data } = await client.post(`/api/routes/${routeId}/simulation/resume`)
+  return data
+}
+
+// Clears the run entirely: the server drops it and broadcasts NotStarted, so followers lose the marker
+// and the controls fall back to Start (first-time). Distinct from stop, which freezes a restartable run.
+export async function endRouteSimulation(routeId) {
+  const { data } = await client.post(`/api/routes/${routeId}/simulation/end`)
+  return data
+}
+
 // Soft-deletes the route AND every stop on it (the server cascades). No body comes back.
 export async function deleteRoute(id) {
   await client.delete(`/api/routes/${id}`)

@@ -148,6 +148,33 @@ public class TransportationControllerTests
     }
 
     [Fact]
+    public async Task RunningSimulationTopologyWritesReturn409()
+    {
+        var routeController = WithUser(new RoutesController(
+            new TransportationStub
+            {
+                BuildResult = RouteBuildResult.SimulationRunning,
+            },
+            new PermissionStub(),
+            NullLogger<RoutesController>.Instance));
+        var stopController = WithUser(new StopsController(
+            new TransportationStub
+            {
+                StopResult = StopWriteResult.SimulationRunning,
+            },
+            new PermissionStub(),
+            NullLogger<StopsController>.Instance));
+
+        var build = Assert.IsType<ConflictObjectResult>(
+            (await routeController.Build(7, CancellationToken.None)).Result);
+        var create = Assert.IsType<ConflictObjectResult>(
+            (await stopController.Create(new StopCreateRequest(), CancellationToken.None)).Result);
+
+        Assert.Equal("simulation_running", Property<string>(build.Value!, "code"));
+        Assert.Equal("simulation_running", Property<string>(create.Value!, "code"));
+    }
+
+    [Fact]
     public async Task OperationalAndAdminReorderFailures_ReturnPersistedOrderState()
     {
         var stops = new[] { new StopResponse { Id = 11 }, new StopResponse { Id = 12 } };
