@@ -7,7 +7,10 @@ import VectorSource from 'ol/source/Vector.js'
 import {
   applyRouteVisibility,
   generateDirectionArrows,
+  isRouteArrowVisibleAtResolution,
   isRouteVisible,
+  isStopLabelVisibleAtResolution,
+  isStopVisibleAtResolution,
   parseRouteFeature,
   persistedRoutingMutation,
   reconcileRouteVisibility,
@@ -18,6 +21,17 @@ import {
   removeVehicleFeature,
   upsertRoute,
 } from './transportationMap.js'
+
+test('transport overlays follow the national-map density thresholds', () => {
+  assert.equal(isStopVisibleAtResolution(200, 1, null), true)
+  assert.equal(isStopVisibleAtResolution(200.01, 1, null), false)
+  assert.equal(isStopVisibleAtResolution(600, 1, 1), true)
+  assert.equal(isStopVisibleAtResolution(600.01, 1, 1), false)
+  assert.equal(isStopLabelVisibleAtResolution(19.99), true)
+  assert.equal(isStopLabelVisibleAtResolution(20), false)
+  assert.equal(isRouteArrowVisibleAtResolution(400), true)
+  assert.equal(isRouteArrowVisibleAtResolution(400.01), false)
+})
 
 test('route WKT parses as a projected LineString and invalid geometry is ignored', () => {
   const feature = parseRouteFeature({
@@ -115,6 +129,11 @@ test('direction arrows follow line direction and reverse their rotation', () => 
   assert.equal(reverseArrows.length, 3)
   const difference = Math.abs(forwardArrows[0].get('rotation') - reverseArrows[0].get('rotation'))
   assert.ok(Math.abs(difference - Math.PI) < 0.0001)
+})
+
+test('direction arrows are capped at 24 per route by default', () => {
+  const longRoute = new Feature(new LineString([[0, 0], [1000000, 0]]))
+  assert.equal(generateDirectionArrows(longRoute).length, 24)
 })
 
 test('route overlay synchronization replaces old geometry and arrows after rebuild', () => {

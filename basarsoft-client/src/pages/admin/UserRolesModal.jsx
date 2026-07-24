@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { setUserRoles } from '../../api/admin'
+import ModalCloseButton from '../../components/ModalCloseButton'
 
 // Assign roles to a user: a checkbox per role, pre-ticked for the ones the user already holds. Saving
 // replaces the user's role set. Whatever permissions those roles grant then flow to the user as
@@ -40,8 +41,11 @@ export default function UserRolesModal({ user, allRoles, onClose, onSuccess }) {
     <div className="admin-modal-overlay" role="dialog" aria-modal="true" aria-label="Manage roles">
       <div className="admin-modal">
         <div className="admin-modal-head">
-          <h2 className="admin-modal-title">Roles — {user.username}</h2>
-          <p className="admin-modal-desc">Tick the roles this user should have.</p>
+          <div>
+            <h2 className="admin-modal-title">Roles — {user.username}</h2>
+            <p className="admin-modal-desc">Tick the roles this user should have.</p>
+          </div>
+          <ModalCloseButton onClick={onClose} label="Close user roles dialog" />
         </div>
 
         <div className="admin-modal-body">
@@ -64,9 +68,6 @@ export default function UserRolesModal({ user, allRoles, onClose, onSuccess }) {
         </div>
 
         <div className="admin-modal-foot">
-          <button type="button" className="admin-btn" onClick={onClose}>
-            Cancel
-          </button>
           <button type="button" className="admin-btn admin-btn-primary" onClick={handleSave} disabled={submitting}>
             Save
           </button>

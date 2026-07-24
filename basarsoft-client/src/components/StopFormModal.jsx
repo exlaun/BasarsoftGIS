@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import './AttributeModal.css'
+import ModalCloseButton from './ModalCloseButton'
 import { listRoutes } from '../api/transportation'
 
 // Popup shown after the Add Stop tool places a point. Collects the stop's name and its route, then
-// Save passes them up (Cancel discards the placed point). Modeled on PoiFormModal (name + a dropdown
+// Save passes them up (the X discards the placed point). Modeled on PoiFormModal (name + a dropdown
 // fetched fresh on open). When `lockedRoute` is given — adding a stop to a route already selected in
 // the panel — the route is fixed: the dropdown shows only that route and is disabled.
 export default function StopFormModal({ lockedRoute, onSave, onCancel }) {
@@ -58,7 +59,10 @@ export default function StopFormModal({ lockedRoute, onSave, onCancel }) {
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Stop details">
       <form className="attr-modal" onSubmit={handleSubmit}>
-        <h2 className="attr-modal-title">Stop details</h2>
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">Stop details</h2>
+          <ModalCloseButton onClick={onCancel} label="Close stop details" />
+        </div>
 
         <label className="attr-modal-field">
           <span>Name *</span>
@@ -99,9 +103,6 @@ export default function StopFormModal({ lockedRoute, onSave, onCancel }) {
         )}
 
         <div className="attr-modal-actions">
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onCancel}>
-            Cancel
-          </button>
           <button type="submit" className="attr-modal-btn attr-modal-save" disabled={!canSubmit}>
             Save
           </button>

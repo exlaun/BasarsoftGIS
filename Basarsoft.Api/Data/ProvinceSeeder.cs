@@ -1,79 +1,61 @@
-using System.Text.Json;
 using Basarsoft.Api.Models;
 using Microsoft.EntityFrameworkCore;
-using NetTopologySuite.Geometries;
-using NetTopologySuite.Geometries.Utilities;
-using NetTopologySuite.IO.Converters;
 
 namespace Basarsoft.Api.Data;
 
-// Loads Turkey's 81 province boundaries into tbl_province from Data/provinces.geojson (simplified
-// OSM admin_level=4 data, © OpenStreetMap contributors, ODbL — see geoserver/README.md for the
-// download + mapshaper pipeline that produced the file). Idempotent: a non-empty table means the
-// reference data is already in place and the seeder no-ops, mirroring AdminSeeder's guards.
+// Synchronizes Turkey's exact 81 province boundaries from the validated source-backed catalog.
+// Existing ids are preserved (location-analysis rows reference them); changed boundaries are updated,
+// missing rows are inserted, and unknown extra rows fail fast rather than leaving a partial catalogue.
 public static class ProvinceSeeder
 {
-    private const int Srid = 4326;
-
-    // GeoJSON4STJ converters so System.Text.Json can turn a GeoJSON geometry into an NTS Geometry
-    // (same setup as GeoServerReadService's WFS parsing).
-    private static readonly JsonSerializerOptions GeoJsonOptions = CreateGeoJsonOptions();
-
-    public static async Task SeedAsync(AppDbContext db)
+    public static async Task SeedAsync(
+        AppDbContext db,
+        IProvinceCatalog? catalog = null,
+        CancellationToken cancellationToken = default)
     {
-        if (await db.Provinces.AnyAsync())
-            return;
-
-        var path = Path.Combine(AppContext.BaseDirectory, "Data", "provinces.geojson");
-        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(path));
-
-        if (!doc.RootElement.TryGetProperty("features", out var features) ||
-            features.ValueKind != JsonValueKind.Array)
+        catalog ??= new ProvinceCatalog();
+        var entries = await catalog.GetAsync(cancellationToken);
+        var existing = await db.Provinces.ToListAsync(cancellationToken);
+        var sourceNames = entries.Select(entry => entry.Name).ToHashSet(StringComparer.Ordinal);
+        var unexpected = existing
+            .Where(province => !sourceNames.Contains(province.Name))
+            .Select(province => province.Name)
+            .OrderBy(name => name)
+            .ToArray();
+        if (unexpected.Length > 0)
         {
-            throw new InvalidOperationException("provinces.geojson is not a GeoJSON FeatureCollection.");
+            throw new InvalidOperationException(
+                $"tbl_province contains names absent from provinces.geojson: {string.Join(", ", unexpected)}.");
         }
 
-        foreach (var feature in features.EnumerateArray())
+        var byName = existing.ToDictionary(province => province.Name, StringComparer.Ordinal);
+        var now = DateTime.UtcNow;
+        var changed = false;
+        foreach (var entry in entries)
         {
-            var name = feature.GetProperty("properties").GetProperty("name").GetString();
-            if (string.IsNullOrWhiteSpace(name))
-                continue;
-
-            var geometry = JsonSerializer.Deserialize<Geometry>(
-                feature.GetProperty("geometry").GetRawText(), GeoJsonOptions);
-            if (geometry is null || geometry.IsEmpty)
-                continue;
-
-            // Simplification can leave slightly invalid rings behind; fix them once here so every
-            // later ST_Intersects (analysis clip, matched-POI count) runs on clean geometry.
-            if (!geometry.IsValid)
-                geometry = GeometryFixer.Fix(geometry);
-
-            // The column is geometry(MultiPolygon,4326); most simplified provinces come out as plain
-            // Polygons, so wrap those. GeometryFixer may also return a Polygon for a MultiPolygon input.
-            if (geometry is Polygon polygon)
-                geometry = polygon.Factory.CreateMultiPolygon(new[] { polygon });
-
-            if (geometry is not MultiPolygon)
-                throw new InvalidOperationException($"Province '{name}' is not a (Multi)Polygon.");
-
-            geometry.SRID = Srid;
-
-            db.Provinces.Add(new Province
+            if (!byName.TryGetValue(entry.Name, out var province))
             {
-                Name = name,
-                Geom = geometry,
-                CreatedAt = DateTime.UtcNow,
-            });
+                db.Provinces.Add(new Province
+                {
+                    Name = entry.Name,
+                    Geom = entry.Boundary.Copy(),
+                    CreatedAt = now,
+                    ModifiedDate = now,
+                });
+                changed = true;
+                continue;
+            }
+
+            if (province.Geom.SRID != entry.Boundary.SRID ||
+                !province.Geom.EqualsExact(entry.Boundary))
+            {
+                province.Geom = entry.Boundary.Copy();
+                province.ModifiedDate = now;
+                changed = true;
+            }
         }
 
-        await db.SaveChangesAsync();
-    }
-
-    private static JsonSerializerOptions CreateGeoJsonOptions()
-    {
-        var options = new JsonSerializerOptions();
-        options.Converters.Add(new GeoJsonConverterFactory());
-        return options;
+        if (changed)
+            await db.SaveChangesAsync(cancellationToken);
     }
 }

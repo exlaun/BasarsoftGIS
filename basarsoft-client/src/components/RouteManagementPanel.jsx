@@ -3,6 +3,8 @@ import { clampPage, pageForItem, pageSlice, rebasePage } from '../utils/adaptive
 import useAdaptivePageSize from '../utils/useAdaptivePageSize'
 import { filterAndSortRoutes, routeListState } from '../utils/routeList'
 import { simulationControls, simulationForRoute } from '../utils/routeSimulation'
+import { moveItem } from '../utils/reorderList'
+import ModalCloseButton from './ModalCloseButton'
 import './RouteManagementPanel.css'
 
 const DEFAULT_ROUTE_COLOR = '#2563eb'
@@ -10,11 +12,6 @@ const DEFAULT_ROUTE_COLOR = '#2563eb'
 // when the page reloads, matching the Drawings panel instead of persisting a surprising old layout.
 const INFO_COLUMN_PX = 32
 const MIN_COLUMN_PX = 46
-const STATUS_FILTERS = [
-  { key: 'ready', label: 'Ready' },
-  { key: 'stale', label: 'Stale' },
-  { key: 'not-built', label: 'Not built' },
-]
 
 const iconProps = {
   width: 16,
@@ -56,7 +53,7 @@ export default function RouteManagementPanel({
   onBuildRoute,
   canControlSimulation,
   simulationStates,
-  followedRouteIds,
+  cameraFollowRouteId,
   simulationBusyRouteId,
   onSimulationAction,
   onFollowRoute,
@@ -67,11 +64,6 @@ export default function RouteManagementPanel({
   const [dragIndex, setDragIndex] = useState(null)
   const [overIndex, setOverIndex] = useState(null)
   const [query, setQuery] = useState('')
-  const [statuses, setStatuses] = useState({
-    ready: true,
-    stale: true,
-    'not-built': true,
-  })
   const [sortBy, setSortBy] = useState('createdAt')
   const [sortDir, setSortDir] = useState('desc')
   const [page, setPage] = useState(1)
@@ -82,21 +74,24 @@ export default function RouteManagementPanel({
     created: 0.23,
   })
   const [availableColumnWidth, setAvailableColumnWidth] = useState(380)
+  const listSpaceRef = useRef(null)
   const listWrapRef = useRef(null)
   const tableHeaderRef = useRef(null)
   const rowRef = useRef(null)
 
   const filteredRoutes = useMemo(
-    () => filterAndSortRoutes(routes, { query, statuses, sortBy, sortDir }),
-    [routes, query, statuses, sortBy, sortDir],
+    () => filterAndSortRoutes(routes, { query, sortBy, sortDir }),
+    [routes, query, sortBy, sortDir],
   )
   const pageSize = useAdaptivePageSize({
-    containerRef: listWrapRef,
+    containerRef: listSpaceRef,
     headerRef: tableHeaderRef,
     rowRef,
-    fallbackRowHeight: 39,
-    rowGap: 0,
-    measureKey: filteredRoutes.length,
+    fallbackRowHeight: 33,
+    // Each route item is separated by a one-pixel border. Include it in the capacity
+    // calculation so a page never creates a scrollbar from the separators alone.
+    rowGap: 1,
+    measureKey: `${filteredRoutes.length}:${page}:${selectedRouteId ?? ''}`,
   })
   const previousPageSizeRef = useRef(pageSize)
 
@@ -138,6 +133,10 @@ export default function RouteManagementPanel({
 
   const totalPages = Math.max(1, Math.ceil(filteredRoutes.length / pageSize))
   const visibleRoutes = pageSlice(filteredRoutes, page, pageSize)
+  // Measure the expanded route as the page's representative item. Its management controls and
+  // stops must fit in the fixed page viewport now that the list itself no longer scrolls.
+  const measuredRouteId = visibleRoutes.find((route) => route.id === selectedRouteId)?.id
+    ?? visibleRoutes[0]?.id
 
   const changePage = (nextPage) => {
     const clamped = clampPage(nextPage, filteredRoutes.length, pageSize)
@@ -194,21 +193,14 @@ export default function RouteManagementPanel({
     document.body.style.userSelect = 'none'
   }
 
-  const toggleStatus = (key) => {
-    setStatuses((current) => ({ ...current, [key]: !current[key] }))
-    setPage(1)
-  }
-
   const resetDrag = () => {
     setDragIndex(null)
     setOverIndex(null)
   }
 
   const handleDrop = () => {
-    if (dragIndex != null && overIndex != null && dragIndex !== overIndex) {
-      const reordered = [...stops]
-      const [moved] = reordered.splice(dragIndex, 1)
-      reordered.splice(overIndex, 0, moved)
+    const reordered = moveItem(stops, dragIndex, overIndex)
+    if (reordered) {
       onReorderStops(reordered.map((stop) => stop.id))
     }
     resetDrag()
@@ -256,16 +248,7 @@ export default function RouteManagementPanel({
     >
       <div className="route-panel-head">
         <h2 className="route-panel-title">Route Management</h2>
-        <button
-          type="button"
-          className="route-panel-close"
-          onClick={onClose}
-          aria-label="Close route management"
-        >
-          <svg {...iconProps}>
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
+        <ModalCloseButton onClick={onClose} label="Close route management" />
       </div>
 
       {canManage && (
@@ -285,21 +268,9 @@ export default function RouteManagementPanel({
         }}
       />
 
-      <div className="route-panel-filters" aria-label="Route state filters">
-        {STATUS_FILTERS.map((filter) => (
-          <label key={filter.key} className="route-panel-filter">
-            <input
-              type="checkbox"
-              checked={statuses[filter.key]}
-              onChange={() => toggleStatus(filter.key)}
-            />
-            <span>{filter.label}</span>
-          </label>
-        ))}
-      </div>
-
-      <div className="route-list-wrap" ref={listWrapRef} style={routeColumnStyle}>
-        <div className="route-table-header" ref={tableHeaderRef}>
+      <div className="route-list-space" ref={listSpaceRef}>
+        <div className="route-list-wrap" ref={listWrapRef} style={routeColumnStyle}>
+          <div className="route-table-header" ref={tableHeaderRef}>
           {sortHeader('name', 'Name', 'route-table-name', ['name', 'state'])}
           {sortHeader('state', 'State', '', ['state', 'stops'])}
           {sortHeader('stopCount', 'Stops', '', ['stops', 'created'])}
@@ -307,7 +278,7 @@ export default function RouteManagementPanel({
           <div aria-label="Info" />
         </div>
 
-        {loading ? (
+          {loading ? (
           <p className="route-panel-empty">Loading routes…</p>
         ) : routes.length === 0 ? (
           <p className="route-panel-empty">
@@ -317,17 +288,17 @@ export default function RouteManagementPanel({
           <p className="route-panel-empty">No routes match the current filters.</p>
         ) : (
           <ul className="route-list">
-            {visibleRoutes.map((route, index) => {
+            {visibleRoutes.map((route) => {
               const expanded = route.id === selectedRouteId
               const routeColor = route.color || DEFAULT_ROUTE_COLOR
               const visible = visibility?.[route.id] !== false
               const routeState = routeListState(route)
               const simulation = simulationForRoute(simulationStates, route.id)
-              const followed = followedRouteIds?.has(route.id) ?? false
+              const cameraFollowed = cameraFollowRouteId === route.id
               const simulationUi = simulationControls({
                 simulation,
                 canControl: canControlSimulation,
-                followed,
+                cameraFollowed,
                 route,
               })
               const created = route.createdAt
@@ -335,9 +306,12 @@ export default function RouteManagementPanel({
                 : '—'
 
               return (
-                <li key={route.id} className="route-item">
+                <li
+                  key={route.id}
+                  ref={route.id === measuredRouteId ? rowRef : undefined}
+                  className="route-item"
+                >
                   <div
-                    ref={index === 0 ? rowRef : undefined}
                     className={`route-row${expanded ? ' is-selected' : ''}`}
                     onClick={() => onSelectRoute(route.id)}
                     role="button"
@@ -574,7 +548,8 @@ export default function RouteManagementPanel({
               )
             })}
           </ul>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="route-panel-foot">

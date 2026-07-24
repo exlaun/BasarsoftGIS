@@ -29,6 +29,13 @@
   font-weight: 700;
 }
 
+.attr-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .attr-modal-field {
   display: flex;
   flex-direction: column;
@@ -116,15 +123,6 @@
 .attr-modal-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-.attr-modal-cancel {
-  background: transparent;
-  color: var(--bar-text);
-}
-
-.attr-modal-cancel:hover {
-  background: var(--bar-hover);
 }
 
 .attr-modal-save {

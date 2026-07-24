@@ -70,8 +70,7 @@ public class GeoAuthorizationService : IGeoAuthorizationService
         await ClearAsync(g => g.RoleId == roleId);
 
     // The boundary a user's drawings are checked against. Own area first (it OVERRIDES role areas —
-    // the rule agreed with the mentor); otherwise the union of the user's roles' areas, which may
-    // come out of the union operation as a MultiPolygon (in-memory only, never stored).
+    // the rule agreed with the mentor); otherwise the union of the user's roles' areas.
     public async Task<Geometry?> GetEffectiveAreaAsync(int userId)
     {
         var own = await _db.GeoAuthorizations
@@ -97,14 +96,14 @@ public class GeoAuthorizationService : IGeoAuthorizationService
 
     // ---- helpers ----
 
-    // A redraw replaces the live row's polygon (and revives a deactivated one); the first assignment
+    // A redraw replaces the live row's multipolygon (and revives a deactivated one); the first assignment
     // inserts. The partial unique index on user_id/role_id guarantees at most one live row per target.
     private async Task<GeoAreaWriteStatus> UpsertAsync(
         string wkt,
         System.Linq.Expressions.Expression<Func<GeoAuthorization, bool>> match,
         Func<Geometry, GeoAuthorization> create)
     {
-        var geom = ParsePolygon(wkt);
+        var geom = ParseArea(wkt);
         if (geom is null)
             return GeoAreaWriteStatus.InvalidGeometry;
 
@@ -134,9 +133,10 @@ public class GeoAuthorizationService : IGeoAuthorizationService
         return true;
     }
 
-    // Same guard set as geometry saves: parseable WKT, non-empty, exactly a POLYGON, and topologically
-    // valid (a self-intersecting boundary would make Covers checks meaningless).
-    private Geometry? ParsePolygon(string wkt)
+    // Same guard set as geometry saves: parseable WKT, non-empty, Polygon/MultiPolygon, and
+    // topologically valid (a self-intersecting boundary would make Covers checks meaningless).
+    // Plain polygons are wrapped so the PostGIS typmod always receives a MultiPolygon.
+    private Geometry? ParseArea(string wkt)
     {
         Geometry geom;
         try
@@ -148,11 +148,48 @@ public class GeoAuthorizationService : IGeoAuthorizationService
             return null;
         }
 
-        if (geom is null || geom.IsEmpty || geom.OgcGeometryType != OgcGeometryType.Polygon || !geom.IsValid)
+        if (geom is null || geom.IsEmpty)
             return null;
 
-        geom.SRID = Srid;
-        return geom;
+        MultiPolygon normalized;
+        if (geom is Polygon polygon)
+        {
+            if (!polygon.IsValid)
+                return null;
+            normalized = polygon.Factory.CreateMultiPolygon([polygon]);
+        }
+        else if (geom is MultiPolygon multiPolygon)
+        {
+            // OpenLayers edits disconnected components independently. If a user draws components
+            // that touch or overlap, their raw MultiPolygon is OGC-invalid even though every
+            // component is a valid polygon. Dissolve those components into their polygonal union
+            // instead of making the form fail with a mysterious 400. A self-intersecting component
+            // remains invalid and is still rejected.
+            var components = multiPolygon.Geometries.Cast<Polygon>().ToArray();
+            if (components.Length == 0 || components.Any(component => !component.IsValid))
+                return null;
+            Geometry dissolved = components[0].Copy();
+            foreach (var component in components.Skip(1))
+                dissolved = dissolved.Union(component);
+            if (dissolved.IsEmpty || !dissolved.IsValid)
+                return null;
+            normalized = dissolved switch
+            {
+                Polygon dissolvedPolygon =>
+                    dissolvedPolygon.Factory.CreateMultiPolygon([dissolvedPolygon]),
+                MultiPolygon dissolvedMultiPolygon => dissolvedMultiPolygon,
+                _ => null!,
+            };
+            if (normalized is null)
+                return null;
+        }
+        else
+        {
+            return null;
+        }
+
+        normalized.SRID = Srid;
+        return normalized;
     }
 
     private static GeoAreaResponse ToResponse(GeoAuthorization? row) => new()

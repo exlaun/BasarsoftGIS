@@ -61,12 +61,12 @@ public class GeometryService : IGeometryService
                 saved = await AddAsync(_db.Lines, geom, request, userId);
                 break;
             case "polygon" when geom.OgcGeometryType == OgcGeometryType.Polygon:
-                // Draw-time polygon save keeps the older "inside" result: count existing rows before
-                // inserting this polygon, otherwise it would count itself.
-                var containedCount = await CountContainedAsync(geom, userId);
+                // Count existing rows before inserting this polygon, otherwise the new polygon would
+                // count itself. Any inventory that touches or crosses the drawn area counts.
+                var intersectingCount = await CountIntersectingAsync(geom, userId);
                 saved = await AddAsync(_db.Polygons, geom, request, userId);
                 if (saved is not null)
-                    saved.IntersectionCount = containedCount;
+                    saved.IntersectionCount = intersectingCount;
                 break;
             default:
                 saved = null; // unknown type or WKT geometry doesn't match the table
@@ -152,14 +152,13 @@ public class GeometryService : IGeometryService
         return DeleteStatus.Success;
     }
 
-    // Counts the caller's existing shapes that fall fully INSIDE a polygon being saved. This is
-    // intentionally stricter than the Analysis tool below: .Within() maps to ST_Within, so a shape
-    // that only clips or touches the polygon edge is not counted.
-    private async Task<int> CountContainedAsync(Geometry area, int userId)
+    // Counts the caller's existing shapes that touch or cross a polygon being saved. The count uses
+    // Intersects so an inventory is included even when only part of it overlaps the drawn area.
+    private async Task<int> CountIntersectingAsync(Geometry area, int userId)
     {
-        var points = await _db.Points.CountAsync(x => x.UserId == userId && x.Geom.Within(area));
-        var lines = await _db.Lines.CountAsync(x => x.UserId == userId && x.Geom.Within(area));
-        var polygons = await _db.Polygons.CountAsync(x => x.UserId == userId && x.Geom.Within(area));
+        var points = await _db.Points.CountAsync(x => x.UserId == userId && x.Geom.Intersects(area));
+        var lines = await _db.Lines.CountAsync(x => x.UserId == userId && x.Geom.Intersects(area));
+        var polygons = await _db.Polygons.CountAsync(x => x.UserId == userId && x.Geom.Intersects(area));
         return points + lines + polygons;
     }
 
@@ -214,12 +213,12 @@ public class GeometryService : IGeometryService
         return GeometryUpdateResult.Ok(ToResponse(entity));
     }
 
-    // Counts the caller's shapes that INTERSECT `area` (`.Intersects()` -> PostGIS ST_Intersects). Per
-    // the analysis-tool spec a shape counts even if it only slightly overlaps the polygon; full
-    // containment is NOT required. This deliberately differs from saved-polygon counting above, which
-    // uses ST_Within. The three counts run sequentially because a single DbContext is not thread-safe
-    // (no Task.WhenAll). Scope is the caller's own shapes, matching the per-user isolation used
-    // everywhere else; widen the UserId filter here for a shared, cross-user inventory.
+    // Counts features that INTERSECT `area` (`.Intersects()` -> PostGIS ST_Intersects). Private
+    // drawings remain scoped to the caller; POIs, stops, and routes are shared map catalogues, so all
+    // visible rows participate. A route without built geometry cannot intersect and is skipped. Per
+    // the analysis-tool spec even a slight overlap counts; full containment is NOT required. This
+    // deliberately differs from saved-polygon counting above, which uses ST_Within. Counts run
+    // sequentially because a single DbContext is not thread-safe (no Task.WhenAll).
     public async Task<AnalysisResponse?> AnalyzeAsync(string wkt, int userId)
     {
         Geometry area;
@@ -240,13 +239,20 @@ public class GeometryService : IGeometryService
         var points = await _db.Points.CountAsync(x => x.UserId == userId && x.Geom.Intersects(area));
         var lines = await _db.Lines.CountAsync(x => x.UserId == userId && x.Geom.Intersects(area));
         var polygons = await _db.Polygons.CountAsync(x => x.UserId == userId && x.Geom.Intersects(area));
+        var pois = await _db.Pois.CountAsync(x => x.Geom.Intersects(area));
+        var stops = await _db.Stops.CountAsync(x => x.Geom.Intersects(area));
+        var routes = await _db.Routes.CountAsync(x =>
+            x.Geometry != null && x.Geometry.Intersects(area));
 
         return new AnalysisResponse
         {
             Points = points,
             Lines = lines,
             Polygons = polygons,
-            Total = points + lines + polygons,
+            Pois = pois,
+            Stops = stops,
+            Routes = routes,
+            Total = points + lines + polygons + pois + stops + routes,
         };
     }
 

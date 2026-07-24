@@ -113,7 +113,9 @@ export function AuthProvider({ children }) {
 
   const value = useMemo(
     () => ({
-      username: auth?.username ?? null,
+      // /me is authoritative after a profile refresh, so a username changed by an administrator is
+      // reflected in the admin sidebar instead of leaving the original login name cached forever.
+      username: profile?.username ?? auth?.username ?? null,
       expiresAt: auth?.expiresAt ?? null,
       isAuthenticated: Boolean(auth?.token),
       // The caller's users.id (from /api/auth/me) — lets the map decide ownership client-side,

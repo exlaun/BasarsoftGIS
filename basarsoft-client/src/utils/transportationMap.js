@@ -7,6 +7,27 @@ const format = new WKT()
 const DATA_PROJECTION = 'EPSG:4326'
 const MAP_PROJECTION = 'EPSG:3857'
 
+export const ORDINARY_STOP_MAX_RESOLUTION = 200
+export const SELECTED_ROUTE_STOP_MAX_RESOLUTION = 600
+export const STOP_LABEL_MAX_RESOLUTION = 20
+export const ROUTE_ARROW_MAX_RESOLUTION = 400
+export const MAX_DIRECTION_ARROWS_PER_ROUTE = 24
+
+export function isStopVisibleAtResolution(resolution, routeId, selectedRouteId) {
+  const maximum = routeId === selectedRouteId
+    ? SELECTED_ROUTE_STOP_MAX_RESOLUTION
+    : ORDINARY_STOP_MAX_RESOLUTION
+  return Number.isFinite(resolution) && resolution <= maximum
+}
+
+export function isStopLabelVisibleAtResolution(resolution) {
+  return Number.isFinite(resolution) && resolution < STOP_LABEL_MAX_RESOLUTION
+}
+
+export function isRouteArrowVisibleAtResolution(resolution) {
+  return Number.isFinite(resolution) && resolution <= ROUTE_ARROW_MAX_RESOLUTION
+}
+
 export function isRouteVisible(visibility, routeId) {
   return visibility?.[routeId] !== false
 }
@@ -47,7 +68,10 @@ export function parseRouteFeature(route, visibility = {}) {
 // Sample arrows approximately every kilometre, with one centered arrow for short routes and a hard
 // cap for long/intercity routes. Bearings use a small local tangent so curves follow the road rather
 // than the route's overall start/end direction.
-export function generateDirectionArrows(lineFeature, { minimumSpacing = 1000, maximumArrows = 50 } = {}) {
+export function generateDirectionArrows(
+  lineFeature,
+  { minimumSpacing = 1000, maximumArrows = MAX_DIRECTION_ARROWS_PER_ROUTE } = {},
+) {
   const geometry = lineFeature?.getGeometry()
   if (!geometry || geometry.getType() !== 'LineString') return []
   const length = geometry.getLength()

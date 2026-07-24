@@ -48,6 +48,35 @@ public class GeometryValidityTests
         Assert.Equal(UpdateStatus.Success, result.Status);
     }
 
+    [Fact]
+    public async Task Create_PolygonCountsInventoriesThatCrossItsBoundary()
+    {
+        var service = NewService();
+
+        var line = await service.CreateAsync(
+            "line",
+            new GeometryCreateRequest
+            {
+                Wkt = "LINESTRING(-1 1, 3 1)",
+                Name = "crossing line",
+            },
+            userId: 1);
+
+        Assert.Equal(UpdateStatus.Success, line.Status);
+
+        var polygon = await service.CreateAsync(
+            "polygon",
+            new GeometryCreateRequest
+            {
+                Wkt = "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))",
+                Name = "analysis area",
+            },
+            userId: 1);
+
+        Assert.Equal(UpdateStatus.Success, polygon.Status);
+        Assert.Equal(1, polygon.Response?.IntersectionCount);
+    }
+
     // Geo-authorization stub: no area assigned, so drawing is unrestricted. Only
     // GetEffectiveAreaAsync is ever consulted by GeometryService.
     private sealed class UnrestrictedGeoAuthorizationService : IGeoAuthorizationService

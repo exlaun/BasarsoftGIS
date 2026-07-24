@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { simulationControls, formatSimulationProgress } from '../utils/routeSimulation'
 import './AttributeModal.css'
 import './ShapeInfoModal.css'
+import ModalCloseButton from './ModalCloseButton'
 
 const DEFAULT_ROUTE_COLOR = '#2563eb'
 
@@ -12,7 +13,7 @@ const DEFAULT_ROUTE_COLOR = '#2563eb'
 export default function RouteInfoModal({
   route,
   simulation,
-  followed = false,
+  cameraFollowed = false,
   canControl = false,
   busy = false,
   onSimulationAction,
@@ -31,10 +32,10 @@ export default function RouteInfoModal({
   if (!route) return null
 
   const color = route.color || DEFAULT_ROUTE_COLOR
-  const state = route.isGeometryStale ? 'Stale' : route.geometryWkt ? 'Ready' : 'Not built'
+  const state = route.isGeometryStale ? 'Needs rebuild' : route.geometryWkt ? 'Built' : 'Not built'
   const length = route.distanceMeters != null ? `${(route.distanceMeters / 1000).toFixed(1)} km` : '—'
   const duration = route.durationSeconds != null ? `${Math.round(route.durationSeconds / 60)} min` : '—'
-  const controls = simulationControls({ simulation, canControl, followed, route })
+  const controls = simulationControls({ simulation, canControl, cameraFollowed, route })
   const started = controls.status !== 'NotStarted'
 
   const actionClass = (variant) =>
@@ -43,8 +44,11 @@ export default function RouteInfoModal({
 
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Route info">
-      <div className="attr-modal route-info-modal">
-        <h2 className="attr-modal-title">Route info</h2>
+      <div className="attr-modal info-modal route-info-modal">
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">Route info</h2>
+          <ModalCloseButton onClick={onClose} label="Close route info" />
+        </div>
 
         <dl className="shape-info-meta">
           <div className="shape-info-wide">
@@ -96,12 +100,12 @@ export default function RouteInfoModal({
         {(controls.actions.length > 0 || controls.showFollow) && (
           <section className="route-info-control-section" aria-label="Simulation controls">
             <span className="route-info-section-title">Simulation controls</span>
-            <div className="attr-modal-actions route-info-actions">
+            <div className={`attr-modal-actions route-info-actions${controls.actions.length === 1 && controls.actions[0].action === 'end' ? ' is-terminal' : ''}`}>
               {controls.actions.map((action) => (
                 <button
                   key={action.action}
                   type="button"
-                  className={actionClass(action.variant)}
+                  className={`${actionClass(action.variant)} is-${action.action}`}
                   disabled={action.disabled || busy}
                   onClick={() => onSimulationAction(action.action, route.id)}
                 >
@@ -111,7 +115,7 @@ export default function RouteInfoModal({
               {controls.showFollow && (
                 <button
                   type="button"
-                  className="attr-modal-btn"
+                  className="attr-modal-btn is-follow"
                   disabled={controls.followDisabled || busy}
                   onClick={() => (controls.followAction === 'unfollow' ? onUnfollow(route.id) : onFollow(route.id))}
                 >
@@ -121,11 +125,6 @@ export default function RouteInfoModal({
             </div>
           </section>
         )}
-        <div className="attr-modal-actions route-info-close-row">
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onClose}>
-            Close
-          </button>
-        </div>
       </div>
     </div>
   )

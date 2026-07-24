@@ -6,7 +6,7 @@ import OSM from 'ol/source/OSM'
 import VectorLayer from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
 import Draw from 'ol/interaction/Draw'
-import WKT from 'ol/format/WKT'
+import Modify from 'ol/interaction/Modify'
 import { fromLonLat } from 'ol/proj'
 import { Style, Fill, Stroke } from 'ol/style'
 import 'ol/ol.css'
@@ -18,13 +18,14 @@ import {
   setRoleGeoArea,
   clearRoleGeoArea,
 } from '../../api/admin'
+import {
+  readAuthorizationAreaFeatures,
+  writeAuthorizationAreaWkt,
+} from './geoAuthorizationArea'
+import ModalCloseButton from '../../components/ModalCloseButton'
 
 // Same center as the main map; zoomed out so all of Turkey fits in the small modal map.
 const TURKEY_CENTER = [35.2433, 38.9637]
-const MAP_PROJ = 'EPSG:3857'
-const DATA_PROJ = 'EPSG:4326'
-
-const wkt = new WKT()
 
 // Green dashed = authorization boundary, matching how the restricted user sees it on the main map.
 const AREA_STYLE = new Style({
@@ -32,14 +33,18 @@ const AREA_STYLE = new Style({
   stroke: new Stroke({ color: '#16a34a', width: 2, lineDash: [4, 8] }),
 })
 
-// Assign a geographic authorization area to a user or role: draw a polygon on a
-// small Turkey-zoomed map; starting a new drawing replaces the previous polygon. The owner of the
-// area may then only draw shapes inside it on the main map.
+// Assign a geographic authorization area to a user or role on a small Turkey-zoomed map. Separate
+// polygons remain separate editable components and are serialized together as a MultiPolygon.
 export default function GeoAuthModal({ kind, targetId, targetLabel, onClose, onSuccess }) {
   const mapElRef = useRef(null)
   const mapRef = useRef(null)
+  const sourceRef = useRef(null)
+  const drawRef = useRef(null)
+  const modifyRef = useRef(null)
   const [pendingWkt, setPendingWkt] = useState(null)
   const [hasExisting, setHasExisting] = useState(false)
+  const [componentCount, setComponentCount] = useState(0)
+  const [toolMode, setToolMode] = useState('draw')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -67,24 +72,33 @@ export default function GeoAuthModal({ kind, targetId, targetLabel, onClose, onS
       view: new View({ center: fromLonLat(TURKEY_CENTER), zoom: 5.6 }),
     })
     mapRef.current = map
+    sourceRef.current = source
 
     // The modal's layout settles after mount; without a deferred updateSize the canvas can size to 0.
     const sizeTimer = window.setTimeout(() => map.updateSize(), 0)
 
     const draw = new Draw({ source, type: 'Polygon' })
-    // One area at a time: a new drawing wipes the previous polygon (saved or pending).
-    draw.on('drawstart', () => {
-      source.clear()
-      setPendingWkt(null)
-    })
+    const modify = new Modify({ source })
+    draw.setActive(false)
+    modify.setActive(false)
+    drawRef.current = draw
+    modifyRef.current = modify
+
+    // Draw appends a new disconnected component. drawend fires before OpenLayers inserts the new
+    // feature into the source, so include the event feature explicitly when serializing.
     draw.on('drawend', (event) => {
-      const geomWkt = wkt.writeGeometry(event.feature.getGeometry(), {
-        featureProjection: MAP_PROJ,
-        dataProjection: DATA_PROJ,
-      })
-      setPendingWkt(geomWkt)
+      const current = source.getFeatures()
+      const next = current.includes(event.feature) ? current : [...current, event.feature]
+      setPendingWkt(writeAuthorizationAreaWkt(next))
+      setComponentCount(next.length)
+      setError('')
+    })
+    modify.on('modifyend', () => {
+      setPendingWkt(writeAuthorizationAreaWkt(source.getFeatures()))
+      setError('')
     })
     map.addInteraction(draw)
+    map.addInteraction(modify)
 
     // Show the currently assigned area (if any) and frame the view on it.
     let cancelled = false
@@ -93,22 +107,22 @@ export default function GeoAuthModal({ kind, targetId, targetLabel, onClose, onS
       .then((area) => {
         if (cancelled) return
         if (area?.wkt) {
-          const feature = wkt.readFeature(area.wkt, {
-            dataProjection: DATA_PROJ,
-            featureProjection: MAP_PROJ,
-          })
-          source.addFeature(feature)
-          map.getView().fit(feature.getGeometry().getExtent(), {
+          const features = readAuthorizationAreaFeatures(area.wkt)
+          source.addFeatures(features)
+          map.getView().fit(source.getExtent(), {
             padding: [30, 30, 30, 30],
             maxZoom: 9,
           })
           setHasExisting(true)
+          setComponentCount(features.length)
         }
+        draw.setActive(true)
         setLoading(false)
       })
       .catch(() => {
         if (cancelled) return
         setError('Could not load the current area.')
+        draw.setActive(true)
         setLoading(false)
       })
 
@@ -117,8 +131,42 @@ export default function GeoAuthModal({ kind, targetId, targetLabel, onClose, onS
       window.clearTimeout(sizeTimer)
       map.setTarget(undefined)
       mapRef.current = null
+      sourceRef.current = null
+      drawRef.current = null
+      modifyRef.current = null
     }
   }, [isUser, targetId])
+
+  const selectTool = (mode) => {
+    setToolMode(mode)
+    drawRef.current?.setActive(mode === 'draw')
+    modifyRef.current?.setActive(mode === 'edit')
+  }
+
+  const handleRemoveLast = () => {
+    const source = sourceRef.current
+    if (!source) return
+
+    const features = source.getFeatures()
+    const last = features.at(-1)
+    if (!last) return
+
+    source.removeFeature(last)
+    const remaining = source.getFeatures()
+    setPendingWkt(writeAuthorizationAreaWkt(remaining))
+    setComponentCount(remaining.length)
+    setError('')
+  }
+
+  const handleClearDrawing = () => {
+    const source = sourceRef.current
+    if (!source) return
+
+    source.clear()
+    setPendingWkt(null)
+    setComponentCount(0)
+    setError('')
+  }
 
   const handleSave = async () => {
     if (!pendingWkt) return
@@ -149,23 +197,71 @@ export default function GeoAuthModal({ kind, targetId, targetLabel, onClose, onS
     <div className="admin-modal-overlay" role="dialog" aria-modal="true" aria-label="Manage geographic area">
       <div className="admin-modal admin-modal-wide">
         <div className="admin-modal-head">
-          <h2 className="admin-modal-title">Geographic Access — {targetLabel}</h2>
-          <p className="admin-modal-desc">
-            Draw a polygon; {isUser ? 'this user' : 'users holding this role'} will only be able to draw
-            shapes inside it. Starting a new drawing replaces the previous area.
-          </p>
+          <div>
+            <h2 className="admin-modal-title">Geographic Access — {targetLabel}</h2>
+            <p className="admin-modal-desc">
+              Add one or more area components; {isUser ? 'this user' : 'users holding this role'} may
+              only make changes inside their combined area. Disconnected components are preserved.
+            </p>
+          </div>
+          <ModalCloseButton onClick={onClose} label="Close geographic access dialog" />
         </div>
 
         <div className="admin-modal-body">
-          <div ref={mapElRef} className="admin-geo-map" />
+          <div className="admin-geo-tools" role="toolbar" aria-label="Geographic area tools">
+            <button
+              type="button"
+              className={`admin-btn${toolMode === 'draw' ? ' admin-btn-primary' : ''}`}
+              aria-pressed={toolMode === 'draw'}
+              onClick={() => selectTool('draw')}
+              disabled={loading || submitting}
+            >
+              Add component
+            </button>
+            <button
+              type="button"
+              className={`admin-btn${toolMode === 'edit' ? ' admin-btn-primary' : ''}`}
+              aria-pressed={toolMode === 'edit'}
+              onClick={() => selectTool('edit')}
+              disabled={loading || submitting || componentCount === 0}
+            >
+              Edit boundaries
+            </button>
+            <button
+              type="button"
+              className="admin-btn"
+              onClick={handleRemoveLast}
+              disabled={loading || submitting || componentCount === 0}
+            >
+              Remove last
+            </button>
+            <button
+              type="button"
+              className="admin-btn admin-btn-danger"
+              onClick={handleClearDrawing}
+              disabled={loading || submitting || componentCount === 0}
+            >
+              Clear map
+            </button>
+            <span className="admin-geo-count" role="status">
+              {componentCount} {componentCount === 1 ? 'component' : 'components'}
+            </span>
+          </div>
+          <div
+            ref={mapElRef}
+            className="admin-geo-map"
+            role="region"
+            aria-label="Authorization area drawing map"
+          />
+          <p className="admin-geo-hint">
+            Add component appends a polygon. Edit boundaries moves vertices on any component. To
+            replace everything, clear the map and draw again.
+          </p>
           {loading && <p className="admin-loading">Loading current area…</p>}
           {error && <p className="admin-error">{error}</p>}
         </div>
 
         <div className="admin-modal-foot">
-          <button type="button" className="admin-btn" onClick={onClose}>
-            Cancel
-          </button>
           {hasExisting && (
             <button type="button" className="admin-btn admin-btn-danger" onClick={handleRemove} disabled={submitting}>
               Remove area

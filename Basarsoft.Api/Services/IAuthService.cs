@@ -7,8 +7,9 @@ public interface IAuthService
     // Returns the auth payload on success, or null if the username is already taken.
     Task<AuthResponse?> RegisterAsync(RegisterRequest request);
 
-    // Returns the auth payload on success, or null if the credentials are invalid.
-    Task<AuthResponse?> LoginAsync(LoginRequest request);
+    // Returns a distinct disabled result so the login screen can explain that an administrator must
+    // reactivate the account; unknown users and wrong passwords remain InvalidCredentials.
+    Task<LoginResult> LoginAsync(LoginRequest request);
 
     // True if a user with this username exists (step 1 of the forgot-password flow).
     Task<bool> UserExistsAsync(string username);

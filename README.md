@@ -15,14 +15,14 @@ GeoServer WFS/WMS rendering, and weighted location analysis over all 81 Turkish 
 
 | Data | Earlier demo | Nationwide demo |
 |---|---:|---:|
-| Accounts | 6 | **17** |
-| Private shapes | 62 | **164** |
-| Shared POIs | 36 | **139** |
-| POI categories | 19 | **42** |
-| Authorization areas | 4 | **15** |
-| Transportation routes | — | **8** |
-| Transportation stops | — | **56** |
-| Provinces represented | about 7 | **all 81** |
+| Accounts | 17 | **19** |
+| Private shapes | 164 | **328** |
+| Shared POIs | 139 | **324** |
+| POI categories | 42 | **42** |
+| Authorization areas | 15 | **17** |
+| Transportation routes | 8 | **30** |
+| Transportation stops | 56 | **215** |
+| Province reference | 81 boundaries | **81 boundaries + 81 capitals** |
 
 The manifest is deterministic and validated before and after insertion. `seed-demo` resets the
 application sequences, so the account ids below are stable. Every account uses **`secret123`**.
@@ -49,10 +49,14 @@ This common password is for a local demonstration only.
 | 15 | `gaziantep_operator` | Operator | Gaziantep; transportation management, POI read-only |
 | 16 | `trabzon_operator` | Operator | Trabzon; transportation management, POI read-only |
 | 17 | `viewer` | Viewer | Permission-free, genuinely read-only |
+| 18 | `ankara_operator` | Operator | Ankara; transportation management, POI read-only |
+| 19 | `izmir_operator` | Operator | İzmir; transportation management, POI read-only |
 
-The five roles remain Admin, Regional Manager, Editor, Operator, and Viewer. There are 15
-authorization areas: one role area, six manager overrides, four editor areas, and four operator
-areas. A user area overrides a role area; otherwise role areas are inherited.
+The five roles remain Admin, Regional Manager, Editor, Operator, and Viewer. There are 17
+authorization areas: one role area, six manager overrides, four editor areas, and six operator
+areas. City accounts use their exact province MultiPolygon; regional managers use the dissolved
+boundaries of their member provinces. A user area overrides a role area; otherwise role areas are
+inherited.
 
 Drawing visibility remains private. Admin does **not** see other users' drawings merely because it
 is Admin: it owns a separate 100-shape inventory. POIs are the shared catalogue and are visible to
@@ -63,23 +67,38 @@ create or delete POIs; deletion requires the effective `manage_pois` permission.
 removes the legacy Operator-role `add_poi` link once, without touching explicit direct user grants.
 
 Creating, updating, moving, and deleting a private drawing all require the matching
-`add_point`, `add_line`, or `add_polygon` permission. The Viewer can inspect its three legacy
-drawings, but the client hides edit/move/delete controls and the API independently refuses writes.
+`add_point`, `add_line`, or `add_polygon` permission. The Viewer can inspect its 25 immutable
+scenario drawings, but the client hides edit/move/delete controls and the API independently refuses
+writes.
 
 ## Nationwide data
 
 ### Private shapes
 
-The exact total is 164:
+The exact total is 328:
 
-- Admin: 100 — 81 province markers, 10 geographically correct intercity routes, and 9
-  regional/tourism zones.
-- Seven regional managers: 7 each — 3 points, 2 lines, and 2 polygons inside each region.
-- `ankara_editor`: 6 — inherited points/lines plus polygons enabled by its direct permission.
-- The other three editors: 2 point/line shapes each.
-- Viewer: 3 read-only legacy drawings.
+- Admin: 100 nationwide examples.
+- Seven regional managers: 21 each.
+- `ankara_editor`: 20; `istanbul_editor`, `izmir_editor`, and `antalya_editor`: 12 each.
+- Viewer: 25 read-only scenario examples.
 
-The type distribution is 109 points, 30 lines, and 25 polygons.
+The type distribution is 218 points, 60 lines, and 50 polygons. The line and polygon data is not
+generic filler: each feature uses source-backed OSM geometry and belongs to one of five clear demo
+planning themes.
+
+| Theme | Color | Line examples | Polygon examples |
+|---|---|---|---|
+| Mobility & logistics | `#2563EB` | Terminal, industrial-road, airport-access, and connector segments | Terminal, depot, parking, and airport precincts |
+| Emergency & resilience | `#DC2626` | Hospital, fire-service, and emergency access roads | Hospital, fire-service, and emergency campuses |
+| Tourism & heritage | `#7C3AED` | Pedestrian, promenade, and cultural-route segments | Historic, archaeological, museum, and heritage sites |
+| Environment & recreation | `#0F766E` | River, coastline, greenway, and trail segments | Parks, wetlands, lakes, forests, beaches, and protected areas |
+| Municipal services | `#EA580C` | Facility-access and inspection-path segments | Municipal campuses, markets, service sites, and treatment plants |
+
+There are exactly 12 lines and 10 polygons per theme. Names use
+`{Theme} · Demo {purpose} · {real place}` so the operational purpose is visibly illustrative while
+the underlying place and geometry remain factual. Related fixture keys ensure every line is paired
+with at least two nearby real points and every polygon contains a related point. The map's Layers
+flyout contains the same five-color legend and disclaimer.
 
 ### Provinces and regions
 
@@ -96,59 +115,66 @@ The explicit province manifest must exactly equal the names in `Data/provinces.g
 | Southeastern Anatolia | 9 |
 | **Total** | **81** |
 
-Two distinct covered points are derived deterministically from each province geometry: one private
-Admin marker and one shared public-institution POI.
+Each province supplies its real administrative-capital point. Boundaries and capitals form a shared,
+default-visible reference layer for every authenticated user; the paired features carry the same
+province id and color and highlight together. The reference catalog includes exceptional
+province/capital names such as Kocaeli–İzmit, Sakarya–Adapazarı, and Hatay–Antakya.
 
 ### Shared POIs
 
-The exact total is 139:
+The exact total is 324, all imported as an Admin-owned shared reference catalogue:
 
-- 81 generated province institutions, one covered by every province boundary. The kind rotates
-  through 12 Turkish-named templates (`{Province} Şehir Hastanesi`, `{Province} Otogarı`,
-  `{Province} Merkez Postanesi`, …) so the nationwide layer mixes hospitals, terminals, museums,
-  parks and more instead of repeating one template.
-- 58 curated demonstration hotspots — real landmarks (Anıtkabir, Galata Kulesi, Sümela Manastırı…)
-  and plausible businesses concentrated in the demo personas' cities.
-- Ownership: Admin 106 (81 generated + 25 curated); istanbul_operator 12; the other three
-  operators 7 each. Operator-owned rows remain preseeded read-only sample data; current Operator
-  permissions do not allow adding or deleting them.
+- Every province has a source-backed named hospital, restaurant, and mall; a named supermarket is
+  used only where the source snapshot has no suitable mall.
+- Another 81 culture, service, education, transport, nature, and sports features are concentrated in
+  İstanbul (15), Ankara (12), İzmir (10), Antalya (10), Bursa (6), Adana (5), Gaziantep (5),
+  Konya (5), Kayseri (4), Mersin (4), Trabzon (3), and Eskişehir (2).
+- Every leaf category has at least two verified examples. Proposed, construction, abandoned,
+  demolished, unnamed, duplicate, and out-of-province objects are rejected by the manifest checks.
 
-POI names and daily hours are demo/sample content. They are not guaranteed to be current business
-names, live opening times, or travel advice.
+Each POI retains its source key/id and capture date in the versioned fixture. A simple daily opening
+range is stored only when the source supplies one; otherwise the API returns null and the client
+shows **Hours unavailable**. User-created POIs still require opening and closing times.
 
 ### Transportation routes and stops
 
-Eight routes and 56 stops, two real transit lines per operator city:
+Thirty road-routable examples contain 215 ordered stops:
 
-| Owner | Routes | Stops |
+| Owner / group | Routes | Stops |
 |---|---|---:|
-| `istanbul_operator` | Metrobüs (Beylikdüzü–Söğütlüçeşme), M4 Kadıköy–Tavşantepe | 7 + 8 |
-| `antalya_operator` | Antalya Nostalji Tramvayı, AntRay T1 Fatih–Expo | 6 + 7 |
-| `gaziantep_operator` | Gaziantep Tramvay T1, GaziRay (Başpınar–Oğuzeli) | 7 + 6 |
-| `trabzon_operator` | Trabzon Sahil Hattı, Trabzon–Uzungöl Hattı | 8 + 7 |
+| `istanbul_operator` | IETT 34BZ, 34AS, 500T, 15F, 25E | 40 |
+| `ankara_operator` | EGO 205, 303, 334-6, 413, 442 | 40 |
+| `izmir_operator` | ESHOT 202, 515, 584, 808, 950 | 40 |
+| `antalya_operator` | KL08, VS18, LC07A, ML22, VF63 | 40 |
+| Secondary cities | Bursa 38/B-2, Adana 114, Konya 4-A, Gaziantep B39, Trabzon 121 | 40 |
+| Admin intercity corridors | İstanbul–Ankara; İstanbul–Bursa–İzmir; Ankara–Konya–Antalya; İzmir–Aydın–Muğla–Antalya; Adana–Gaziantep–Şanlıurfa | 15 |
 
-Each route takes a different color, so no two lines' stop markers look alike. Stops are named after
-the neighborhoods and landmarks the line actually serves, are ordered `1..N` with no gaps, and sit
-inside their operator's authorization area — placing one outside fails the seed rather than producing
-a stop that renders but refuses every edit. The two Trabzon routes deliberately share Meydan Parkı and
-Değirmendere, the way real lines share a transfer point.
+Each urban line uses eight ordered representative stops resolved from an operator/feed page, a
+matching OSM route relation, or a separately identified public stop-order source recorded per stop.
+Secondary routes are owned by the matching operator where one exists and otherwise by unrestricted Admin.
+Intercity lines are explicitly named **corridors**, not commercial services or timetables.
 
 Unlike private drawings, routes and stops are visible to every authenticated user; only the
 `manage_transport` permission, held by the Operator role, allows creating, editing, reordering, or
 deleting them. Deleting a route deletes its stops with it; deleting one stop renumbers the rest of
 its route to a contiguous `1..N` and rebuilds the road geometry without it. Route and stop names are
-demo/sample content on the same terms as the POI names above.
+dated reference examples on the same terms as the POI names above.
 
 Routes store the last successful OSRM `LineString` plus distance and duration. Adding the second or
 later stop, changing the exact stop order, or choosing Rebuild calls OSRM in stop order. A routing
 failure preserves both the committed stop/order and the previous geometry, marking that geometry
-stale and retaining a routing error code. Existing and demo routes start without geometry and need
-one successful rebuild before a road line and direction arrows appear.
+stale and retaining a routing error code. All 30 demo routes are seeded with precomputed local-OSRM
+geometry and positive metrics, so their lines, arrows, and simulations work immediately after a
+demo seed.
 
 Route visibility is session-local and synchronizes the line, approximately 1 km direction arrows,
 and stop markers. The overlays stay visible in both WFS and WMS display modes. Transportation
 administrators have a separate `/admin/transportation` route/stop view gated by
 `manage_transport_admin`; this permission is granted to Admin, not Operator.
+
+Map density adapts to scale: ordinary stops disappear above 200 m/px, the selected route's stops
+remain through 600 m/px, stop labels appear below 20 m/px, and arrows disappear above 400 m/px.
+Each route is capped at 24 arrows, while route labels use collision decluttering.
 
 ### Transportation API contracts
 
@@ -222,7 +248,7 @@ The schema migration, destructive demo seed, and live GeoServer provisioning are
 actions. Run them in this order when you intentionally want to replace the current demo data:
 
 ```bash
-# 1. Apply EF migrations, including route geometry/metrics and Operator-role cleanup
+# 1. Apply EF migrations, including nullable imported POI hours and MultiPolygon authorization
 cd Basarsoft.Api
 dotnet ef database update
 
@@ -234,10 +260,11 @@ cd ..
 GEOSERVER_USER=... GEOSERVER_PASSWORD=... ./geoserver/setup-poi.sh
 ```
 
-`seed-demo` only runs in `Development`, wipes application tables inside one transaction, resets
-their sequences, validates the complete contract, and rolls back on any failure. It preserves the
-province reference table and fills it when empty. After reseeding, log out or clear `localStorage`
-because old tokens may point at a different reset user id.
+`seed-demo` only runs in `Development`, validates the complete committed manifest before opening its
+destructive transaction, wipes application tables inside that transaction, resets their sequences,
+and rolls back on any failure. The province reference table is synchronized as an exact idempotent
+81-row upsert while preserving stable ids. After reseeding, log out or clear `localStorage` because
+old tokens may point at a different reset user id.
 
 If the existing location-analysis GeoServer layer has not been provisioned, follow the separate
 `./geoserver/setup-konum.sh` instructions in [geoserver/README.md](geoserver/README.md).
@@ -265,6 +292,18 @@ OSRM is expected at `http://localhost:5001`. Download the Turkey PBF, run the pi
 extract/partition/customize stages, and start the router by following [osrm/README.md](osrm/README.md).
 The API's `Routing` section defaults to the local service, the `driving` profile, a 10-second timeout,
 and no fallback. An opt-in fallback is tried only for a connection error, timeout, or primary 5xx.
+
+The dated spatial fixtures and their ODbL attribution are documented in
+[Data/demo/SOURCES.md](Basarsoft.Api/Data/demo/SOURCES.md). Keep the large Geofabrik PBF and generated
+OSRM graph outside Git. To prepare a reviewed replacement bundle without changing committed data,
+run:
+
+```bash
+Basarsoft.Api/Data/demo/refresh-fixtures.sh \
+  --pbf /absolute/path/to/turkey-latest.osm.pbf \
+  --snapshot-date YYYY-MM-DD \
+  --osrm-url http://127.0.0.1:5001
+```
 
 ## Security notes
 
@@ -312,9 +351,9 @@ git diff --check
 
 - The shared demo password is intentionally simple and is not production-safe.
 - Password recovery is not implemented.
-- POIs use one daily opening/closing pair, not editable weekly schedules.
-- Curated names and hours are sample data, not live information.
-- Existing/demo routes contain no road geometry until OSRM completes a rebuild successfully.
+- POIs support one optional daily opening/closing pair, not editable weekly schedules; complex or
+  demo POIs use deterministic category-based daily schedules rather than verified live hours.
+- The committed real-world fixtures are dated snapshots, not live operational or travel information.
 - Transportation has no stop movement between routes and no undelete: a soft-deleted route or stop
   stays in the database but nothing in the app restores it.
 - No OSM PBF or generated OSRM graph is committed; local routing needs the preparation in

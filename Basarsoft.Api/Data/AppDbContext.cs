@@ -25,7 +25,8 @@ public class AppDbContext : DbContext
     public DbSet<RolePermission> RolePermissions { get; set; }
     public DbSet<UserPermission> UserPermissions { get; set; }
 
-    // Geographic authorization areas: one polygon per user or role limiting where they may draw.
+    // Geographic authorization areas: one (possibly disconnected) multipolygon per user or role
+    // limiting where they may draw.
     public DbSet<GeoAuthorization> GeoAuthorizations { get; set; }
 
     // POI module: the shared points-of-interest catalogue and its parent-child category tree.
@@ -189,7 +190,7 @@ public class AppDbContext : DbContext
     }
 
     // Geographic authorization areas: each row belongs to exactly ONE user or ONE
-    // role (check constraint), holds a single polygon, and at most one live row exists per target
+    // role (check constraint), holds one normalized multipolygon, and at most one live row exists per target
     // (partial unique indexes skip soft-deleted rows so history can accumulate).
     private static void ConfigureGeoAuthorization(ModelBuilder modelBuilder)
     {
@@ -197,7 +198,7 @@ public class AppDbContext : DbContext
         {
             e.ToTable("tbl_geo_authorization", t =>
                 t.HasCheckConstraint("ck_tbl_geo_authorization_target", "num_nonnulls(user_id, role_id) = 1"));
-            e.Property(x => x.Geom).HasColumnType("geometry(Polygon,4326)");
+            e.Property(x => x.Geom).HasColumnType("geometry(MultiPolygon,4326)");
             e.HasQueryFilter(x => !x.IsDeleted);
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Role>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);

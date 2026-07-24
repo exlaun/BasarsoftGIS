@@ -25,6 +25,11 @@
   <ItemGroup>
     <!-- Province boundaries for ProvinceSeeder: read at runtime from <output>/Data/provinces.geojson. -->
     <Content Include="Data\provinces.geojson" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Source-backed, deterministic demo fixtures. Refreshing them is an explicit developer task;
+         seed-demo only reads these committed files and never calls OSM, operators, or OSRM. -->
+    <Content Include="Data\demo\**\*" Exclude="Data\demo\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The Web SDK already includes JSON files as Content; update its implicit items instead. -->
+    <Content Update="Data\demo\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

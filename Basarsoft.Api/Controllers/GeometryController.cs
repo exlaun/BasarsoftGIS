@@ -290,8 +290,8 @@ public class GeometryController : ControllerBase
         }
     }
 
-    // POST /api/geometry/analysis -> count how many of the caller's shapes intersect a temporary
-    // polygon. The polygon is NOT persisted; this is a read-only spatial query for the analysis tool.
+    // POST /api/geometry/analysis -> count the caller's drawings and shared POI/transport features
+    // intersecting a temporary polygon. The polygon is NOT persisted; this is a read-only query.
     [HttpPost("analysis")]
     public async Task<ActionResult<AnalysisResponse>> Analyze(AnalysisRequest request)
     {

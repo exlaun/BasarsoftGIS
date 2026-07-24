@@ -66,10 +66,16 @@ public class AuthController : ControllerBase
         try
         {
             var result = await _authService.LoginAsync(request);
-            if (result is null)
-                return Unauthorized(new { message = "Invalid username or password." });
-
-            return Ok(result);
+            return result.Status switch
+            {
+                LoginStatus.Disabled => StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = "You are unable to log in. Please contact your administrator.",
+                    code = "account_disabled",
+                }),
+                LoginStatus.InvalidCredentials => Unauthorized(new { message = "Invalid username or password." }),
+                _ => Ok(result.Response),
+            };
         }
         catch (Exception ex)
         {

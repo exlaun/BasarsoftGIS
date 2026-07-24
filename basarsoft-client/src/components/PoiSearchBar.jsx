@@ -17,6 +17,7 @@ export default function PoiSearchBar({ pois, onPick }) {
   const [debounced, setDebounced] = useState('')
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
+  const inputRef = useRef(null)
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced(query.trim()), 150)
@@ -39,6 +40,10 @@ export default function PoiSearchBar({ pois, onPick }) {
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [])
 
+  useEffect(() => {
+    if (open) inputRef.current?.focus()
+  }, [open])
+
   const pick = (feature) => {
     setOpen(false)
     setQuery('')
@@ -56,8 +61,22 @@ export default function PoiSearchBar({ pois, onPick }) {
   }
 
   return (
-    <div className="poi-search" ref={containerRef} role="search">
-      <div className="poi-search-box">
+    <div className={`poi-search${open ? ' is-open' : ''}`} ref={containerRef} role="search">
+      <div
+        className="poi-search-box"
+        onClick={() => {
+          if (!open) setOpen(true)
+        }}
+        role={!open ? 'button' : undefined}
+        tabIndex={!open ? 0 : undefined}
+        onKeyDown={(event) => {
+          if (!open && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault()
+            setOpen(true)
+          }
+        }}
+        aria-label={!open ? 'Search POIs' : undefined}
+      >
         <svg
           className="poi-search-icon"
           width="14"
@@ -65,7 +84,7 @@ export default function PoiSearchBar({ pois, onPick }) {
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="2.2"
           strokeLinecap="round"
           strokeLinejoin="round"
           aria-hidden="true"
@@ -74,6 +93,8 @@ export default function PoiSearchBar({ pois, onPick }) {
           <path d="m21 21-4.3-4.3" />
         </svg>
         <input
+          ref={inputRef}
+          className={!open ? 'is-collapsed' : ''}
           type="text"
           value={query}
           onChange={(event) => {
@@ -84,8 +105,9 @@ export default function PoiSearchBar({ pois, onPick }) {
           onKeyDown={onKeyDown}
           placeholder="Search POIs…"
           aria-label="Search POIs by name or category"
+          tabIndex={open ? 0 : -1}
         />
-        {query && (
+        {open && query && (
           <button
             type="button"
             className="poi-search-clear"

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './AttributeModal.css'
+import ModalCloseButton from './ModalCloseButton'
 import { listPoiCategories } from '../api/poi'
 import { flattenCategoryTree, categoryOptionLabel } from '../utils/poiCategories'
 
 // Popup shown after the POI tool places a point. Collects the POI's details — name, one of the
-// admin-prepared categories, and working hours — before it is saved. Save passes them up; Cancel
+// admin-prepared categories, and working hours — before it is saved. Save passes them up; the X
 // discards the placed point. The category list is fetched fresh on open so a category the admin
 // just added is immediately pickable without a page reload.
 export default function PoiFormModal({ onSave, onCancel }) {
@@ -60,7 +61,10 @@ export default function PoiFormModal({ onSave, onCancel }) {
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="POI details">
       <form className="attr-modal" onSubmit={handleSubmit}>
-        <h2 className="attr-modal-title">POI details</h2>
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">POI details</h2>
+          <ModalCloseButton onClick={onCancel} label="Close POI details" />
+        </div>
 
         <label className="attr-modal-field">
           <span>Name *</span>
@@ -104,9 +108,6 @@ export default function PoiFormModal({ onSave, onCancel }) {
         </div>
 
         <div className="attr-modal-actions">
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onCancel}>
-            Cancel
-          </button>
           <button type="submit" className="attr-modal-btn attr-modal-save" disabled={!canSubmit}>
             Save
           </button>

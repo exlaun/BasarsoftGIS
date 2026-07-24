@@ -147,3 +147,8 @@ export function categoryBadgeAppearance(categories, id, fallbackColor = DEFAULT_
 export function formatTime(time) {
   return typeof time === 'string' ? time.slice(0, 5) : ''
 }
+
+export function formatWorkingHours(openTime, closeTime) {
+  if (!openTime || !closeTime) return 'Hours unavailable'
+  return `${formatTime(openTime)} – ${formatTime(closeTime)}`
+}

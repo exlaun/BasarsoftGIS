@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import './AttributeModal.css'
+import ModalCloseButton from './ModalCloseButton'
 
 // Create/edit a transportation route (name + color). Modeled on AttributeModal (the drawn-shape
 // name+color popup) but reused from the Route Management panel rather than the draw flow. onSave is
@@ -51,7 +52,10 @@ export default function RouteFormModal({ mode, route, onSave, onCancel }) {
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Route details">
       <form className="attr-modal" onSubmit={handleSubmit}>
-        <h2 className="attr-modal-title">{isEdit ? 'Edit route' : 'New route'}</h2>
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">{isEdit ? 'Edit route' : 'New route'}</h2>
+          <ModalCloseButton onClick={onCancel} label="Close route details" />
+        </div>
 
         <label className="attr-modal-field">
           <span>Name *</span>
@@ -77,9 +81,6 @@ export default function RouteFormModal({ mode, route, onSave, onCancel }) {
         {error && <p className="attr-modal-message attr-modal-error">{error}</p>}
 
         <div className="attr-modal-actions">
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onCancel}>
-            Cancel
-          </button>
           <button
             type="submit"
             className="attr-modal-btn attr-modal-save"

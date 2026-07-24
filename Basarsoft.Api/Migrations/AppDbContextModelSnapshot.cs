@@ -73,7 +73,7 @@ namespace Basarsoft.Api.Migrations
 
                     b.Property<Geometry>("Geom")
                         .IsRequired()
-                        .HasColumnType("geometry(Polygon,4326)")
+                        .HasColumnType("geometry(MultiPolygon,4326)")
                         .HasColumnName("geom");
 
                     b.Property<bool>("IsActive")
@@ -347,7 +347,7 @@ namespace Basarsoft.Api.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("category_id");
 
-                    b.Property<TimeOnly>("CloseTime")
+                    b.Property<TimeOnly?>("CloseTime")
                         .HasColumnType("time without time zone")
                         .HasColumnName("close_time");
 
@@ -384,7 +384,7 @@ namespace Basarsoft.Api.Migrations
                         .HasColumnType("text")
                         .HasColumnName("name");
 
-                    b.Property<TimeOnly>("OpenTime")
+                    b.Property<TimeOnly?>("OpenTime")
                         .HasColumnType("time without time zone")
                         .HasColumnName("open_time");
 

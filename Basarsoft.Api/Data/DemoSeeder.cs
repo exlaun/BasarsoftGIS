@@ -1,25 +1,25 @@
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Basarsoft.Api.Models;
 using Basarsoft.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using NetTopologySuite.Geometries;
+using NetTopologySuite.Geometries.Utilities;
 using NetTopologySuite.IO;
-using System.Text.Json;
-using System.Text.RegularExpressions;
+using NetTopologySuite.IO.Converters;
 using BC = BCrypt.Net.BCrypt;
 
 namespace Basarsoft.Api.Data;
 
-// DESTRUCTIVE. Wipes every application table and rebuilds the demo dataset described in DemoData.
-// Reached only through `dotnet run -- seed-demo`, only in Development — never from a normal startup.
-//
-// Re-runnable by construction: it begins by truncating and restarting every id sequence, so two runs
-// produce identical ids and the demo script can rely on them.
+/// <summary>
+/// Destructively rebuilds the deterministic, source-backed Turkey demonstration dataset.
+/// The committed fixtures are validated completely before the transaction begins and are never
+/// refreshed from the network during seeding.
+/// </summary>
 public static class DemoSeeder
 {
-    // Every table holding application data. Postgres truncates a mutually-referencing group in one
-    // statement as long as every referencing table is listed, so FK order is irrelevant here — but
-    // CASCADE is deliberately NOT used: a table added later and forgotten in this list then makes
-    // the seeder fail loudly instead of quietly leaving orphaned rows behind.
     private static readonly string[] Tables =
     [
         "user_permissions", "role_permissions", "user_roles",
@@ -28,15 +28,8 @@ public static class DemoSeeder
         "tbl_stop", "tbl_route",
         "tbl_point", "tbl_line", "tbl_polygon",
         "permissions", "roles", "users",
-        // tbl_province is deliberately absent: static reference data with no FK into the demo tables
-        // (analysis runs reference it, and those are truncated above). ProvinceSeeder below fills it
-        // if this is a brand-new database.
     ];
 
-    // TRUNCATE ... RESTART IDENTITY cannot be used to reset these: only 9 of the 12 are OWNED BY
-    // their column (the AddGeoAuthorization and AddPoiTables migrations never issued ALTER SEQUENCE
-    // ... OWNED BY), so it would restart nine and silently leave three running on — users beginning
-    // at 1 while POIs carried on from wherever development left them.
     private static readonly string[] Sequences =
     [
         "seq_users", "seq_roles", "seq_permissions",
@@ -45,28 +38,32 @@ public static class DemoSeeder
         "seq_tbl_geo_authorization", "seq_tbl_poi_category", "seq_tbl_poi",
         "seq_tbl_location_analysis", "seq_tbl_location_analysis_criterion",
         "seq_tbl_route", "seq_tbl_stop",
-        // seq_tbl_province keeps running: its table is not wiped (see Tables above).
     ];
 
     private const int Srid = 4326;
-
+    private const int ProvincePoiBaselineCount = DemoData.ExpectedProvinceCount * 3;
     private static readonly WKTReader Reader = new();
-
-    // RouteSaveRequest's color rule, mirrored here so a seeded route stays editable through the UI
-    // instead of failing validation the first time an operator renames it.
     private static readonly Regex HexColor = new("^#[0-9a-fA-F]{6}$", RegexOptions.Compiled);
-
-    private sealed record ProvinceSeedPoint(
-        DemoData.DemoProvince Manifest,
-        Geometry Boundary,
-        Point Marker,
-        Point Hub);
+    private static readonly Regex OsmObjectId = new(
+        "^(node|way|relation)/[1-9][0-9]*$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex WeakHospitalName = new(
+        @"\beski\b|aile sagligi|saglik ocagi|saglik merkezi|saglik mudurlugu|\bosgb\b|"
+        + @"ortak saglik|\bgiris\b|\bentrance\b|diyaliz|\b112\b|acil servis|"
+        + @"dis hekimligi fakultesi|agiz ve dis sagligi merkezi|tip merkezi|\bcagem\b|\bunitesi\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex WeakMallName = new(
+        @"^market$|bilgisayar|\bkolej\b|\bokul\b|kafeterya|\bevent\b|organizasyon|"
+        + @"yapi market|konfeksiyon.*mobilya|\bevkur\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex WeakRestaurantName = new(
+        @"^lokanta$|(?:^|\s)(?:cafe|kafe)$|\bbufe\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static async Task<bool> RunAsync(
         AppDbContext db, IHostEnvironment env, ILogger logger, bool skipConfirmation)
     {
         var database = db.Database.GetDbConnection().Database;
-
         if (!env.IsDevelopment())
         {
             logger.LogError(
@@ -78,7 +75,6 @@ public static class DemoSeeder
         try
         {
             ValidateManifest();
-            await ValidateProvinceSourceManifestAsync();
         }
         catch (Exception ex)
         {
@@ -90,7 +86,6 @@ public static class DemoSeeder
             "This DELETES ALL DATA in database '{Database}' and replaces it with the demo dataset.",
             database);
         await LogCurrentContentsAsync(db, logger);
-
         if (!skipConfirmation && !Confirm(database))
         {
             logger.LogInformation("Aborted. Nothing was changed.");
@@ -99,48 +94,615 @@ public static class DemoSeeder
 
         try
         {
-            // One transaction around the wipe and every insert (TRUNCATE is transactional in
-            // Postgres), so a failure half-way leaves the database as it was rather than empty.
-            await using var tx = await db.Database.BeginTransactionAsync();
-
+            await using var transaction = await db.Database.BeginTransactionAsync();
             await WipeAsync(db);
-
-            // Against empty tables, AdminSeeder takes its first-creation path in every branch — the
-            // only way to get an Admin role holding the whole permission catalogue. It also creates
-            // the Operator and Viewer roles two of the personas use. Nothing below re-grants any of
-            // that; a second grant would violate the (role_id, permission_id) unique index.
             await AdminSeeder.SeedAsync(db);
-
-            // Provinces are not wiped (reference data), but a brand-new demo database still needs
-            // them for the location-analysis dropdown; the seeder no-ops when they already exist.
             await ProvinceSeeder.SeedAsync(db);
 
-            var provincePoints = await LoadProvinceSeedPointsAsync(db);
-            var permissions = await db.Permissions.ToDictionaryAsync(p => p.Name, p => p.Id);
-
+            var permissions = await db.Permissions.ToDictionaryAsync(permission => permission.Name, permission => permission.Id);
             var users = await InsertUsersAsync(db);
             var roles = await InsertRolesAsync(db);
             await InsertGrantsAsync(db, users, roles, permissions);
             await InsertAreasAsync(db, users, roles);
             var categories = await InsertCategoriesAsync(db, users["admin"]);
-            await InsertShapesAsync(db, users, provincePoints);
-            await InsertPoisAsync(db, users, categories, provincePoints);
+            await InsertShapesAsync(db, users);
+            await InsertPoisAsync(db, users, categories);
             await InsertTransportationAsync(db, users);
 
             await BackdateModifiedDatesAsync(db);
-            await AssertEveryShapeIsInsideItsAreaAsync(db);
-            await AssertDemoContractAsync(db, users, provincePoints);
-
-            await tx.CommitAsync();
-
-            await LogSummaryAsync(db, logger, users);
-            return true;
+            db.ChangeTracker.Clear();
+            await AssertEveryFeatureIsInsideItsAreaAsync(db);
+            await AssertDemoContractAsync(db, users);
+            await transaction.CommitAsync();
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Demo seed FAILED. The database was rolled back to its previous contents.");
             return false;
         }
+
+        try
+        {
+            await LogSummaryAsync(db, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Demo seed committed successfully, but the post-commit summary could not be loaded.");
+        }
+        return true;
+    }
+
+    /// <summary>Runs the same complete fixture preflight as seed-demo without touching a database.</summary>
+    public static void ValidateManifest()
+    {
+        var expectedUsers = new[]
+        {
+            "admin",
+            "marmara_manager", "aegean_manager", "mediterranean_manager", "central_manager",
+            "blacksea_manager", "eastern_manager", "southeast_manager",
+            "ankara_editor", "istanbul_editor", "izmir_editor", "antalya_editor",
+            "istanbul_operator", "antalya_operator", "gaziantep_operator", "trabzon_operator",
+            "viewer", "ankara_operator", "izmir_operator",
+        };
+        Require(DemoData.Password == "secret123", "All demo accounts must use password 'secret123'.");
+        Require(DemoData.Users.Count == DemoData.ExpectedUserCount,
+            $"Expected {DemoData.ExpectedUserCount} users, found {DemoData.Users.Count}.");
+        Require(DemoData.Users.Select(user => user.Username).SequenceEqual(expectedUsers),
+            "Demo account order changed; ids 1..19 are part of the demo contract.");
+        RequireUnique(DemoData.Users.Select(user => user.Username), "usernames");
+
+        var permissionNames = SeedData.Permissions.Select(permission => permission.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var rolePermissions = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
+        {
+            [SeedData.AdminRoleName] = new(permissionNames, StringComparer.Ordinal),
+            [SeedData.OperatorRoleName] = SeedData.OperatorPermissions.ToHashSet(StringComparer.Ordinal),
+            [SeedData.ViewerRoleName] = [],
+        };
+        foreach (var role in DemoData.Roles)
+        {
+            RequireUnique(role.Permissions, $"permissions on role '{role.Name}'");
+            Require(role.Permissions.All(permissionNames.Contains),
+                $"Role '{role.Name}' refers to an unknown permission.");
+            rolePermissions[role.Name] = role.Permissions.ToHashSet(StringComparer.Ordinal);
+        }
+        Require(rolePermissions.Count == 5, "Demo permission matrix must have exactly five roles.");
+        Require(rolePermissions[SeedData.OperatorRoleName].SetEquals(["manage_transport"]),
+            "Operator must inherit manage_transport only.");
+
+        var boundaries = LoadProvinceBoundaries();
+        Require(boundaries.Count == DemoData.ExpectedProvinceCount,
+            $"Expected {DemoData.ExpectedProvinceCount} province boundaries.");
+        Require(DemoData.Provinces.Count == DemoData.ExpectedProvinceCount,
+            $"Expected {DemoData.ExpectedProvinceCount} province catalogue rows.");
+        RequireUnique(DemoData.Provinces.Select(province => province.Name), "province names");
+        RequireUnique(DemoData.Provinces.Select(province => $"{province.SourceKey}:{province.SourceId}"),
+            "province capital source identities");
+        RequireUnique(DemoData.Provinces.Select(province => province.BoundarySourceId),
+            "province boundary source identities");
+        foreach (var province in DemoData.Provinces)
+        {
+            Require(boundaries.ContainsKey(province.Name), $"Province source is missing '{province.Name}'.");
+            Require(HexColor.IsMatch(province.Color), $"Province '{province.Name}' has invalid color.");
+            RequireSource(province.SourceKey, province.SourceId, province.CapturedAt, province.GeometrySource,
+                $"province '{province.Name}'");
+            Require(province.BoundarySourceId.StartsWith("relation/", StringComparison.Ordinal),
+                $"Province '{province.Name}' has invalid boundary source identity.");
+            var capital = new Point(province.CapitalLongitude, province.CapitalLatitude) { SRID = Srid };
+            Require(boundaries[province.Name].Covers(capital),
+                $"Capital '{province.CapitalName}' is outside province '{province.Name}'.");
+        }
+        var expectedRegions = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["Marmara"] = 11, ["Aegean"] = 8, ["Mediterranean"] = 8,
+            ["Central Anatolia"] = 13, ["Black Sea"] = 18,
+            ["Eastern Anatolia"] = 14, ["Southeastern Anatolia"] = 9,
+        };
+        RequireDictionaryEqual(expectedRegions, DemoData.Provinces.GroupBy(province => province.Region)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal),
+            "province-to-region distribution");
+
+        foreach (var role in DemoData.Roles)
+            ValidateAreaScope(role.AreaProvinceNames, boundaries, $"role '{role.Name}'");
+        foreach (var user in DemoData.Users)
+        {
+            Require(rolePermissions.TryGetValue(user.Role, out var inherited),
+                $"User '{user.Username}' refers to unknown role '{user.Role}'.");
+            RequireUnique(user.DirectPermissions, $"direct permissions on '{user.Username}'");
+            Require(user.DirectPermissions.All(permissionNames.Contains),
+                $"User '{user.Username}' refers to an unknown direct permission.");
+            Require(!user.DirectPermissions.Any(inherited!.Contains),
+                $"User '{user.Username}' duplicates an inherited permission.");
+            ValidateAreaScope(user.AreaProvinceNames, boundaries, $"user '{user.Username}'");
+        }
+        Require(DemoData.Users.Count(user => user.AreaProvinceNames is not null)
+                + DemoData.Roles.Count(role => role.AreaProvinceNames is not null)
+                == DemoData.ExpectedAreaCount,
+            $"Expected {DemoData.ExpectedAreaCount} authorization areas.");
+
+        ValidateShapes(boundaries, rolePermissions);
+        ValidateCategoriesAndPois(boundaries);
+        ValidateTransportation(boundaries, rolePermissions);
+    }
+
+    public static Dictionary<string, int> ExpectedPoiCategoryUse() =>
+        DemoData.Pois.GroupBy(poi => poi.Category)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+    private static void ValidateShapes(
+        IReadOnlyDictionary<string, Geometry> boundaries,
+        IReadOnlyDictionary<string, HashSet<string>> rolePermissions)
+    {
+        Require(DemoData.Shapes.Count == DemoData.ExpectedShapeCount,
+            $"Expected {DemoData.ExpectedShapeCount} private shapes.");
+        Require(DemoData.Shapes.Count(shape => shape.Type == "point") == DemoData.ExpectedPointCount
+                && DemoData.Shapes.Count(shape => shape.Type == "line") == DemoData.ExpectedLineCount
+                && DemoData.Shapes.Count(shape => shape.Type == "polygon") == DemoData.ExpectedPolygonCount,
+            "Shape type distribution must be 218 points, 60 lines and 50 polygons.");
+        RequireUnique(DemoData.Shapes.Select(shape => shape.Name), "shape names");
+        RequireUnique(DemoData.Shapes.Select(shape => $"{shape.SourceKey}:{shape.SourceId}"),
+            "shape source identities");
+
+        var expectedOwners = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["admin"] = 100,
+            ["marmara_manager"] = 21, ["aegean_manager"] = 21,
+            ["mediterranean_manager"] = 21, ["central_manager"] = 21,
+            ["blacksea_manager"] = 21, ["eastern_manager"] = 21,
+            ["southeast_manager"] = 21,
+            ["ankara_editor"] = 20,
+            ["istanbul_editor"] = 12, ["izmir_editor"] = 12, ["antalya_editor"] = 12,
+            ["viewer"] = 25,
+        };
+        RequireDictionaryEqual(expectedOwners, DemoData.Shapes.GroupBy(shape => shape.Owner)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal),
+            "shape owner distribution");
+
+        var users = DemoData.Users.ToDictionary(user => user.Username, StringComparer.Ordinal);
+        var themes = DemoData.Themes.ToDictionary(theme => theme.Key, StringComparer.Ordinal);
+        var featureKeys = DemoData.Shapes.Where(shape => shape.FeatureKey is not null)
+            .ToDictionary(shape => shape.FeatureKey!, StringComparer.Ordinal);
+        var effectiveAreas = EffectiveManifestAreas(boundaries);
+        foreach (var shape in DemoData.Shapes)
+        {
+            Require(users.TryGetValue(shape.Owner, out var owner),
+                $"Shape '{shape.Name}' has unknown owner '{shape.Owner}'.");
+            Require(themes.TryGetValue(shape.Theme, out var theme) && theme.Color == shape.Color,
+                $"Shape '{shape.Name}' does not use its theme color.");
+            Require(shape.Name.Length <= 80 && HexColor.IsMatch(shape.Color),
+                $"Shape '{shape.Name}' has invalid presentation metadata.");
+            RequireSource(shape.SourceKey, shape.SourceId, shape.CapturedAt, shape.GeometrySource,
+                $"shape '{shape.Name}'");
+            Require(!string.IsNullOrWhiteSpace(shape.SourceName),
+                $"Shape '{shape.Name}' is missing its canonical source name.");
+            var expectedType = shape.Type switch
+            {
+                "point" => OgcGeometryType.Point,
+                "line" => OgcGeometryType.LineString,
+                "polygon" => OgcGeometryType.Polygon,
+                _ => throw new InvalidOperationException($"Unknown shape type '{shape.Type}'."),
+            };
+            var geometry = Parse(shape.Wkt, expectedType, shape.Name);
+            if (owner!.Username != "viewer")
+            {
+                var effective = rolePermissions[owner.Role]
+                    .Concat(owner.DirectPermissions).ToHashSet(StringComparer.Ordinal);
+                Require(effective.Contains($"add_{shape.Type}"),
+                    $"Owner '{owner.Username}' cannot manage seeded {shape.Type} '{shape.Name}'.");
+            }
+            if (effectiveAreas[shape.Owner] is { } area)
+                Require(area.Covers(geometry),
+                    $"Restricted shape '{shape.Name}' is outside '{shape.Owner}' area.");
+        }
+
+        foreach (var theme in DemoData.Themes)
+        {
+            Require(DemoData.Shapes.Count(shape => shape.Type == "line" && shape.Theme == theme.Key) == 12,
+                $"Theme '{theme.Key}' must contain exactly 12 lines.");
+            Require(DemoData.Shapes.Count(shape => shape.Type == "polygon" && shape.Theme == theme.Key) == 10,
+                $"Theme '{theme.Key}' must contain exactly 10 polygons.");
+        }
+        foreach (var owner in DemoData.Users.Where(user =>
+                     user.Role == DemoData.RegionalManagerRoleName
+                     || user.Username.EndsWith("_editor", StringComparison.Ordinal)))
+        {
+            Require(DemoData.Shapes.Where(shape => shape.Owner == owner.Username)
+                    .Select(shape => shape.Theme).Distinct(StringComparer.Ordinal).Count() >= 3,
+                $"Owner '{owner.Username}' must demonstrate at least three drawing themes.");
+        }
+
+        // Scenario drawings must remain distinct from reference/transport layers. Checking the
+        // envelope first keeps this inexpensive even with detailed province relations while
+        // EqualsTopologically catches reversed rings/lines and different starting vertices.
+        var routeLines = DemoData.Routes
+            .Select(route => Parse(route.GeometryWkt, OgcGeometryType.LineString, route.Name))
+            .ToArray();
+        foreach (var line in DemoData.Shapes.Where(shape => shape.Type == "line"))
+        {
+            var geometry = Parse(line.Wkt, OgcGeometryType.LineString, line.Name);
+            Require(!routeLines.Any(route => IsTopologicalDuplicate(geometry, route)),
+                $"Scenario line '{line.Name}' duplicates a transportation route.");
+        }
+        foreach (var polygon in DemoData.Shapes.Where(shape => shape.Type == "polygon"))
+        {
+            var geometry = Parse(polygon.Wkt, OgcGeometryType.Polygon, polygon.Name);
+            Require(!boundaries.Values.Any(boundary => IsTopologicalDuplicate(geometry, boundary)),
+                $"Scenario polygon '{polygon.Name}' duplicates a province boundary.");
+        }
+
+        foreach (var scenario in DemoData.Shapes.Where(shape => shape.Type is "line" or "polygon"))
+        {
+            var geometry = Parse(scenario.Wkt,
+                scenario.Type == "line" ? OgcGeometryType.LineString : OgcGeometryType.Polygon,
+                scenario.Name);
+            var related = scenario.RelatedFeatureKeys.Select(key =>
+                featureKeys.TryGetValue(key, out var point)
+                    ? point
+                    : throw new InvalidOperationException(
+                        $"Scenario '{scenario.ScenarioId}' refers to missing point '{key}'."))
+                .ToArray();
+            Require(related.All(point => point.Theme == scenario.Theme && point.Color == scenario.Color),
+                $"Scenario '{scenario.ScenarioId}' mixes theme presentation.");
+            if (scenario.Type == "line")
+            {
+                Require(related.Length == 2, $"Line scenario '{scenario.ScenarioId}' needs two anchors.");
+                Require(related.All(point => DistanceToLineMeters(
+                        (Point)Parse(point.Wkt, OgcGeometryType.Point, point.Name),
+                        (LineString)geometry) <= 100),
+                    $"Line scenario '{scenario.ScenarioId}' has an anchor more than 100m away.");
+            }
+            else
+            {
+                Require(related.Length == 1 && geometry.Contains(Parse(
+                    related[0].Wkt, OgcGeometryType.Point, related[0].Name)),
+                    $"Polygon scenario '{scenario.ScenarioId}' must contain its site point.");
+            }
+        }
+    }
+
+    private static void ValidateCategoriesAndPois(IReadOnlyDictionary<string, Geometry> boundaries)
+    {
+        Require(DemoData.Categories.Count == DemoData.ExpectedCategoryCount,
+            $"Expected {DemoData.ExpectedCategoryCount} POI categories.");
+        RequireUnique(DemoData.Categories.Select(category => category.Name), "category names");
+        var categories = DemoData.Categories.ToDictionary(category => category.Name, StringComparer.Ordinal);
+        foreach (var category in DemoData.Categories)
+        {
+            Require(category.Parent is null || categories.ContainsKey(category.Parent),
+                $"Category '{category.Name}' has unknown parent '{category.Parent}'.");
+            Require(PoiIconCatalog.TryNormalize(category.IconKey, out var normalized)
+                    && normalized == category.IconKey,
+                $"Category '{category.Name}' has invalid icon '{category.IconKey}'.");
+        }
+        foreach (var category in DemoData.Categories)
+        {
+            var chain = new HashSet<string>(StringComparer.Ordinal);
+            var current = category;
+            while (true)
+            {
+                Require(chain.Add(current.Name),
+                    $"Category parent chain for '{category.Name}' contains a cycle.");
+                if (current.Parent is null)
+                    break;
+                Require(categories.TryGetValue(current.Parent, out var parent),
+                    $"Category '{category.Name}' cannot reach a root category.");
+                current = parent!;
+            }
+        }
+        var parentNames = DemoData.Categories.Where(category => category.Parent is not null)
+            .Select(category => category.Parent!).ToHashSet(StringComparer.Ordinal);
+        var leaves = DemoData.Categories.Where(category => !parentNames.Contains(category.Name))
+            .Select(category => category.Name).ToHashSet(StringComparer.Ordinal);
+        Require(DemoData.Categories.Count(category => category.Parent is null) == 9 && leaves.Count == 33,
+            "Category tree must contain nine roots and 33 leaves.");
+
+        Require(DemoData.Pois.Count == DemoData.ExpectedPoiCount,
+            $"Expected {DemoData.ExpectedPoiCount} POIs.");
+        RequireUnique(DemoData.Pois.Select(poi => $"{poi.SourceKey}:{poi.SourceId}"),
+            "POI source identities");
+        foreach (var poi in DemoData.Pois)
+        {
+            Require(poi.Owner == "admin", $"Shared POI '{poi.Name}' must be admin-owned.");
+            Require(leaves.Contains(poi.Category), $"POI '{poi.Name}' must use a leaf category.");
+            Require(poi.SourceKey == "openstreetmap" && OsmObjectId.IsMatch(poi.SourceId),
+                $"POI '{poi.Name}' must retain its canonical OSM object identity.");
+            Require(boundaries.TryGetValue(poi.Province, out var boundary),
+                $"POI '{poi.Name}' refers to unknown province '{poi.Province}'.");
+            Require(DemoData.PoiHoursByCategory.TryGetValue(poi.Category, out var expectedHours),
+                $"POI category '{poi.Category}' has no logical demo operating-hours profile.");
+            Require(poi.Open == expectedHours!.Open && poi.Close == expectedHours.Close,
+                $"POI '{poi.Name}' does not use the '{poi.Category}' demo operating-hours profile.");
+            Require(boundary!.Covers(Parse(poi.Wkt, OgcGeometryType.Point, poi.Name)),
+                $"POI '{poi.Name}' is outside '{poi.Province}'.");
+            RequireSource(poi.SourceKey, poi.SourceId, poi.CapturedAt, poi.GeometrySource,
+                $"POI '{poi.Name}'");
+        }
+
+        var foodCategories = new HashSet<string>(
+            ["Restaurant", "Cafe", "Bakery", "Fast Food"], StringComparer.Ordinal);
+        var shoppingCategories = new HashSet<string>(
+            ["Mall", "Supermarket"], StringComparer.Ordinal);
+        var baselinePois = DemoData.Pois.Take(ProvincePoiBaselineCount).ToArray();
+        var baselineByProvince = baselinePois.GroupBy(poi => poi.Province)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        Require(baselinePois.Length == ProvincePoiBaselineCount
+                && baselineByProvince.Count == DemoData.ExpectedProvinceCount,
+            "The first 243 POIs must be the nationwide province baseline.");
+        foreach (var province in boundaries.Keys)
+        {
+            Require(baselineByProvince.TryGetValue(province, out var rows) && rows.Length == 3,
+                $"Province '{province}' must have exactly three baseline POIs.");
+            var baselineRows = rows!;
+            Require(baselineRows.Count(poi => poi.Category == "Hospital") == 1
+                    && baselineRows.Count(poi => foodCategories.Contains(poi.Category)) == 1
+                    && baselineRows.Count(poi => shoppingCategories.Contains(poi.Category)) == 1,
+                $"Province '{province}' baseline must contain one hospital, food venue and shopping venue.");
+
+            var hospital = baselineRows.Single(poi => poi.Category == "Hospital");
+            Require(!WeakHospitalName.IsMatch(FoldForSemanticValidation(hospital.Name)),
+                $"Baseline hospital '{hospital.Name}' in '{province}' is semantically unsuitable.");
+            var mall = baselineRows.SingleOrDefault(poi => poi.Category == "Mall");
+            Require(mall is null || !WeakMallName.IsMatch(FoldForSemanticValidation(mall.Name)),
+                $"Baseline mall '{mall?.Name}' in '{province}' is semantically unsuitable.");
+            var restaurant = baselineRows.SingleOrDefault(poi => poi.Category == "Restaurant");
+            Require(restaurant is null
+                    || !WeakRestaurantName.IsMatch(FoldForSemanticValidation(restaurant.Name)),
+                $"Baseline restaurant '{restaurant?.Name}' in '{province}' is semantically unsuitable.");
+        }
+
+        var provinceCounts = DemoData.Pois.GroupBy(poi => poi.Province)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var expectedExtras = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["İstanbul"] = 15,
+            ["Ankara"] = 12,
+            ["İzmir"] = 10,
+            ["Antalya"] = 10,
+            ["Bursa"] = 6,
+            ["Adana"] = 5,
+            ["Gaziantep"] = 5,
+            ["Konya"] = 5,
+            ["Kayseri"] = 4,
+            ["Mersin"] = 4,
+            ["Trabzon"] = 3,
+            ["Eskişehir"] = 2,
+        };
+        foreach (var province in boundaries.Keys)
+        {
+            var expected = 3 + expectedExtras.GetValueOrDefault(province);
+            Require(provinceCounts.GetValueOrDefault(province) == expected,
+                $"Province '{province}' must contain exactly {expected} shared POIs.");
+        }
+        var provincePois = DemoData.Pois.GroupBy(poi => poi.Province)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        foreach (var province in boundaries.Keys)
+        {
+            var rows = provincePois[province];
+            Require(rows.Any(poi => poi.Category == "Hospital"),
+                $"Province '{province}' must include a mapped hospital.");
+            Require(rows.Any(poi => foodCategories.Contains(poi.Category)),
+                $"Province '{province}' must include a mapped food venue.");
+            Require(rows.Any(poi => poi.Category is "Mall" or "Supermarket"),
+                $"Province '{province}' must include a mapped mall/supermarket.");
+        }
+        var categoryUse = ExpectedPoiCategoryUse();
+        Require(leaves.All(leaf => categoryUse.GetValueOrDefault(leaf) >= 2),
+            "Every POI leaf category must have at least two examples.");
+    }
+
+    private static string FoldForSemanticValidation(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var buffer = new char[decomposed.Length];
+        var length = 0;
+        foreach (var character in decomposed)
+        {
+            var category = CharUnicodeInfo.GetUnicodeCategory(character);
+            if (category == UnicodeCategory.NonSpacingMark)
+                continue;
+            buffer[length++] = character == 'ı' ? 'i' : char.ToLowerInvariant(character);
+        }
+        return new string(buffer, 0, length);
+    }
+
+    private static void ValidateTransportation(
+        IReadOnlyDictionary<string, Geometry> boundaries,
+        IReadOnlyDictionary<string, HashSet<string>> rolePermissions)
+    {
+        Require(DemoData.Routes.Count == DemoData.ExpectedRouteCount,
+            $"Expected {DemoData.ExpectedRouteCount} transportation routes.");
+        Require(DemoData.Stops.Count == DemoData.ExpectedStopCount,
+            $"Expected {DemoData.ExpectedStopCount} transportation stops.");
+        RequireUnique(DemoData.Routes.Select(route => route.Name), "route names");
+        RequireUnique(DemoData.Routes.Select(route => $"{route.SourceKey}:{route.SourceId}"),
+            "route source identities");
+        var users = DemoData.Users.ToDictionary(user => user.Username, StringComparer.Ordinal);
+        var areas = EffectiveManifestAreas(boundaries);
+        foreach (var route in DemoData.Routes)
+        {
+            Require(users.TryGetValue(route.Owner, out var owner),
+                $"Route '{route.Name}' has unknown owner '{route.Owner}'.");
+            Require(rolePermissions[owner!.Role].Concat(owner.DirectPermissions)
+                    .Contains(SeedData.ManageTransportPermission),
+                $"Owner '{route.Owner}' cannot manage route '{route.Name}'.");
+            Require(HexColor.IsMatch(route.Color) && route.Name.Length <= 80,
+                $"Route '{route.Name}' has invalid presentation metadata.");
+            Require(route.DistanceMeters > 0 && route.DurationSeconds > 0,
+                $"Route '{route.Name}' must carry persisted positive OSRM metrics.");
+            Require(route.DaysAgo >= 0,
+                $"Route '{route.Name}' has an invalid fixture age.");
+            Require(Uri.TryCreate(route.SourceUrl, UriKind.Absolute, out var routeSourceUrl)
+                    && routeSourceUrl.Scheme is "http" or "https",
+                $"Route '{route.Name}' has an invalid source URL.");
+            var line = Parse(route.GeometryWkt, OgcGeometryType.LineString, route.Name);
+            if (areas[route.Owner] is { } area)
+                Require(area.Covers(line), $"Route '{route.Name}' leaves '{route.Owner}' authorization.");
+            RequireSource(route.SourceKey, route.SourceId, route.CapturedAt, route.GeometrySource,
+                $"route '{route.Name}'");
+        }
+        foreach (var cityGroup in DemoData.Routes.GroupBy(route => route.City))
+            Require(cityGroup.Select(route => route.Color).Distinct(StringComparer.OrdinalIgnoreCase).Count()
+                    == cityGroup.Count(),
+                $"Route colors must be distinct within '{cityGroup.Key}'.");
+
+        var routes = DemoData.Routes.ToDictionary(route => route.Name, StringComparer.Ordinal);
+        var stopGroups = DemoData.Stops.GroupBy(stop => stop.Route)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        Require(routes.Keys.All(stopGroups.ContainsKey), "Every route must have stops.");
+        foreach (var (routeName, stops) in stopGroups)
+        {
+            Require(routes.TryGetValue(routeName, out var route),
+                $"Stops refer to unknown route '{routeName}'.");
+            RequireUnique(stops.Select(stop => stop.SourceId), $"stop source ids on '{routeName}'");
+            RequireUnique(stops.Select(stop => stop.Name), $"stop names on '{routeName}'");
+            Require(route!.Kind == "urban" ? stops.Count == 8 : stops.Count is >= 2 and <= 4,
+                $"Route '{routeName}' has an invalid representative-stop count.");
+            var line = Parse(route.GeometryWkt, OgcGeometryType.LineString, routeName);
+            foreach (var stop in stops)
+            {
+                var point = Parse(stop.Wkt, OgcGeometryType.Point, stop.Name);
+                Require(stop.Name.Length <= 80 && stop.DaysAgo >= 0,
+                    $"Stop '{stop.Name}' has invalid presentation or fixture-age metadata.");
+                Require(DistanceToLineMeters((Point)point, (LineString)line) <= 100,
+                    $"Route '{routeName}' does not pass within 100m of stop '{stop.Name}'.");
+                if (areas[route.Owner] is { } stopArea)
+                    Require(stopArea.Covers(point),
+                        $"Stop '{stop.Name}' leaves '{route.Owner}' authorization.");
+                RequireSource(stop.SourceKey, stop.SourceId, stop.CapturedAt,
+                    stop.GeometrySource, $"stop '{stop.Name}'");
+                Require(Uri.TryCreate(stop.SourceUrl, UriKind.Absolute, out var sourceUrl)
+                        && sourceUrl.Scheme is "http" or "https",
+                    $"Stop '{stop.Name}' has an invalid source URL.");
+            }
+        }
+        var expectedUrban = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["İstanbul"] = 5, ["Ankara"] = 5, ["İzmir"] = 5, ["Antalya"] = 5,
+            ["Bursa"] = 1, ["Adana"] = 1, ["Konya"] = 1, ["Gaziantep"] = 1, ["Trabzon"] = 1,
+        };
+        RequireDictionaryEqual(expectedUrban, DemoData.Routes.Where(route => route.Kind == "urban")
+            .GroupBy(route => route.City)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal),
+            "urban route distribution");
+        var expectedUrbanInventory = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "İstanbul|34BZ", "İstanbul|34AS", "İstanbul|500T", "İstanbul|15F", "İstanbul|25E",
+            "Ankara|205", "Ankara|303", "Ankara|334-6", "Ankara|413", "Ankara|442",
+            "İzmir|202", "İzmir|515", "İzmir|584", "İzmir|808", "İzmir|950",
+            "Antalya|KL08", "Antalya|VS18", "Antalya|LC07A", "Antalya|ML22", "Antalya|VF63",
+            "Bursa|38/B-2", "Adana|114", "Konya|4-A", "Gaziantep|B39", "Trabzon|121",
+        };
+        Require(expectedUrbanInventory.SetEquals(DemoData.Routes
+                .Where(route => route.Kind == "urban")
+                .Select(route => $"{route.City}|{route.LineCode}")),
+            "Urban route city/code inventory differs from the approved manifest.");
+        var expectedIntercityNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Intercity corridor · İstanbul–Ankara",
+            "Intercity corridor · İstanbul–Bursa–İzmir",
+            "Intercity corridor · Ankara–Konya–Antalya",
+            "Intercity corridor · İzmir–Aydın–Muğla–Antalya",
+            "Intercity corridor · Adana–Gaziantep–Şanlıurfa",
+        };
+        Require(expectedIntercityNames.SetEquals(DemoData.Routes
+                .Where(route => route.Kind == "intercity")
+                .Select(route => route.Name)),
+            "Intercity corridor inventory differs from the approved manifest.");
+    }
+
+    private static Dictionary<string, Geometry?> EffectiveManifestAreas(
+        IReadOnlyDictionary<string, Geometry> boundaries)
+    {
+        var roles = DemoData.Roles.ToDictionary(role => role.Name, StringComparer.Ordinal);
+        return DemoData.Users.ToDictionary(
+            user => user.Username,
+            user =>
+            {
+                var names = user.AreaProvinceNames
+                    ?? (roles.TryGetValue(user.Role, out var role) ? role.AreaProvinceNames : null);
+                return names is null ? null : BuildArea(names, boundaries);
+            },
+            StringComparer.Ordinal);
+    }
+
+    private static void ValidateAreaScope(
+        string[]? provinceNames,
+        IReadOnlyDictionary<string, Geometry> boundaries,
+        string what)
+    {
+        if (provinceNames is null) return;
+        Require(provinceNames.Length > 0, $"Authorization area for {what} is empty.");
+        RequireUnique(provinceNames, $"province names in {what} area");
+        Require(provinceNames.All(boundaries.ContainsKey), $"Authorization area for {what} has an unknown province.");
+        _ = BuildArea(provinceNames, boundaries);
+    }
+
+    private static Dictionary<string, Geometry> LoadProvinceBoundaries()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Data", "provinces.geojson");
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var options = new JsonSerializerOptions();
+        options.Converters.Add(new GeoJsonConverterFactory());
+        var result = new Dictionary<string, Geometry>(StringComparer.Ordinal);
+        foreach (var feature in document.RootElement.GetProperty("features").EnumerateArray())
+        {
+            var name = feature.GetProperty("properties").GetProperty("name").GetString()
+                ?? throw new InvalidOperationException("Province name is required.");
+            var geometry = JsonSerializer.Deserialize<Geometry>(
+                feature.GetProperty("geometry").GetRawText(), options)
+                ?? throw new InvalidOperationException($"Province '{name}' has no geometry.");
+            if (!geometry.IsValid) geometry = GeometryFixer.Fix(geometry);
+            geometry.SRID = Srid;
+            result.Add(name, geometry);
+        }
+        return result;
+    }
+
+    private static Geometry BuildArea(
+        IEnumerable<string> provinceNames,
+        IReadOnlyDictionary<string, Geometry> boundaries)
+    {
+        var geometries = provinceNames.Select(name => boundaries[name]).ToArray();
+        var union = geometries.Skip(1).Aggregate(geometries[0].Copy(), (area, next) => area.Union(next));
+        if (!union.IsValid) union = GeometryFixer.Fix(union);
+        union.SRID = Srid;
+        return NormalizeMultiPolygon(union);
+    }
+
+    private static MultiPolygon NormalizeMultiPolygon(Geometry geometry)
+    {
+        if (geometry is Polygon polygon)
+        {
+            var result = polygon.Factory.CreateMultiPolygon([polygon]);
+            result.SRID = Srid;
+            return result;
+        }
+        if (geometry is MultiPolygon multiPolygon)
+        {
+            multiPolygon.SRID = Srid;
+            return multiPolygon;
+        }
+        throw new InvalidOperationException(
+            $"Authorization union must be Polygon/MultiPolygon, got {geometry.GeometryType}.");
+    }
+
+    private static void RequireSource(
+        string sourceKey,
+        string sourceId,
+        string capturedAt,
+        string geometrySource,
+        string what)
+    {
+        Require(!string.IsNullOrWhiteSpace(sourceKey)
+                && !string.IsNullOrWhiteSpace(sourceId)
+                && !string.IsNullOrWhiteSpace(geometrySource),
+            $"Source metadata is incomplete for {what}.");
+        Require(DateOnly.TryParseExact(capturedAt, "yyyy-MM-dd", out _),
+            $"Capture date for {what} must be yyyy-MM-dd.");
+        Require(capturedAt == DemoData.FixtureSnapshotDate,
+            $"Capture date for {what} must match the locked {DemoData.FixtureSnapshotDate} snapshot.");
     }
 
     private static bool Confirm(string database)
@@ -149,699 +711,159 @@ public static class DemoSeeder
         return string.Equals(Console.ReadLine()?.Trim(), database, StringComparison.Ordinal);
     }
 
-    // Validates the code-owned part of the scenario before the destructive transaction can begin.
-    // Kept public so the API contract tests exercise the exact same rules as seed-demo.
-    public static void ValidateManifest()
-    {
-        string[] expectedUsers =
-        [
-            "admin",
-            "marmara_manager", "aegean_manager", "mediterranean_manager", "central_manager",
-            "blacksea_manager", "eastern_manager", "southeast_manager",
-            "ankara_editor", "istanbul_editor", "izmir_editor", "antalya_editor",
-            "istanbul_operator", "antalya_operator", "gaziantep_operator", "trabzon_operator",
-            "viewer",
-        ];
-
-        Require(DemoData.Password == "secret123", "All demo accounts must use password 'secret123'.");
-        Require(DemoData.Users.Count == DemoData.ExpectedUserCount,
-            $"Expected {DemoData.ExpectedUserCount} users, found {DemoData.Users.Count}.");
-        Require(DemoData.Users.Select(u => u.Username).SequenceEqual(expectedUsers),
-            "Demo account order no longer matches the deterministic ids 1..17.");
-        RequireUnique(DemoData.Users.Select(u => u.Username), "usernames");
-
-        var permissionNames = SeedData.Permissions.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
-        Require(permissionNames.Count == SeedData.Permissions.Count, "Seed permission names must be unique.");
-
-        var rolePermissions = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
-        {
-            [SeedData.AdminRoleName] = permissionNames,
-            [SeedData.OperatorRoleName] = SeedData.OperatorPermissions.ToHashSet(StringComparer.Ordinal),
-            [SeedData.ViewerRoleName] = new(StringComparer.Ordinal),
-        };
-
-        foreach (var role in DemoData.Roles)
-        {
-            Require(!rolePermissions.ContainsKey(role.Name), $"Duplicate demo role '{role.Name}'.");
-            Require(role.Permissions.All(permissionNames.Contains),
-                $"Role '{role.Name}' refers to an unknown permission.");
-            RequireUnique(role.Permissions, $"permissions on role '{role.Name}'");
-            rolePermissions[role.Name] = role.Permissions.ToHashSet(StringComparer.Ordinal);
-            if (role.AreaWkt is not null)
-                Parse(role.AreaWkt, OgcGeometryType.Polygon, $"area of role '{role.Name}'");
-        }
-
-        Require(rolePermissions.Count == 5, $"Expected five roles, found {rolePermissions.Count}.");
-        Require(rolePermissions[SeedData.ViewerRoleName].Count == 0,
-            "Viewer must remain permission-free.");
-        Require(rolePermissions[SeedData.OperatorRoleName].SetEquals(["manage_transport"]),
-            "Operator must inherit manage_transport only and remain POI read-only.");
-
-        var users = DemoData.Users.ToDictionary(u => u.Username, StringComparer.Ordinal);
-        var effectiveAreas = new Dictionary<string, Geometry?>(StringComparer.Ordinal);
-        foreach (var user in DemoData.Users)
-        {
-            Require(rolePermissions.TryGetValue(user.Role, out var inherited),
-                $"User '{user.Username}' refers to unknown role '{user.Role}'.");
-            RequireUnique(user.DirectPermissions, $"direct permissions on '{user.Username}'");
-            Require(user.DirectPermissions.All(permissionNames.Contains),
-                $"User '{user.Username}' refers to an unknown direct permission.");
-
-            var duplicateGrants = user.DirectPermissions.Where(inherited!.Contains).ToArray();
-            Require(duplicateGrants.Length == 0,
-                $"User '{user.Username}' duplicates role permission(s) directly: {string.Join(", ", duplicateGrants)}.");
-
-            effectiveAreas[user.Username] = user.AreaWkt is not null
-                ? Parse(user.AreaWkt, OgcGeometryType.Polygon, $"area of user '{user.Username}'")
-                : DemoData.Roles.FirstOrDefault(r => r.Name == user.Role)?.AreaWkt is { } roleArea
-                    ? Parse(roleArea, OgcGeometryType.Polygon, $"effective area of '{user.Username}'")
-                    : null;
-        }
-
-        Require(DemoData.Users.Count(u => u.AreaWkt is not null)
-                + DemoData.Roles.Count(r => r.AreaWkt is not null)
-                == DemoData.ExpectedAreaCount,
-            $"Expected {DemoData.ExpectedAreaCount} authorization areas.");
-
-        Require(DemoData.Provinces.Count == DemoData.ExpectedProvinceCount,
-            $"Expected {DemoData.ExpectedProvinceCount} provinces, found {DemoData.Provinces.Count}.");
-        RequireUnique(DemoData.Provinces.Select(p => p.Name), "province names");
-        var expectedRegionCounts = new Dictionary<string, int>(StringComparer.Ordinal)
-        {
-            ["Marmara"] = 11,
-            ["Aegean"] = 8,
-            ["Mediterranean"] = 8,
-            ["Central Anatolia"] = 13,
-            ["Black Sea"] = 18,
-            ["Eastern Anatolia"] = 14,
-            ["Southeastern Anatolia"] = 9,
-        };
-        var actualRegionCounts = DemoData.Provinces
-            .GroupBy(p => p.Region)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        Require(actualRegionCounts.Count == expectedRegionCounts.Count
-                && expectedRegionCounts.All(pair =>
-                    actualRegionCounts.TryGetValue(pair.Key, out var count) && count == pair.Value),
-            "Province-to-region manifest does not match Turkey's seven-region 81-province distribution.");
-
-        Require(DemoData.Shapes.Count + DemoData.Provinces.Count == DemoData.ExpectedShapeCount,
-            $"Expected {DemoData.ExpectedShapeCount} total shapes.");
-        RequireUnique(DemoData.Shapes.Select(s => s.Name), "explicit shape names");
-        var expectedShapeOwners = new Dictionary<string, int>(StringComparer.Ordinal)
-        {
-            ["admin"] = 19,
-            ["marmara_manager"] = 7,
-            ["aegean_manager"] = 7,
-            ["mediterranean_manager"] = 7,
-            ["central_manager"] = 7,
-            ["blacksea_manager"] = 7,
-            ["eastern_manager"] = 7,
-            ["southeast_manager"] = 7,
-            ["ankara_editor"] = 6,
-            ["istanbul_editor"] = 2,
-            ["izmir_editor"] = 2,
-            ["antalya_editor"] = 2,
-            ["viewer"] = 3,
-        };
-        var actualShapeOwners = DemoData.Shapes
-            .GroupBy(s => s.Owner)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        Require(expectedShapeOwners.Count == actualShapeOwners.Count
-                && expectedShapeOwners.All(pair =>
-                    actualShapeOwners.TryGetValue(pair.Key, out var count) && count == pair.Value),
-            "Explicit shape ownership no longer matches the 83-row contract.");
-        Require(DemoData.Shapes.Count(s => s.Type == "point") + DemoData.Provinces.Count == 109
-                && DemoData.Shapes.Count(s => s.Type == "line") == 30
-                && DemoData.Shapes.Count(s => s.Type == "polygon") == 25,
-            "Shape type distribution must be 109 points, 30 lines and 25 polygons.");
-
-        foreach (var shape in DemoData.Shapes)
-        {
-            Require(users.TryGetValue(shape.Owner, out var owner),
-                $"Shape '{shape.Name}' refers to unknown owner '{shape.Owner}'.");
-            var expectedType = shape.Type switch
-            {
-                "point" => OgcGeometryType.Point,
-                "line" => OgcGeometryType.LineString,
-                "polygon" => OgcGeometryType.Polygon,
-                _ => throw new InvalidOperationException(
-                    $"Shape '{shape.Name}' has unknown type '{shape.Type}'."),
-            };
-            var geometry = Parse(shape.Wkt, expectedType, shape.Name);
-            Require(shape.DaysAgo >= 0, $"Shape '{shape.Name}' has a negative age.");
-
-            var effectivePermissions = rolePermissions[owner!.Role]
-                .Concat(owner.DirectPermissions)
-                .ToHashSet(StringComparer.Ordinal);
-            if (!string.Equals(owner.Username, "viewer", StringComparison.Ordinal))
-            {
-                Require(effectivePermissions.Contains($"add_{shape.Type}"),
-                    $"Owner '{owner.Username}' cannot manage seeded {shape.Type} '{shape.Name}'.");
-            }
-
-            if (effectiveAreas[owner!.Username] is { } area)
-                Require(area.Covers(geometry),
-                    $"Restricted shape '{shape.Name}' falls outside '{owner.Username}' effective area.");
-        }
-
-        Require(DemoData.Categories.Count == DemoData.ExpectedCategoryCount,
-            $"Expected {DemoData.ExpectedCategoryCount} categories, found {DemoData.Categories.Count}.");
-        RequireUnique(DemoData.Categories.Select(c => c.Name), "category names");
-        var categories = DemoData.Categories.ToDictionary(c => c.Name, StringComparer.Ordinal);
-        foreach (var category in DemoData.Categories)
-        {
-            Require(category.Parent is null || categories.ContainsKey(category.Parent),
-                $"Category '{category.Name}' has unknown parent '{category.Parent}'.");
-            Require(PoiIconCatalog.TryNormalize(category.IconKey, out var normalized)
-                    && normalized == category.IconKey,
-                $"Category '{category.Name}' has invalid or non-canonical icon '{category.IconKey}'.");
-
-            var visited = new HashSet<string>(StringComparer.Ordinal);
-            var cursor = category;
-            string? effectiveIcon = null;
-            while (true)
-            {
-                Require(visited.Add(cursor.Name), $"Category cycle detected at '{cursor.Name}'.");
-                effectiveIcon ??= cursor.IconKey;
-                if (cursor.Parent is null)
-                    break;
-                cursor = categories[cursor.Parent];
-            }
-
-            Require(PoiIconCatalog.TryNormalize(effectiveIcon, out var inheritedIcon),
-                $"Category '{category.Name}' does not resolve to a valid inherited icon.");
-            _ = inheritedIcon ?? PoiIconCatalog.DefaultIconKey;
-        }
-
-        var parentNames = DemoData.Categories
-            .Where(c => c.Parent is not null)
-            .Select(c => c.Parent!)
-            .ToHashSet(StringComparer.Ordinal);
-        var leaves = DemoData.Categories
-            .Where(c => !parentNames.Contains(c.Name))
-            .Select(c => c.Name)
-            .ToHashSet(StringComparer.Ordinal);
-        Require(DemoData.Categories.Count(c => c.Parent is null) == 9 && leaves.Count == 33,
-            "Category tree must contain nine roots and 33 leaf categories.");
-
-        Require(DemoData.Pois.Count + DemoData.Provinces.Count == DemoData.ExpectedPoiCount,
-            $"Expected {DemoData.ExpectedPoiCount} total POIs.");
-        RequireUnique(DemoData.Pois.Select(p => p.Name), "curated POI names");
-        RequireUnique(DemoData.ProvincePoiTemplates.Select(t => t.NameSuffix),
-            "province POI template suffixes");
-        foreach (var template in DemoData.ProvincePoiTemplates)
-        {
-            Require(leaves.Contains(template.Category),
-                $"Province POI template '{template.NameSuffix}' must use a leaf category.");
-            Require(template.Close >= template.Open,
-                $"Province POI template '{template.NameSuffix}' has invalid sample hours.");
-        }
-
-        // Expected per-category use derives from the manifest itself: curated entries plus the
-        // template rotation applied over the 81 provinces. Every leaf must appear on the map.
-        var expectedCategoryUse = ExpectedPoiCategoryUse();
-        Require(expectedCategoryUse.Keys.All(leaves.Contains),
-            "Every curated POI must use a leaf category.");
-        foreach (var leaf in leaves)
-            Require(expectedCategoryUse.GetValueOrDefault(leaf) > 0,
-                $"Leaf category '{leaf}' is never used by a curated or generated POI.");
-
-        foreach (var poi in DemoData.Pois)
-        {
-            Require(users.TryGetValue(poi.Owner, out var owner),
-                $"POI '{poi.Name}' refers to unknown owner '{poi.Owner}'.");
-            Require(categories.ContainsKey(poi.Category),
-                $"POI '{poi.Name}' refers to unknown category '{poi.Category}'.");
-            Require(poi.DaysAgo >= 0 && poi.Close >= poi.Open,
-                $"POI '{poi.Name}' has invalid sample hours or age.");
-            var geometry = Parse(poi.Wkt, OgcGeometryType.Point, poi.Name);
-            // Curated data may retain legacy Operator ownership even though that role is now strictly
-            // POI read-only. The destructive seeder inserts fixtures directly; runtime creation still
-            // requires add_poi and deletion requires manage_pois.
-            var poiOwner = owner!;
-            if (effectiveAreas[poiOwner.Username] is { } area)
-                Require(area.Covers(geometry),
-                    $"Restricted POI '{poi.Name}' falls outside '{poiOwner.Username}' effective area.");
-        }
-
-        var poiOwners = DemoData.Pois
-            .GroupBy(p => p.Owner)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        Require(poiOwners.Count == 5
-                && poiOwners.GetValueOrDefault("admin") == 25
-                && poiOwners.GetValueOrDefault("istanbul_operator") == 12
-                && new[] { "antalya_operator", "gaziantep_operator", "trabzon_operator" }
-                    .All(owner => poiOwners.GetValueOrDefault(owner) == 7),
-            "Curated POI ownership must be admin 25, istanbul_operator 12, and seven for the other three operators.");
-
-        Require(DemoData.Routes.Count == DemoData.ExpectedRouteCount,
-            $"Expected {DemoData.ExpectedRouteCount} routes, found {DemoData.Routes.Count}.");
-        RequireUnique(DemoData.Routes.Select(r => r.Name), "route names");
-        Require(DemoData.Routes.Select(r => r.Color).Distinct(StringComparer.Ordinal).Count()
-                == DemoData.Routes.Count,
-            "Every demo route needs its own color, or two lines' stop markers look identical.");
-
-        var routes = DemoData.Routes.ToDictionary(r => r.Name, StringComparer.Ordinal);
-        foreach (var route in DemoData.Routes)
-        {
-            Require(users.TryGetValue(route.Owner, out var owner),
-                $"Route '{route.Name}' refers to unknown owner '{route.Owner}'.");
-            Require(route.DaysAgo >= 0, $"Route '{route.Name}' has a negative age.");
-            Require(HexColor.IsMatch(route.Color),
-                $"Route '{route.Name}' has a color the API would reject: '{route.Color}'.");
-            Require(route.Name.Length <= 80, $"Route name '{route.Name}' exceeds the API's 80 characters.");
-
-            var effectivePermissions = rolePermissions[owner!.Role]
-                .Concat(owner.DirectPermissions)
-                .ToHashSet(StringComparer.Ordinal);
-            Require(effectivePermissions.Contains(SeedData.ManageTransportPermission),
-                $"Owner '{owner.Username}' cannot manage seeded route '{route.Name}'.");
-        }
-
-        Require(DemoData.Stops.Count == DemoData.ExpectedStopCount,
-            $"Expected {DemoData.ExpectedStopCount} stops, found {DemoData.Stops.Count}.");
-
-        // A stop's SequenceOrder is its position inside its route's run of the manifest, so each route
-        // has to occupy exactly one unbroken run: interleave two and the seeded order stops matching
-        // the order the manifest reads in.
-        var stopNamesByRoute = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        string? previousRoute = null;
-        foreach (var stop in DemoData.Stops)
-        {
-            Require(routes.TryGetValue(stop.Route, out var route),
-                $"Stop '{stop.Name}' refers to unknown route '{stop.Route}'.");
-            if (!string.Equals(stop.Route, previousRoute, StringComparison.Ordinal))
-            {
-                Require(!stopNamesByRoute.ContainsKey(stop.Route),
-                    $"Route '{stop.Route}' stops are not contiguous in the manifest.");
-                stopNamesByRoute[stop.Route] = [];
-                previousRoute = stop.Route;
-            }
-
-            stopNamesByRoute[stop.Route].Add(stop.Name);
-            Require(stop.Name.Length <= 80, $"Stop name '{stop.Name}' exceeds the API's 80 characters.");
-
-            // A stop belongs to whoever owns its route, so that operator's area is the one it has to
-            // sit inside — exactly what CreateStopAsync would have enforced had an operator placed it.
-            var geometry = Parse(stop.Wkt, OgcGeometryType.Point, stop.Name);
-            if (effectiveAreas[route!.Owner] is { } area)
-                Require(area.Covers(geometry),
-                    $"Stop '{stop.Name}' falls outside '{route.Owner}' effective area.");
-        }
-
-        // Names repeat across routes on purpose (two Trabzon lines share their transfer points), so
-        // uniqueness is only meaningful within a single route.
-        foreach (var (routeName, stopNames) in stopNamesByRoute)
-            RequireUnique(stopNames, $"stop names on route '{routeName}'");
-
-        var expectedStopsPerRoute = new Dictionary<string, int>(StringComparer.Ordinal)
-        {
-            ["Metrobüs (Beylikdüzü–Söğütlüçeşme)"] = 7,
-            ["M4 Kadıköy–Tavşantepe"] = 8,
-            ["Antalya Nostalji Tramvayı"] = 6,
-            ["AntRay T1 Fatih–Expo"] = 7,
-            ["Gaziantep Tramvay T1"] = 7,
-            ["GaziRay (Başpınar–Oğuzeli)"] = 6,
-            ["Trabzon Sahil Hattı"] = 8,
-            ["Trabzon–Uzungöl Hattı"] = 7,
-        };
-        Require(expectedStopsPerRoute.Count == stopNamesByRoute.Count
-                && expectedStopsPerRoute.All(pair =>
-                    stopNamesByRoute.TryGetValue(pair.Key, out var names) && names.Count == pair.Value),
-            "Route-to-stop distribution no longer matches the eight-route/56-stop contract.");
-
-        var routeOwners = DemoData.Routes
-            .GroupBy(r => r.Owner)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        Require(routeOwners.Count == 4
-                && new[]
-                    {
-                        "istanbul_operator", "antalya_operator",
-                        "gaziantep_operator", "trabzon_operator",
-                    }
-                    .All(owner => routeOwners.GetValueOrDefault(owner) == 2),
-            "Route ownership must be exactly two routes for each of the four city operators.");
-    }
-
-    // Manifest-derived per-category POI counts: curated entries plus the province template rotation.
-    // Shared by ValidateManifest and VerifyAsync so the expectation cannot drift from the generator.
-    public static Dictionary<string, int> ExpectedPoiCategoryUse()
-    {
-        var counts = DemoData.Pois
-            .GroupBy(p => p.Category)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        for (var index = 0; index < DemoData.ExpectedProvinceCount; index++)
-        {
-            var category = DemoData.ProvincePoiTemplates[index % DemoData.ProvincePoiTemplates.Count].Category;
-            counts[category] = counts.GetValueOrDefault(category) + 1;
-        }
-        return counts;
-    }
-
-    private static async Task ValidateProvinceSourceManifestAsync()
-    {
-        var path = Path.Combine(AppContext.BaseDirectory, "Data", "provinces.geojson");
-        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(path));
-        if (!doc.RootElement.TryGetProperty("features", out var features)
-            || features.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidOperationException("provinces.geojson is not a GeoJSON FeatureCollection.");
-        }
-
-        var sourceNames = features.EnumerateArray()
-            .Select(feature => feature.GetProperty("properties").GetProperty("name").GetString())
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => name!)
-            .ToList();
-
-        RequireExactNames(
-            "province manifest and provinces.geojson",
-            sourceNames,
-            DemoData.Provinces.Select(p => p.Name));
-    }
-
-    private static async Task<IReadOnlyList<ProvinceSeedPoint>> LoadProvinceSeedPointsAsync(AppDbContext db)
-    {
-        var rows = await db.Provinces.AsNoTracking().ToListAsync();
-        RequireExactNames(
-            "province manifest and tbl_province",
-            rows.Select(p => p.Name),
-            DemoData.Provinces.Select(p => p.Name));
-
-        var byName = rows.ToDictionary(p => p.Name, StringComparer.Ordinal);
-        return DemoData.Provinces.Select((manifest, index) =>
-        {
-            var boundary = byName[manifest.Name].Geom;
-            var (marker, hub) = DeriveProvincePoints(boundary, index, manifest.Name);
-            return new ProvinceSeedPoint(manifest, boundary, marker, hub);
-        }).ToList();
-    }
-
-    // Pure deterministic geometry rule shared with offline tests: the marker uses InteriorPoint,
-    // then the hub moves in a province/index-specific direction within the marker's guaranteed
-    // interior-clearance radius. No database state is needed to prove both points are distinct and
-    // covered by each of the 81 province geometries.
-    public static (Point Marker, Point Hub) DeriveProvincePoints(
-        Geometry boundary,
-        int provinceIndex,
-        string provinceName)
-    {
-        Require(!boundary.IsEmpty && boundary.IsValid,
-            $"Province '{provinceName}' has an empty or invalid boundary.");
-
-        var srid = boundary.SRID == 0 ? Srid : boundary.SRID;
-        var marker = boundary.InteriorPoint;
-        marker.SRID = srid;
-        Require(boundary.Covers(marker),
-            $"Could not derive a covered marker for province '{provinceName}'.");
-
-        var clearance = marker.Distance(boundary.Boundary);
-        Require(clearance > 1e-10,
-            $"Province '{provinceName}' has no usable interior clearance for two demo points.");
-
-        Point? hub = null;
-        var angle = (provinceIndex + 1) * 2.399963229728653;
-        var distance = clearance * 0.35;
-        for (var attempt = 0; attempt < 12 && hub is null; attempt++, distance /= 2)
-        {
-            var candidate = boundary.Factory.CreatePoint(new Coordinate(
-                marker.X + Math.Cos(angle) * distance,
-                marker.Y + Math.Sin(angle) * distance));
-            candidate.SRID = srid;
-            if (boundary.Covers(candidate) && candidate.Distance(marker) > 1e-12)
-                hub = candidate;
-        }
-
-        Require(hub is not null,
-            $"Could not derive a distinct covered POI point for province '{provinceName}'.");
-        return (marker, hub!);
-    }
-
-    private static void RequireUnique(IEnumerable<string> values, string what)
-    {
-        var duplicates = values
-            .GroupBy(value => value, StringComparer.Ordinal)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToArray();
-        Require(duplicates.Length == 0,
-            $"Duplicate {what}: {string.Join(", ", duplicates)}.");
-    }
-
-    private static void RequireExactNames(
-        string what,
-        IEnumerable<string> actualValues,
-        IEnumerable<string> expectedValues)
-    {
-        var actual = actualValues.ToList();
-        var expected = expectedValues.ToList();
-        RequireUnique(actual, $"{what} names");
-        var missing = expected.Except(actual, StringComparer.Ordinal).ToArray();
-        var unexpected = actual.Except(expected, StringComparer.Ordinal).ToArray();
-        Require(actual.Count == expected.Count && missing.Length == 0 && unexpected.Length == 0,
-            $"{what} differ. Missing: [{string.Join(", ", missing)}]. " +
-            $"Unexpected: [{string.Join(", ", unexpected)}].");
-    }
-
-    private static void Require(bool condition, string message)
-    {
-        if (!condition)
-            throw new InvalidOperationException(message);
-    }
-
-    // --- Wipe --------------------------------------------------------------------------------------
-
     private static async Task WipeAsync(AppDbContext db)
     {
-        // TRUNCATE, not ExecuteDelete: ExecuteDelete honours the global query filters, so it would
-        // walk straight past soft-deleted users and inactive shapes; and modified_user_id -> users
-        // is NO ACTION (only user_id cascades), so a plain DELETE FROM users fails outright while
-        // any shape still names a user as its last modifier.
         await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE " + string.Join(", ", Tables) + ";");
-
-        var restarts = Sequences.Select(s => $"ALTER SEQUENCE {s} RESTART WITH 1;");
-        await db.Database.ExecuteSqlRawAsync(string.Join("\n", restarts));
+        await db.Database.ExecuteSqlRawAsync(string.Join("\n",
+            Sequences.Select(sequence => $"ALTER SEQUENCE {sequence} RESTART WITH 1;")));
     }
-
-    // --- Inserts -----------------------------------------------------------------------------------
-    //
-    // Ids come from nextval('seq_...'), so EF gets them back from the INSERT and populates each
-    // entity in place. That is what every FK below is built from — hence one SaveChanges per wave.
 
     private static async Task<Dictionary<string, int>> InsertUsersAsync(AppDbContext db)
     {
-        var joined = DateTime.UtcNow.AddDays(-120);
-
-        var users = DemoData.Users.Select((u, i) => new User
+        var joined = DateTime.UtcNow.AddDays(-180);
+        var rows = DemoData.Users.Select((user, index) => new User
         {
-            Username = u.Username,
+            Username = user.Username,
             PasswordHash = BC.HashPassword(DemoData.Password),
-            CreatedAt = joined.AddDays(i * 4),
+            CreatedAt = joined.AddDays(index * 4),
         }).ToList();
-
-        db.Users.AddRange(users);
+        db.Users.AddRange(rows);
         await db.SaveChangesAsync();
-
-        return users.ToDictionary(u => u.Username, u => u.Id);
+        return rows.ToDictionary(user => user.Username, user => user.Id, StringComparer.Ordinal);
     }
 
     private static async Task<Dictionary<string, int>> InsertRolesAsync(AppDbContext db)
     {
-        db.Roles.AddRange(DemoData.Roles.Select(r => new Role
+        db.Roles.AddRange(DemoData.Roles.Select(role => new Role
         {
-            Name = r.Name,
-            Description = r.Description,
-            CreatedAt = DateTime.UtcNow.AddDays(-115),
+            Name = role.Name,
+            Description = role.Description,
+            CreatedAt = DateTime.UtcNow.AddDays(-175),
         }));
         await db.SaveChangesAsync();
-
-        // Includes Admin/Operator/Viewer from AdminSeeder, which the personas also reference.
-        return await db.Roles.ToDictionaryAsync(r => r.Name, r => r.Id);
+        return await db.Roles.ToDictionaryAsync(role => role.Name, role => role.Id);
     }
 
     private static async Task InsertGrantsAsync(
         AppDbContext db,
-        Dictionary<string, int> users,
-        Dictionary<string, int> roles,
-        Dictionary<string, int> permissions)
+        IReadOnlyDictionary<string, int> users,
+        IReadOnlyDictionary<string, int> roles,
+        IReadOnlyDictionary<string, int> permissions)
     {
-        // Only the scenario's own roles: Admin, Operator and Viewer already hold exactly what
-        // AdminSeeder gave them.
         db.RolePermissions.AddRange(
             from role in DemoData.Roles
             from permission in role.Permissions
             select new RolePermission { RoleId = roles[role.Name], PermissionId = permissions[permission] });
-
-        db.UserRoles.AddRange(DemoData.Users.Select(u => new UserRole
+        db.UserRoles.AddRange(DemoData.Users.Select(user => new UserRole
         {
-            UserId = users[u.Username],
-            RoleId = roles[u.Role],
+            UserId = users[user.Username],
+            RoleId = roles[user.Role],
         }));
-
         db.UserPermissions.AddRange(
             from user in DemoData.Users
             from permission in user.DirectPermissions
-            select new UserPermission { UserId = users[user.Username], PermissionId = permissions[permission] });
-
+            select new UserPermission
+            {
+                UserId = users[user.Username],
+                PermissionId = permissions[permission],
+            });
         await db.SaveChangesAsync();
     }
 
     private static async Task InsertAreasAsync(
-        AppDbContext db, Dictionary<string, int> users, Dictionary<string, int> roles)
+        AppDbContext db,
+        IReadOnlyDictionary<string, int> users,
+        IReadOnlyDictionary<string, int> roles)
     {
-        db.GeoAuthorizations.AddRange(DemoData.Roles
-            .Where(r => r.AreaWkt is not null)
-            .Select(r => new GeoAuthorization
+        var boundaries = await db.Provinces.AsNoTracking()
+            .ToDictionaryAsync(province => province.Name, province => province.Geom, StringComparer.Ordinal);
+        foreach (var role in DemoData.Roles.Where(role => role.AreaProvinceNames is not null))
+            db.GeoAuthorizations.Add(new GeoAuthorization
             {
-                RoleId = roles[r.Name],
-                Geom = Parse(r.AreaWkt!, OgcGeometryType.Polygon, $"area of role '{r.Name}'"),
-            }));
-
-        db.GeoAuthorizations.AddRange(DemoData.Users
-            .Where(u => u.AreaWkt is not null)
-            .Select(u => new GeoAuthorization
+                RoleId = roles[role.Name],
+                Geom = BuildArea(role.AreaProvinceNames!, boundaries),
+            });
+        foreach (var user in DemoData.Users.Where(user => user.AreaProvinceNames is not null))
+            db.GeoAuthorizations.Add(new GeoAuthorization
             {
-                UserId = users[u.Username],
-                Geom = Parse(u.AreaWkt!, OgcGeometryType.Polygon, $"area of user '{u.Username}'"),
-            }));
-
+                UserId = users[user.Username],
+                Geom = BuildArea(user.AreaProvinceNames!, boundaries),
+            });
         await db.SaveChangesAsync();
     }
 
     private static async Task<Dictionary<string, int>> InsertCategoriesAsync(AppDbContext db, int adminId)
     {
-        var ids = new Dictionary<string, int>();
+        var ids = new Dictionary<string, int>(StringComparer.Ordinal);
         var pending = DemoData.Categories.ToList();
-        var createdAt = DateTime.UtcNow.AddDays(-100);
-
-        // One SaveChanges per level of the tree: PoiCategory exposes no navigation property, only a
-        // raw ParentId, so EF cannot fix a parent's generated id into its children for us. A child
-        // saved alongside its parent would write ParentId = 0 and the Restrict FK would reject it.
         while (pending.Count > 0)
         {
-            var level = pending
-                .Where(c => c.Parent is null || ids.ContainsKey(c.Parent))
-                .ToList();
-
+            var level = pending.Where(category =>
+                category.Parent is null || ids.ContainsKey(category.Parent)).ToList();
             if (level.Count == 0)
-                throw new InvalidOperationException("POI category tree has a parent that does not exist.");
-
-            var rows = level.Select(c => new PoiCategory
+                throw new InvalidOperationException("POI category tree has an unresolved parent.");
+            var rows = level.Select(category => new PoiCategory
             {
-                Name = c.Name,
-                ParentId = c.Parent is null ? null : ids[c.Parent],
-                Color = c.Color,
-                IconKey = c.IconKey,
+                Name = category.Name,
+                ParentId = category.Parent is null ? null : ids[category.Parent],
+                Color = category.Color,
+                IconKey = category.IconKey,
                 UserId = adminId,
                 ModifiedUserId = adminId,
-                CreatedAt = createdAt,
+                CreatedAt = DateTime.UtcNow.AddDays(-160),
             }).ToList();
-
             db.PoiCategories.AddRange(rows);
             await db.SaveChangesAsync();
-
-            foreach (var (category, row) in level.Zip(rows))
-                ids[category.Name] = row.Id;
-
+            foreach (var (category, row) in level.Zip(rows)) ids[category.Name] = row.Id;
             pending = pending.Except(level).ToList();
         }
-
         return ids;
     }
 
     private static async Task InsertShapesAsync(
         AppDbContext db,
-        Dictionary<string, int> users,
-        IReadOnlyList<ProvinceSeedPoint> provinces)
+        IReadOnlyDictionary<string, int> users)
     {
-        var adminId = users["admin"];
-        db.Points.AddRange(provinces.Select((province, index) => new PointFeature
-        {
-            UserId = adminId,
-            Name = $"{province.Manifest.Name} Province Marker",
-            Color = province.Manifest.Color,
-            Geom = province.Marker,
-            CreatedAt = DateTime.UtcNow.AddDays(-(100 - index % 40)),
-            ModifiedUserId = adminId,
-        }));
-
         foreach (var shape in DemoData.Shapes)
         {
             var ownerId = users[shape.Owner];
-            // Not stamped by SaveChanges (unlike ModifiedDate), so it is ours to backdate.
             var createdAt = DateTime.UtcNow.AddDays(-shape.DaysAgo);
-
             switch (shape.Type)
             {
                 case "point":
                     db.Points.Add(new PointFeature
                     {
-                        UserId = ownerId,
-                        Name = shape.Name,
-                        Color = shape.Color,
+                        UserId = ownerId, Name = shape.Name, Color = shape.Color,
                         Geom = Parse(shape.Wkt, OgcGeometryType.Point, shape.Name),
-                        CreatedAt = createdAt,
-                        // A never-edited shape reports its creator as its last modifier, which is
-                        // what the services do for a freshly drawn one.
-                        ModifiedUserId = ownerId,
+                        CreatedAt = createdAt, ModifiedUserId = ownerId,
                     });
                     break;
-
                 case "line":
                     db.Lines.Add(new LineFeature
                     {
-                        UserId = ownerId,
-                        Name = shape.Name,
-                        Color = shape.Color,
+                        UserId = ownerId, Name = shape.Name, Color = shape.Color,
                         Geom = Parse(shape.Wkt, OgcGeometryType.LineString, shape.Name),
-                        CreatedAt = createdAt,
-                        ModifiedUserId = ownerId,
+                        CreatedAt = createdAt, ModifiedUserId = ownerId,
                     });
                     break;
-
                 case "polygon":
                     db.Polygons.Add(new PolygonFeature
                     {
-                        UserId = ownerId,
-                        Name = shape.Name,
-                        Color = shape.Color,
+                        UserId = ownerId, Name = shape.Name, Color = shape.Color,
                         Geom = Parse(shape.Wkt, OgcGeometryType.Polygon, shape.Name),
-                        CreatedAt = createdAt,
-                        ModifiedUserId = ownerId,
+                        CreatedAt = createdAt, ModifiedUserId = ownerId,
                     });
                     break;
-
-                default:
-                    throw new InvalidOperationException($"'{shape.Name}' has unknown shape type '{shape.Type}'.");
             }
         }
-
         await db.SaveChangesAsync();
     }
 
     private static async Task InsertPoisAsync(
         AppDbContext db,
-        Dictionary<string, int> users,
-        Dictionary<string, int> categories,
-        IReadOnlyList<ProvinceSeedPoint> provinces)
+        IReadOnlyDictionary<string, int> users,
+        IReadOnlyDictionary<string, int> categories)
     {
-        var adminId = users["admin"];
-        db.Pois.AddRange(provinces.Select((province, index) =>
-        {
-            var (name, category, open, close) = DemoData.ProvincePoiFor(index, province.Manifest.Name);
-            return new Poi
-            {
-                UserId = adminId,
-                Name = name,
-                CategoryId = categories[category],
-                Geom = province.Hub,
-                OpenTime = open,
-                CloseTime = close,
-                CreatedAt = DateTime.UtcNow.AddDays(-(90 - index % 30)),
-                ModifiedUserId = adminId,
-            };
-        }));
-
         db.Pois.AddRange(DemoData.Pois.Select(poi => new Poi
         {
             UserId = users[poi.Owner],
@@ -853,394 +875,193 @@ public static class DemoSeeder
             CreatedAt = DateTime.UtcNow.AddDays(-poi.DaysAgo),
             ModifiedUserId = users[poi.Owner],
         }));
-
         await db.SaveChangesAsync();
     }
 
-    private static async Task InsertTransportationAsync(AppDbContext db, Dictionary<string, int> users)
+    private static async Task InsertTransportationAsync(
+        AppDbContext db,
+        IReadOnlyDictionary<string, int> users)
     {
-        // Routes first, on their own SaveChanges: Stop carries a raw RouteId and no navigation
-        // property, so EF cannot fix a route's generated id into its stops — same reason
-        // InsertCategoriesAsync saves one level of its tree at a time.
-        var routes = DemoData.Routes.Select(route => new TransportRoute
+        var routeRows = DemoData.Routes.Select(route => new TransportRoute
         {
             Name = route.Name,
             Color = route.Color,
             UserId = users[route.Owner],
+            Geometry = (LineString)Parse(route.GeometryWkt, OgcGeometryType.LineString, route.Name),
+            DistanceMeters = route.DistanceMeters,
+            DurationSeconds = route.DurationSeconds,
+            IsGeometryStale = false,
+            RoutingErrorCode = null,
             CreatedAt = DateTime.UtcNow.AddDays(-route.DaysAgo),
-            // A never-edited route reports its creator as its last modifier, like every other table.
             ModifiedUserId = users[route.Owner],
         }).ToList();
-
-        db.Routes.AddRange(routes);
+        db.Routes.AddRange(routeRows);
         await db.SaveChangesAsync();
-
-        var routesByName = DemoData.Routes
-            .Zip(routes, (manifest, row) => (manifest.Name, Row: row))
-            .ToDictionary(pair => pair.Name, pair => pair.Row, StringComparer.Ordinal);
-
-        // SequenceOrder restarts at 1 for every route and counts up in manifest order: the contiguous
-        // 1..N the reorder guard and the panel's order badges rely on. The manifest keeps each route's
-        // stops in one unbroken run (ValidateManifest enforces it), so this counter cannot interleave.
+        var byName = DemoData.Routes.Zip(routeRows)
+            .ToDictionary(pair => pair.First.Name, pair => pair.Second, StringComparer.Ordinal);
         var orders = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var stop in DemoData.Stops)
         {
-            var route = routesByName[stop.Route];
+            var route = byName[stop.Route];
             var order = orders[stop.Route] = orders.GetValueOrDefault(stop.Route) + 1;
-
             db.Stops.Add(new Stop
             {
                 UserId = route.UserId,
                 Name = stop.Name,
-                // Left null deliberately: a stop renders in its route's color, and CreateStopAsync
-                // never sets this either.
                 Color = null,
                 Geom = Parse(stop.Wkt, OgcGeometryType.Point, stop.Name),
                 RouteId = route.Id,
                 SequenceOrder = order,
-                // Placed an hour apart just after the route was created, so the audit trail reads the
-                // way it would had an operator added them one by one along the line.
                 CreatedAt = route.CreatedAt.AddHours(order),
                 ModifiedUserId = route.UserId,
             });
         }
-
         await db.SaveChangesAsync();
     }
 
-    // --- After the inserts -------------------------------------------------------------------------
+    private static async Task BackdateModifiedDatesAsync(AppDbContext db) =>
+        await db.Database.ExecuteSqlRawAsync(string.Join("\n",
+            Tables.Select(table => $"UPDATE {table} SET modified_date = created_at;")));
 
-    private static async Task BackdateModifiedDatesAsync(AppDbContext db)
-    {
-        // AppDbContext.SaveChanges stamps ModifiedDate with UtcNow on every insert, so seeded rows
-        // would all read "created three months ago, last modified two seconds ago". Raw SQL is the
-        // only way past it, and modified_date = created_at is exactly what the services mean by a
-        // row nobody has edited.
-        var updates = Tables.Select(t => $"UPDATE {t} SET modified_date = created_at;");
-        await db.Database.ExecuteSqlRawAsync(string.Join("\n", updates));
-    }
-
-    // The failure this guards against is quiet and nasty: the authorization area is checked when a
-    // shape is created or moved but never when it is read, so a seeded shape outside its owner's
-    // area shows up on the map perfectly and then refuses every edit with a 403. Better to fail the
-    // seed than to find that out during the demo.
-    private static async Task AssertEveryShapeIsInsideItsAreaAsync(AppDbContext db)
+    private static async Task AssertEveryFeatureIsInsideItsAreaAsync(AppDbContext db)
     {
         var areas = await db.GeoAuthorizations.ToListAsync();
         var userRoles = await db.UserRoles.ToListAsync();
-        var usernames = await db.Users.ToDictionaryAsync(u => u.Id, u => u.Username);
-
+        var usernames = await db.Users.ToDictionaryAsync(user => user.Id, user => user.Username);
         Geometry? EffectiveArea(int userId)
         {
-            // Mirrors GeoAuthorizationService.GetEffectiveAreaAsync: the user's own area overrides
-            // their roles' areas outright; otherwise the roles' areas are unioned; no area at all
-            // means unrestricted.
-            var own = areas.FirstOrDefault(a => a.UserId == userId);
-            if (own is not null)
-                return own.Geom;
-
-            var roleIds = userRoles.Where(ur => ur.UserId == userId).Select(ur => ur.RoleId).ToHashSet();
-
-            return areas
-                .Where(a => a.RoleId is not null && roleIds.Contains(a.RoleId.Value))
-                .Select(a => a.Geom)
-                .Aggregate((Geometry?)null, (acc, geom) => acc is null ? geom : acc.Union(geom));
+            var own = areas.FirstOrDefault(area => area.UserId == userId);
+            if (own is not null) return own.Geom;
+            var roleIds = userRoles.Where(grant => grant.UserId == userId)
+                .Select(grant => grant.RoleId).ToHashSet();
+            return areas.Where(area => area.RoleId is not null && roleIds.Contains(area.RoleId.Value))
+                .Select(area => area.Geom)
+                .Aggregate((Geometry?)null, (current, next) => current is null ? next : current.Union(next));
         }
 
         var owned = new List<(int UserId, string Kind, string? Name, Geometry Geom)>();
-        owned.AddRange((await db.Points.ToListAsync()).Select(p => (p.UserId, "point", p.Name, p.Geom)));
-        owned.AddRange((await db.Lines.ToListAsync()).Select(l => (l.UserId, "line", l.Name, l.Geom)));
-        owned.AddRange((await db.Polygons.ToListAsync()).Select(g => (g.UserId, "polygon", g.Name, g.Geom)));
-        owned.AddRange((await db.Pois.ToListAsync()).Select(p => (p.UserId, "poi", p.Name, p.Geom)));
-        owned.AddRange((await db.Stops.ToListAsync()).Select(s => (s.UserId, "stop", s.Name, s.Geom)));
-
-        var escaped = owned
-            .Where(o => EffectiveArea(o.UserId) is { } area && !area.Covers(o.Geom))
-            .Select(o => $"{o.Kind} '{o.Name}' (owner {usernames[o.UserId]})")
-            .ToList();
-
-        if (escaped.Count > 0)
-            throw new InvalidOperationException(
-                "These seeded shapes fall outside their owner's authorized area, so they would be " +
-                "visible but not editable: " + string.Join("; ", escaped));
+        owned.AddRange((await db.Points.ToListAsync()).Select(row => (row.UserId, "point", row.Name, row.Geom)));
+        owned.AddRange((await db.Lines.ToListAsync()).Select(row => (row.UserId, "line", row.Name, row.Geom)));
+        owned.AddRange((await db.Polygons.ToListAsync()).Select(row => (row.UserId, "polygon", row.Name, row.Geom)));
+        owned.AddRange((await db.Pois.ToListAsync()).Select(row => (row.UserId, "poi", row.Name, row.Geom)));
+        owned.AddRange((await db.Stops.ToListAsync()).Select(row => (row.UserId, "stop", row.Name, row.Geom)));
+        owned.AddRange((await db.Routes.Where(route => route.Geometry != null).ToListAsync())
+            .Select(row => (row.UserId, "route", (string?)row.Name, (Geometry)row.Geometry!)));
+        var escaped = owned.Where(item => EffectiveArea(item.UserId) is { } area && !area.Covers(item.Geom))
+            .Select(item => $"{item.Kind} '{item.Name}' (owner {usernames[item.UserId]})").ToArray();
+        Require(escaped.Length == 0,
+            "Seeded features outside their owner's authorization: " + string.Join("; ", escaped));
     }
 
-    // Verifies the database state produced inside the still-open transaction. This deliberately
-    // duplicates the externally visible headline counts: if a future insert path stops honoring the
-    // manifest, seed-demo rolls back instead of publishing a subtly broken demonstration database.
     private static async Task AssertDemoContractAsync(
         AppDbContext db,
-        IReadOnlyDictionary<string, int> userIds,
-        IReadOnlyList<ProvinceSeedPoint> provinces)
+        IReadOnlyDictionary<string, int> users)
     {
-        var orderedUsers = await db.Users
-            .OrderBy(user => user.Id)
-            .Select(user => new { user.Id, user.Username })
-            .ToListAsync();
-        Require(orderedUsers.Count == DemoData.ExpectedUserCount,
-            $"Post-insert user count is {orderedUsers.Count}, expected {DemoData.ExpectedUserCount}.");
-        Require(orderedUsers.Select(user => user.Id).SequenceEqual(Enumerable.Range(1, 17))
-                && orderedUsers.Select(user => user.Username)
+        var persistedUsers = await db.Users.OrderBy(user => user.Id).ToListAsync();
+        Require(persistedUsers.Count == DemoData.ExpectedUserCount
+                && persistedUsers.Select(user => user.Id).SequenceEqual(Enumerable.Range(1, 19))
+                && persistedUsers.Select(user => user.Username)
                     .SequenceEqual(DemoData.Users.Select(user => user.Username)),
-            "Post-insert account ids/order do not match the deterministic 1..17 contract.");
-        Require(userIds.Count == orderedUsers.Count
-                && orderedUsers.All(user => userIds[user.Username] == user.Id),
-            "Inserted user-id lookup differs from persisted account order.");
+            "Persisted account order differs from the deterministic 1..19 contract.");
+        Require(users.Count == DemoData.ExpectedUserCount, "Inserted user lookup is incomplete.");
+        var persistedRoles = await db.Roles.ToListAsync();
+        var expectedRoleNames = new HashSet<string>(
+            [
+                SeedData.AdminRoleName,
+                SeedData.OperatorRoleName,
+                SeedData.ViewerRoleName,
+                .. DemoData.Roles.Select(role => role.Name),
+            ],
+            StringComparer.Ordinal);
+        Require(persistedRoles.Count == 5
+                && expectedRoleNames.SetEquals(persistedRoles.Select(role => role.Name)),
+            "Persisted role names differ from the five-role manifest.");
 
-        Require(await db.Roles.CountAsync() == 5, "Post-insert role count must be exactly five.");
-        Require(await db.Permissions.CountAsync() == SeedData.Permissions.Count,
-            "Post-insert permission catalogue count differs from SeedData.");
-        Require(await db.UserRoles.CountAsync() == DemoData.ExpectedUserCount,
-            "Every demo account must have exactly one role.");
+        var persistedPermissions = await db.Permissions.ToListAsync();
+        Require(SeedData.Permissions.Select(permission => permission.Name)
+                .ToHashSet(StringComparer.Ordinal)
+                .SetEquals(persistedPermissions.Select(permission => permission.Name)),
+            "Persisted permission names differ from the manifest.");
+        var permissionById = persistedPermissions.ToDictionary(
+            permission => permission.Id, permission => permission.Name);
+        var roleById = persistedRoles.ToDictionary(role => role.Id, role => role.Name);
+        var userById = persistedUsers.ToDictionary(user => user.Id, user => user.Username);
+
+        var actualUserRoles = (await db.UserRoles.ToListAsync())
+            .Select(grant => $"{userById[grant.UserId]}|{roleById[grant.RoleId]}")
+            .ToHashSet(StringComparer.Ordinal);
+        var expectedUserRoles = DemoData.Users
+            .Select(user => $"{user.Username}|{user.Role}")
+            .ToHashSet(StringComparer.Ordinal);
+        Require(actualUserRoles.SetEquals(expectedUserRoles)
+                && actualUserRoles.Count == DemoData.ExpectedUserCount,
+            "Persisted user-role mappings differ from the manifest.");
+
+        var expectedRolePermissions = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var permission in persistedPermissions)
+            expectedRolePermissions.Add($"{SeedData.AdminRoleName}|{permission.Name}");
+        foreach (var permission in SeedData.OperatorPermissions)
+            expectedRolePermissions.Add($"{SeedData.OperatorRoleName}|{permission}");
+        foreach (var role in DemoData.Roles)
+        foreach (var permission in role.Permissions)
+            expectedRolePermissions.Add($"{role.Name}|{permission}");
+        var actualRolePermissions = (await db.RolePermissions.ToListAsync())
+            .Select(grant => $"{roleById[grant.RoleId]}|{permissionById[grant.PermissionId]}")
+            .ToHashSet(StringComparer.Ordinal);
+        Require(actualRolePermissions.SetEquals(expectedRolePermissions),
+            "Persisted role-permission mappings differ from the manifest.");
+
+        var expectedDirectPermissions = (
+            from user in DemoData.Users
+            from permission in user.DirectPermissions
+            select $"{user.Username}|{permission}"
+        ).ToHashSet(StringComparer.Ordinal);
+        var actualDirectPermissions = (await db.UserPermissions.ToListAsync())
+            .Select(grant => $"{userById[grant.UserId]}|{permissionById[grant.PermissionId]}")
+            .ToHashSet(StringComparer.Ordinal);
+        Require(actualDirectPermissions.SetEquals(expectedDirectPermissions),
+            "Persisted direct user-permission mappings differ from the manifest.");
+
         Require(await db.GeoAuthorizations.CountAsync() == DemoData.ExpectedAreaCount,
-            $"Post-insert authorization-area count must be {DemoData.ExpectedAreaCount}.");
+            $"Authorization-area count must be {DemoData.ExpectedAreaCount}.");
         Require(await db.PoiCategories.CountAsync() == DemoData.ExpectedCategoryCount,
-            $"Post-insert category count must be {DemoData.ExpectedCategoryCount}.");
+            $"POI category count must be {DemoData.ExpectedCategoryCount}.");
         Require(await db.Provinces.CountAsync() == DemoData.ExpectedProvinceCount,
-            $"Post-insert province count must be {DemoData.ExpectedProvinceCount}.");
-
-        var pointCount = await db.Points.CountAsync();
-        var lineCount = await db.Lines.CountAsync();
-        var polygonCount = await db.Polygons.CountAsync();
-        Require(pointCount == 109 && lineCount == 30 && polygonCount == 25,
-            $"Post-insert shape types are {pointCount} points/{lineCount} lines/{polygonCount} polygons; " +
-            "expected 109/30/25.");
-        Require(pointCount + lineCount + polygonCount == DemoData.ExpectedShapeCount,
-            $"Post-insert total shape count must be {DemoData.ExpectedShapeCount}.");
+            $"Province count must be {DemoData.ExpectedProvinceCount}.");
+        Require(await db.Points.CountAsync() == DemoData.ExpectedPointCount
+                && await db.Lines.CountAsync() == DemoData.ExpectedLineCount
+                && await db.Polygons.CountAsync() == DemoData.ExpectedPolygonCount,
+            "Persisted shape type counts differ from 218/60/50.");
         Require(await db.Pois.CountAsync() == DemoData.ExpectedPoiCount,
-            $"Post-insert POI count must be {DemoData.ExpectedPoiCount}.");
-
-        var shapeOwners = new Dictionary<int, int>();
-        static void AddOwnerCounts(
-            Dictionary<int, int> target,
-            IEnumerable<KeyValuePair<int, int>> additions)
-        {
-            foreach (var (ownerId, count) in additions)
-                target[ownerId] = target.GetValueOrDefault(ownerId) + count;
-        }
-
-        AddOwnerCounts(shapeOwners, (await db.Points
-                .GroupBy(row => row.UserId)
-                .Select(group => new { OwnerId = group.Key, Count = group.Count() })
-                .ToListAsync())
-            .Select(row => KeyValuePair.Create(row.OwnerId, row.Count)));
-        AddOwnerCounts(shapeOwners, (await db.Lines
-                .GroupBy(row => row.UserId)
-                .Select(group => new { OwnerId = group.Key, Count = group.Count() })
-                .ToListAsync())
-            .Select(row => KeyValuePair.Create(row.OwnerId, row.Count)));
-        AddOwnerCounts(shapeOwners, (await db.Polygons
-                .GroupBy(row => row.UserId)
-                .Select(group => new { OwnerId = group.Key, Count = group.Count() })
-                .ToListAsync())
-            .Select(row => KeyValuePair.Create(row.OwnerId, row.Count)));
-
-        Require(shapeOwners.GetValueOrDefault(userIds["admin"]) == 100,
-            "Admin must own exactly 100 private shapes.");
-        foreach (var manager in DemoData.Users.Where(user => user.Role == DemoData.RegionalManagerRoleName))
-            Require(shapeOwners.GetValueOrDefault(userIds[manager.Username]) == 7,
-                $"{manager.Username} must own exactly seven shapes.");
-        Require(shapeOwners.GetValueOrDefault(userIds["ankara_editor"]) == 6,
-            "ankara_editor must own exactly six shapes.");
-        foreach (var editor in new[] { "istanbul_editor", "izmir_editor", "antalya_editor" })
-            Require(shapeOwners.GetValueOrDefault(userIds[editor]) == 2,
-                $"{editor} must own exactly two shapes.");
-        Require(shapeOwners.GetValueOrDefault(userIds["viewer"]) == 3,
-            "Viewer must retain exactly three read-only legacy shapes.");
-
-        var poiOwners = await db.Pois
-            .GroupBy(row => row.UserId)
-            .Select(group => new { OwnerId = group.Key, Count = group.Count() })
-            .ToDictionaryAsync(row => row.OwnerId, row => row.Count);
-        Require(poiOwners.Count == 5 && poiOwners.GetValueOrDefault(userIds["admin"]) == 106,
-            "POI ownership must include admin with exactly 106 records (81 generated + 25 curated).");
-        Require(poiOwners.GetValueOrDefault(userIds["istanbul_operator"]) == 12,
-            "istanbul_operator must own exactly twelve POIs.");
-        foreach (var poiOperator in new[] { "antalya_operator", "gaziantep_operator", "trabzon_operator" })
-        {
-            Require(poiOwners.GetValueOrDefault(userIds[poiOperator]) == 7,
-                $"{poiOperator} must own exactly seven POIs.");
-        }
-
+            $"POI count must be {DemoData.ExpectedPoiCount}.");
         var persistedRoutes = await db.Routes.OrderBy(route => route.Id).ToListAsync();
-        Require(persistedRoutes.Count == DemoData.ExpectedRouteCount,
-            $"Post-insert route count is {persistedRoutes.Count}, expected {DemoData.ExpectedRouteCount}.");
-        Require(persistedRoutes.Select(route => route.Id)
+        Require(persistedRoutes.Count == DemoData.ExpectedRouteCount
+                && persistedRoutes.Select(route => route.Id)
                     .SequenceEqual(Enumerable.Range(1, DemoData.ExpectedRouteCount))
-                && persistedRoutes.Zip(DemoData.Routes).All(pair =>
-                    pair.First.Name == pair.Second.Name
-                    && pair.First.Color == pair.Second.Color
-                    && pair.First.UserId == userIds[pair.Second.Owner]),
-            "Post-insert route ids/order/ownership do not match the deterministic manifest contract.");
-
-        var routeOwners = persistedRoutes
-            .GroupBy(route => route.UserId)
-            .ToDictionary(group => group.Key, group => group.Count());
-        Require(routeOwners.Count == 4
-                && new[]
-                    {
-                        "istanbul_operator", "antalya_operator",
-                        "gaziantep_operator", "trabzon_operator",
-                    }
-                    .All(cityOperator => routeOwners.GetValueOrDefault(userIds[cityOperator]) == 2),
-            "Each of the four city operators must own exactly two routes.");
-
-        var persistedStops = await db.Stops.ToListAsync();
-        Require(persistedStops.Count == DemoData.ExpectedStopCount,
-            $"Post-insert stop count is {persistedStops.Count}, expected {DemoData.ExpectedStopCount}.");
-        // ListAllStopsAsync drops stops whose route is not live, so an orphan would simply vanish.
-        var routeIds = persistedRoutes.Select(route => route.Id).ToHashSet();
-        Require(persistedStops.All(stop => routeIds.Contains(stop.RouteId)),
-            "A seeded stop points at a route the API cannot see, so the stop would silently disappear.");
-
+                && persistedRoutes.Select(route => route.Name)
+                    .SequenceEqual(DemoData.Routes.Select(route => route.Name)),
+            "Persisted route ids/order differ from the deterministic 1..30 manifest.");
+        Require(await db.Stops.CountAsync() == DemoData.ExpectedStopCount,
+            $"Stop count must be {DemoData.ExpectedStopCount}.");
+        Require(persistedRoutes.All(route =>
+                route.Geometry != null && route.DistanceMeters > 0 && route.DurationSeconds > 0
+                && !route.IsGeometryStale && route.RoutingErrorCode == null),
+            "Every seeded route must be immediately healthy with persisted geometry and metrics.");
+        var stops = await db.Stops.ToListAsync();
         foreach (var route in persistedRoutes)
         {
-            var stops = persistedStops.Where(stop => stop.RouteId == route.Id).ToList();
-            Require(stops.Count > 0, $"Route '{route.Name}' was seeded without any stops.");
-            // The (route_id, sequence_order) index is non-unique on purpose, so nothing below this
-            // line enforces the contiguous 1..N that the reorder guard and the order badges assume.
-            Require(stops.Select(stop => stop.SequenceOrder)
-                    .OrderBy(order => order)
-                    .SequenceEqual(Enumerable.Range(1, stops.Count)),
-                $"Route '{route.Name}' stop orders are not a contiguous 1..{stops.Count}.");
-            Require(stops.All(stop => stop.UserId == route.UserId),
-                $"Route '{route.Name}' has a stop owned by someone other than the route's owner.");
+            var orders = stops.Where(stop => stop.RouteId == route.Id)
+                .Select(stop => stop.SequenceOrder).OrderBy(order => order).ToArray();
+            Require(orders.SequenceEqual(Enumerable.Range(1, orders.Length)),
+                $"Route '{route.Name}' stop order is not contiguous.");
         }
-
-        var persistedPoints = await db.Points
-            .Where(point => point.UserId == userIds["admin"])
-            .ToListAsync();
-        var persistedPois = await db.Pois.ToListAsync();
-        for (var provinceIndex = 0; provinceIndex < provinces.Count; provinceIndex++)
-        {
-            var province = provinces[provinceIndex];
-            var markerName = $"{province.Manifest.Name} Province Marker";
-            var markerMatches = persistedPoints.Where(point => point.Name == markerName).ToList();
-            Require(markerMatches.Count == 1 && province.Boundary.Covers(markerMatches[0].Geom),
-                $"Province '{province.Manifest.Name}' must have one covered admin marker.");
-
-            var generated = DemoData.ProvincePoiFor(provinceIndex, province.Manifest.Name);
-            var generatedMatches = persistedPois.Where(poi => poi.Name == generated.Name).ToList();
-            Require(generatedMatches.Count == 1
-                    && generatedMatches[0].UserId == userIds["admin"]
-                    && province.Boundary.Covers(generatedMatches[0].Geom),
-                $"Province '{province.Manifest.Name}' must have one covered admin '{generated.Name}' POI.");
-            Require(markerMatches[0].Geom.Distance(generatedMatches[0].Geom) > 1e-12,
-                $"Province '{province.Manifest.Name}' marker and generated POI must not overlap.");
-        }
-
-        var categories = await db.PoiCategories.ToDictionaryAsync(category => category.Id);
-        var categoriesByName = categories.Values.ToDictionary(category => category.Name, StringComparer.Ordinal);
-        RequireExactNames(
-            "persisted categories and DemoData.Categories",
-            categoriesByName.Keys,
-            DemoData.Categories.Select(category => category.Name));
-        foreach (var manifestCategory in DemoData.Categories)
-        {
-            var persisted = categoriesByName[manifestCategory.Name];
-            var persistedParentName = persisted.ParentId is null
-                ? null
-                : categories[persisted.ParentId.Value].Name;
-            Require(persistedParentName == manifestCategory.Parent
-                    && persisted.Color == manifestCategory.Color
-                    && persisted.IconKey == manifestCategory.IconKey,
-                $"Persisted category '{manifestCategory.Name}' differs from its parent/color/icon manifest.");
-        }
-
-        var poiCategoryCounts = await db.Pois
-            .GroupBy(poi => poi.CategoryId)
-            .Select(group => new { CategoryId = group.Key, Count = group.Count() })
-            .ToDictionaryAsync(row => row.CategoryId, row => row.Count);
-        var expectedCategoryUse = ExpectedPoiCategoryUse();
-        foreach (var manifestCategory in DemoData.Categories)
-        {
-            var expectedUse = expectedCategoryUse.GetValueOrDefault(manifestCategory.Name);
-            Require(poiCategoryCounts.GetValueOrDefault(categoriesByName[manifestCategory.Name].Id)
-                    == expectedUse,
-                $"Persisted category '{manifestCategory.Name}' should own {expectedUse} POI(s).");
-        }
-
-        foreach (var category in categories.Values)
-        {
-            var visited = new HashSet<int>();
-            var cursor = category;
-            string? effectiveIcon = null;
-            while (true)
-            {
-                Require(visited.Add(cursor.Id),
-                    $"Persisted category cycle detected at '{cursor.Name}'.");
-                if (cursor.IconKey is not null)
-                {
-                    Require(PoiIconCatalog.TryNormalize(cursor.IconKey, out var normalized)
-                            && normalized == cursor.IconKey,
-                        $"Persisted category '{cursor.Name}' has invalid icon '{cursor.IconKey}'.");
-                    effectiveIcon ??= cursor.IconKey;
-                }
-
-                if (cursor.ParentId is null)
-                    break;
-                Require(categories.TryGetValue(cursor.ParentId.Value, out var parent),
-                    $"Persisted category '{cursor.Name}' has unresolved parent id {cursor.ParentId}.");
-                cursor = parent!;
-            }
-
-            var resolved = effectiveIcon ?? PoiIconCatalog.DefaultIconKey;
-            Require(PoiIconCatalog.TryNormalize(resolved, out var normalizedResolved)
-                    && normalizedResolved is not null,
-                $"Persisted category '{category.Name}' has no valid effective icon.");
-        }
-
-        var userRoles = await db.UserRoles.ToListAsync();
-        var rolePermissions = await db.RolePermissions.ToListAsync();
-        var directPermissions = await db.UserPermissions.ToListAsync();
-        var rolesById = await db.Roles.ToDictionaryAsync(role => role.Id);
-        var permissionsById = await db.Permissions.ToDictionaryAsync(permission => permission.Id);
-        var expectedPermissionsByRole = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
-        {
-            [SeedData.AdminRoleName] = SeedData.Permissions
-                .Select(permission => permission.Name)
-                .ToHashSet(StringComparer.Ordinal),
-            [DemoData.RegionalManagerRoleName] = ["add_point", "add_line", "add_polygon"],
-            [DemoData.EditorRoleName] = ["add_point", "add_line"],
-            [SeedData.OperatorRoleName] = ["manage_transport"],
-            [SeedData.ViewerRoleName] = [],
-        };
-        foreach (var role in rolesById.Values)
-        {
-            var actual = rolePermissions
-                .Where(grant => grant.RoleId == role.Id)
-                .Select(grant => permissionsById[grant.PermissionId].Name)
-                .ToHashSet(StringComparer.Ordinal);
-            Require(expectedPermissionsByRole.TryGetValue(role.Name, out var expected)
-                    && actual.SetEquals(expected),
-                $"Persisted permission matrix differs for role '{role.Name}'.");
-        }
-
-        Require(directPermissions.Count == 1
-                && directPermissions[0].UserId == userIds["ankara_editor"]
-                && permissionsById[directPermissions[0].PermissionId].Name == "add_polygon",
-            "ankara_editor must be the only direct grant holder, with add_polygon only.");
-
-        var inheritedPairs =
-            (from userRole in userRoles
-             join rolePermission in rolePermissions on userRole.RoleId equals rolePermission.RoleId
-             select (userRole.UserId, rolePermission.PermissionId))
-            .ToHashSet();
-        var duplicatedPairs = directPermissions
-            .Where(direct => inheritedPairs.Contains((direct.UserId, direct.PermissionId)))
-            .ToList();
-        Require(duplicatedPairs.Count == 0,
-            "A permission was granted both directly and through a role after insertion.");
     }
-
-    // --- Logging -----------------------------------------------------------------------------------
 
     private static async Task LogCurrentContentsAsync(AppDbContext db, ILogger logger)
     {
-        // IgnoreQueryFilters so soft-deleted rows are counted too — they are about to go as well.
         logger.LogWarning(
-            "Currently: {Users} users, {Roles} roles, {Shapes} shapes, {Pois} POIs, {Categories} POI " +
-            "categories, {Routes} routes, {Stops} stops.",
+            "Currently: {Users} users, {Roles} roles, {Shapes} shapes, {Pois} POIs, " +
+            "{Categories} POI categories, {Routes} routes, {Stops} stops.",
             await db.Users.IgnoreQueryFilters().CountAsync(),
             await db.Roles.IgnoreQueryFilters().CountAsync(),
             await db.Points.IgnoreQueryFilters().CountAsync()
@@ -1252,47 +1073,90 @@ public static class DemoSeeder
             await db.Stops.IgnoreQueryFilters().CountAsync());
     }
 
-    private static async Task LogSummaryAsync(AppDbContext db, ILogger logger, Dictionary<string, int> users)
+    private static async Task LogSummaryAsync(
+        AppDbContext db,
+        ILogger logger)
     {
+        var users = await db.Users.ToDictionaryAsync(user => user.Username, user => user.Id);
         logger.LogInformation(
-            "Demo data seeded: {Users} users, {Roles} roles, {Points} points, {Lines} lines, " +
-            "{Polygons} polygons, {Areas} authorization areas, {Categories} POI categories, {Pois} POIs, " +
-            "{Routes} transportation routes, {Stops} stops.",
-            await db.Users.CountAsync(),
-            await db.Roles.CountAsync(),
-            await db.Points.CountAsync(),
-            await db.Lines.CountAsync(),
-            await db.Polygons.CountAsync(),
-            await db.GeoAuthorizations.CountAsync(),
-            await db.PoiCategories.CountAsync(),
-            await db.Pois.CountAsync(),
-            await db.Routes.CountAsync(),
-            await db.Stops.CountAsync());
-
+            "Demo data seeded: {Users} users, {Points} points, {Lines} lines, {Polygons} polygons, " +
+            "{Areas} areas, {Categories} categories, {Pois} POIs, {Routes} routes, {Stops} stops.",
+            await db.Users.CountAsync(), await db.Points.CountAsync(), await db.Lines.CountAsync(),
+            await db.Polygons.CountAsync(), await db.GeoAuthorizations.CountAsync(),
+            await db.PoiCategories.CountAsync(), await db.Pois.CountAsync(),
+            await db.Routes.CountAsync(), await db.Stops.CountAsync());
         foreach (var persona in DemoData.Users)
-            logger.LogInformation(
-                "  {Id,2}  {Username,-12} {Role,-15} {Demonstrates}",
+            logger.LogInformation("  {Id,2}  {Username,-22} {Role,-18} {Demonstrates}",
                 users[persona.Username], persona.Username, persona.Role, persona.Demonstrates);
-
         logger.LogInformation("All accounts use the password '{Password}'.", DemoData.Password);
-        logger.LogWarning(
-            "Log out in the browser (clear localStorage) before demoing: ids restart at 1, so a token " +
-            "minted before this reseed now points at a different user.");
     }
 
-    // WKTReader hands back geometries with SRID 0; the columns are geometry(<Type>,4326) and PostGIS
-    // rejects a mismatch, so every geometry has to be stamped — the same thing the services do.
     private static Geometry Parse(string wkt, OgcGeometryType expected, string what)
     {
-        var geom = Reader.Read(wkt);
+        var geometry = Reader.Read(wkt);
+        if (geometry is null || geometry.IsEmpty || geometry.OgcGeometryType != expected)
+            throw new InvalidOperationException($"{what}: expected {expected} WKT.");
+        if (!geometry.IsValid)
+            throw new InvalidOperationException($"{what}: geometry is invalid.");
+        geometry.SRID = Srid;
+        return geometry;
+    }
 
-        if (geom is null || geom.IsEmpty || geom.OgcGeometryType != expected)
-            throw new InvalidOperationException($"{what}: expected {expected} WKT, got '{wkt}'.");
+    private static void RequireUnique(IEnumerable<string> values, string what)
+    {
+        var duplicates = values.GroupBy(value => value, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1).Select(group => group.Key).ToArray();
+        Require(duplicates.Length == 0, $"Duplicate {what}: {string.Join(", ", duplicates)}.");
+    }
 
-        if (!geom.IsValid)
-            throw new InvalidOperationException($"{what}: geometry is not valid: '{wkt}'.");
+    private static void RequireDictionaryEqual(
+        IReadOnlyDictionary<string, int> expected,
+        IReadOnlyDictionary<string, int> actual,
+        string what)
+    {
+        Require(expected.Count == actual.Count
+                && expected.All(pair => actual.GetValueOrDefault(pair.Key) == pair.Value),
+            $"{what} differs from the manifest contract.");
+    }
 
-        geom.SRID = Srid;
-        return geom;
+    private static bool IsTopologicalDuplicate(Geometry first, Geometry second) =>
+        first.EnvelopeInternal.Equals(second.EnvelopeInternal)
+        && first.EqualsTopologically(second);
+
+    // All fixture coordinates use geographic EPSG:4326. Project each line segment into a local
+    // equirectangular plane around the point so the 100-metre rule is expressed in metres rather
+    // than a latitude-dependent degree approximation.
+    private static double DistanceToLineMeters(Point point, LineString line)
+    {
+        const double earthRadiusMeters = 6_371_008.8;
+        var longitudeScale = Math.Cos(point.Y * Math.PI / 180);
+        var radians = Math.PI / 180;
+        var minimum = double.PositiveInfinity;
+        var coordinates = line.Coordinates;
+        for (var index = 1; index < coordinates.Length; index++)
+        {
+            var first = coordinates[index - 1];
+            var second = coordinates[index];
+            var firstX = (first.X - point.X) * longitudeScale * earthRadiusMeters * radians;
+            var firstY = (first.Y - point.Y) * earthRadiusMeters * radians;
+            var secondX = (second.X - point.X) * longitudeScale * earthRadiusMeters * radians;
+            var secondY = (second.Y - point.Y) * earthRadiusMeters * radians;
+            var deltaX = secondX - firstX;
+            var deltaY = secondY - firstY;
+            var lengthSquared = deltaX * deltaX + deltaY * deltaY;
+            var fraction = lengthSquared == 0
+                ? 0
+                : Math.Clamp(-(firstX * deltaX + firstY * deltaY) / lengthSquared, 0, 1);
+            var closestX = firstX + fraction * deltaX;
+            var closestY = firstY + fraction * deltaY;
+            minimum = Math.Min(minimum, Math.Sqrt(closestX * closestX + closestY * closestY));
+        }
+
+        return minimum;
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
     }
 }

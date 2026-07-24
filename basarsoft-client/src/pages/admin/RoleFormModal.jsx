@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRole, updateRole } from '../../api/admin'
+import ModalCloseButton from '../../components/ModalCloseButton'
 
 // Create or edit a role (name + description). Permission assignment lives in RolePermissionsModal.
 export default function RoleFormModal({ mode, role, onClose, onSuccess }) {
@@ -55,6 +56,7 @@ export default function RoleFormModal({ mode, role, onClose, onSuccess }) {
       <form className="admin-modal" onSubmit={handleSubmit}>
         <div className="admin-modal-head">
           <h2 className="admin-modal-title">{isEdit ? 'Edit role' : 'Add role'}</h2>
+          <ModalCloseButton onClick={onClose} label="Close role dialog" />
         </div>
 
         <div className="admin-modal-body">
@@ -84,9 +86,6 @@ export default function RoleFormModal({ mode, role, onClose, onSuccess }) {
         </div>
 
         <div className="admin-modal-foot">
-          <button type="button" className="admin-btn" onClick={onClose}>
-            Cancel
-          </button>
           <button type="submit" className="admin-btn admin-btn-primary" disabled={!canSubmit}>
             {isEdit ? 'Save' : 'Create'}
           </button>

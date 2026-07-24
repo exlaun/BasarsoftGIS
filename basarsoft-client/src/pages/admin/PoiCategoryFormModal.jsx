@@ -9,6 +9,7 @@ import {
   categoryOptionLabel,
 } from '../../utils/poiCategories'
 import PoiIconBadge from '../../components/PoiIconBadge'
+import ModalCloseButton from '../../components/ModalCloseButton'
 
 // Create or edit a POI category: a name plus an optional parent, marker color and marker icon.
 // Null appearance values inherit the nearest ancestor. The color input cannot express null, so the
@@ -101,6 +102,7 @@ export default function PoiCategoryFormModal({ mode, category, categories, onClo
       <form className="admin-modal" onSubmit={handleSubmit}>
         <div className="admin-modal-head">
           <h2 className="admin-modal-title">{isEdit ? 'Edit category' : 'Add category'}</h2>
+          <ModalCloseButton onClick={onClose} label="Close category dialog" />
         </div>
 
         <div className="admin-modal-body">
@@ -195,9 +197,6 @@ export default function PoiCategoryFormModal({ mode, category, categories, onClo
         </div>
 
         <div className="admin-modal-foot">
-          <button type="button" className="admin-btn" onClick={onClose}>
-            Cancel
-          </button>
           <button type="submit" className="admin-btn admin-btn-primary" disabled={!canSubmit}>
             {isEdit ? 'Save' : 'Create'}
           </button>

@@ -32,7 +32,7 @@ const TRANSPORT_NAV = [
 ]
 
 export default function AdminLayout() {
-  const { logout, permissions } = useAuth()
+  const { logout, permissions, username } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -76,7 +76,7 @@ export default function AdminLayout() {
         <nav className="admin-nav" aria-label="Admin navigation">
           <div className="admin-nav-brand">
             Admin Panel
-            <small>Admin</small>
+            <small>Admin ({username ?? 'Unknown user'})</small>
           </div>
 
           <div className="admin-nav-links">

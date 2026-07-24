@@ -71,7 +71,9 @@ export default function LoginPage() {
       }
     } catch (err) {
       const status = err.response?.status
-      if (status === 401) setError('Wrong username or password. Please try again.')
+      if (status === 403 && err.response?.data?.code === 'account_disabled') {
+        setError('You are unable to log in. Please contact your administrator.')
+      } else if (status === 401) setError('Wrong username or password. Please try again.')
       else if (status === 409) setError('That username is already taken.')
       else if (status === 404) setError('No account found with that username.')
       else setError('Something went wrong. Please try again.')

@@ -144,7 +144,8 @@ For both presentation values the category's own value wins, otherwise the neares
 ancestor's value is inherited; an entirely null icon chain falls back to `pin`. The
 `users` join deliberately skips the soft-delete filter (matches the EF read's
 `IgnoreQueryFilters`), and the two `time` columns are cast with `to_char` so WFS GeoJSON
-carries them as plain `"HH:MM:SS"` strings.
+carries known values as plain `"HH:MM:SS"` strings. PostgreSQL naturally keeps
+`to_char(NULL, ...)` null; the API preserves that as unknown instead of converting it to midnight.
 
 View SQL (REST `JDBC_VIRTUAL_TABLE`, key column `id`, geometry `geom` Point/4326 — note
 the SQL must be XML-escaped inside the REST body: `<` and `>` appear in the CTE):
@@ -325,17 +326,14 @@ degenerate bbox. `featuretypes/vw_konum.xml` declares Turkey's extent
 
 ### Province boundaries (tbl_province)
 
-The region dropdown is backed by `tbl_province`, seeded once at API startup by
-`ProvinceSeeder` from `Basarsoft.Api/Data/provinces.geojson` — Turkey's 81 provinces from
-OSM `admin_level=4` boundaries (© OpenStreetMap contributors, ODbL; downloaded from the
-`izzetkalic/geojsons-of-turkey` dataset). The committed file is pre-simplified so the repo
-stays small and `ST_Intersects` stays fast; to regenerate it:
+The region dropdown is backed by `tbl_province`. At API startup `ProvinceSeeder`
+id-preservingly synchronizes its exact 81 boundaries from
+`Basarsoft.Api/Data/provinces.geojson`. `ProvinceCatalog` validates the same versioned
+file's region/color, administrative-capital point, and source provenance, including that
+every capital is covered by its province. The geometries come from the locked Geofabrik
+Turkey OpenStreetMap snapshot documented with the demo fixtures (© OpenStreetMap
+contributors, ODbL).
 
-```bash
-# 1. download the raw OSM export (12 MB), 2. keep the 81 (Multi)Polygons + name only,
-# 3. simplify to ~8% of vertices at ~11 m precision (267 KB):
-npx mapshaper turkey-al4-polys.geojson -simplify 8% keep-shapes -o precision=0.0001 provinces.geojson
-```
-
-(The two tiny MultiPolygon islets — Antalya's offshore rocks and Giresun Island — collapse
-into the mainland polygons at this tolerance; irrelevant for POI analysis.)
+Authenticated clients use `GET /api/provinces/map` for the complete reference layer. Each
+row includes the persisted province id/boundary plus its catalog region, color, capital
+name, and capital point; the boundary and point deliberately share one color and id.

@@ -5,6 +5,7 @@ import {
   categoryOptionLabel,
 } from '../utils/poiCategories'
 import PoiIconBadge from './PoiIconBadge'
+import ModalCloseButton from './ModalCloseButton'
 import './LocationAnalysisPanel.css'
 
 // Weight rows the analysis starts from: the mentor's minimum (2 criteria). Category '' = unpicked.
@@ -30,6 +31,7 @@ export default function LocationAnalysisPanel({
   analysis,
   onStart,
   onReset,
+  onClose,
 }) {
   const [criteria, setCriteria] = useState([emptyCriterion(), emptyCriterion()])
 
@@ -75,7 +77,10 @@ export default function LocationAnalysisPanel({
   if (analysis) {
     return (
       <section className="konum-panel" aria-label="Location analysis">
-        <h2 className="konum-title">Location Analysis</h2>
+        <div className="konum-head">
+          <h2 className="konum-title">Location Analysis</h2>
+          <ModalCloseButton onClick={onClose} label="Close location analysis" />
+        </div>
         <p className="konum-summary-region">
           Region: <strong>{analysis.provinceName ?? 'Drawn region'}</strong>
         </p>
@@ -106,7 +111,10 @@ export default function LocationAnalysisPanel({
 
   return (
     <section className="konum-panel" aria-label="Location analysis">
-      <h2 className="konum-title">Location Analysis</h2>
+      <div className="konum-head">
+        <h2 className="konum-title">Location Analysis</h2>
+        <ModalCloseButton onClick={onClose} label="Close location analysis" />
+      </div>
 
       <div className="konum-step">
         <span className="konum-step-label">1. Target region</span>

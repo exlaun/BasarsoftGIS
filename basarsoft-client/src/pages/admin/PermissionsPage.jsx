@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listPermissions, deletePermission } from '../../api/admin'
+import AdminTable from '../../components/AdminTable'
 import PermissionFormModal from './PermissionFormModal'
 import AdminConfirm from './AdminConfirm'
 import { useAuth } from '../../context/auth-context'
@@ -53,6 +54,38 @@ export default function PermissionsPage() {
     }
   }
 
+  const permissionColumns = useMemo(() => [
+    { key: 'name', label: 'Name', sortValue: (permission) => permission.name, flex: 0.9, minWidth: 150 },
+    {
+      key: 'description',
+      label: 'Description',
+      sortValue: (permission) => permission.description,
+      flex: 1.4,
+      minWidth: 220,
+      cellClassName: 'admin-wrap',
+      render: (permission) => permission.description || <span className="admin-muted">—</span>,
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      fixedWidth: 120,
+      sortable: false,
+      resizable: false,
+      align: 'right',
+      render: (permission) => (
+        <div className="admin-table-actions">
+          <button
+            type="button"
+            className="admin-btn admin-btn-sm admin-btn-danger"
+            onClick={() => setModal({ type: 'delete', permission })}
+          >
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ], [])
+
   return (
     <div>
       <div className="admin-page-head">
@@ -73,32 +106,13 @@ export default function PermissionsPage() {
         ) : permissions.length === 0 ? (
           <p className="admin-empty">No permissions yet.</p>
         ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {permissions.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.name}</td>
-                    <td className="admin-wrap">{p.description || <span className="admin-muted">—</span>}</td>
-                    <td>
-                      <div className="admin-table-actions">
-                        <button type="button" className="admin-btn admin-btn-sm admin-btn-danger" onClick={() => setModal({ type: 'delete', permission: p })}>
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AdminTable
+            columns={permissionColumns}
+            rows={permissions}
+            getRowKey={(permission) => permission.id}
+            defaultSortKey="name"
+            defaultSortDir="asc"
+          />
         )}
       </div>
 

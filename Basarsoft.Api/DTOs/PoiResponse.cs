@@ -27,10 +27,11 @@ public class PoiResponse
     // CategoryColor this is always non-null so every renderer can select an asset deterministically.
     public string CategoryIconKey { get; set; } = "pin";
 
-    // Working hours; serialized by System.Text.Json as "HH:mm:ss" (the client trims to HH:mm).
-    public TimeOnly OpenTime { get; set; }
+    // Working hours; serialized by System.Text.Json as "HH:mm:ss" when known. Source-backed demo
+    // POIs intentionally return null rather than inventing hours (the client renders a fallback).
+    public TimeOnly? OpenTime { get; set; }
 
-    public TimeOnly CloseTime { get; set; }
+    public TimeOnly? CloseTime { get; set; }
 
     // users.id of the creator — lets the client decide whether to offer Delete (own POI or admin).
     public int UserId { get; set; }

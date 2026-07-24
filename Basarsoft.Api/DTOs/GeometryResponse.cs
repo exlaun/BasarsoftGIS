@@ -25,8 +25,8 @@ public class GeometryResponse
     // predate the column and were never touched since.
     public int? ModifiedUserId { get; set; }
 
-    // Only populated when a polygon is created: how many of the caller's existing shapes fall fully
-    // inside it. Hidden on point/line/read/update responses.
+    // Only populated when a polygon is created: how many of the caller's existing inventories touch
+    // or cross it. Hidden on point/line/read/update responses.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? IntersectionCount { get; set; }
 }

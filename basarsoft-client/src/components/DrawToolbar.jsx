@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import LayerPanel from './LayerPanel'
+import {
+  calculateLayerFlyoutPlacement,
+  visibleToolbarGroups,
+} from './drawToolbarModel'
 import './DrawToolbar.css'
 
 // Inline feather-style icons (inherit currentColor, no icon dependency) — matches the
@@ -124,14 +129,6 @@ const LayersIcon = (
   </svg>
 )
 
-// The three geometry layers the Layers menu can show/hide. Reuses the draw-tool icons above so a
-// layer reads as the same thing as its draw tool.
-const LAYER_OPTIONS = [
-  { type: 'point', label: 'Points', icon: PointIcon },
-  { type: 'line', label: 'Lines', icon: LineIcon },
-  { type: 'polygon', label: 'Polygons', icon: PolygonIcon },
-]
-
 // The rail, top to bottom. Leaf `key` values are the tool keys MapPage expects: 'none' pans,
 // 'select' inspects/edits/deletes, the three OL draw types draw, 'analysis' counts shapes under a
 // temporary polygon. Deleting lives inside the Select popup (behind a confirmation) rather than as
@@ -201,25 +198,23 @@ export default function DrawToolbar({
   disabledTools = new Set(),
   layerVisibility = {},
   onToggleLayer,
+  displayOnly = false,
 }) {
   // A tool the caller has no permission for is removed from the rail entirely (not just disabled), so
   // it never appears on that user's screen. A group left with no children disappears with them — a
   // Viewer holds no add_* permission, so Draw and Places vanish rather than opening onto nothing.
   // Pan/Select/Analysis/Layers carry no permission gate and always show.
   const visibleGroups = useMemo(
-    () =>
-      TOOL_GROUPS.map((entry) =>
-        entry.kind === 'group'
-          ? { ...entry, children: entry.children.filter((child) => !disabledTools.has(child.key)) }
-          : entry,
-      ).filter((entry) => entry.kind !== 'group' || entry.children.length > 0),
-    [disabledTools],
+    () => visibleToolbarGroups(TOOL_GROUPS, disabledTools, displayOnly),
+    [disabledTools, displayOnly],
   )
 
   // Id of the group whose flyout is open, or null. One at a time: opening a group replaces the
   // previous one. A click anywhere outside the rail, or Escape, closes it.
   const [openGroup, setOpenGroup] = useState(null)
+  const toolbarRef = useRef(null)
   const railRef = useRef(null)
+  const layerFlyoutRef = useRef(null)
   useEffect(() => {
     if (!openGroup) return undefined
     const onDocPointerDown = (event) => {
@@ -246,11 +241,51 @@ export default function DrawToolbar({
     [onSelectTool],
   )
 
-  return (
-    <div className="draw-toolbar">
-      <p className="draw-toolbar-hint">{TOOL_HINTS[activeTool] ?? TOOL_HINTS.none}</p>
+  const positionLayerFlyout = useCallback(() => {
+    const toolbar = toolbarRef.current
+    const flyout = layerFlyoutRef.current
+    const anchor = flyout?.parentElement
+    if (!toolbar || !flyout || !anchor) return
 
-      <div className="draw-rail" ref={railRef}>
+    const containerRect = toolbar.getBoundingClientRect()
+    const anchorRect = anchor.getBoundingClientRect()
+    const placement = calculateLayerFlyoutPlacement({
+      containerTop: containerRect.top,
+      containerBottom: containerRect.bottom,
+      anchorTop: anchorRect.top,
+      anchorBottom: anchorRect.bottom,
+      contentHeight: flyout.scrollHeight,
+    })
+    flyout.style.top = `${placement.top}px`
+    flyout.style.maxHeight = `${placement.maxHeight}px`
+  }, [])
+
+  // The map body clips overflow. Reposition before paint, then keep the flyout clamped when the
+  // viewport changes or the expandable theme legend changes its height.
+  useLayoutEffect(() => {
+    if (openGroup !== 'layers' || !layerFlyoutRef.current) return undefined
+
+    positionLayerFlyout()
+    window.addEventListener('resize', positionLayerFlyout)
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(positionLayerFlyout)
+    if (resizeObserver) {
+      resizeObserver.observe(toolbarRef.current)
+      resizeObserver.observe(layerFlyoutRef.current)
+    }
+    return () => {
+      window.removeEventListener('resize', positionLayerFlyout)
+      resizeObserver?.disconnect()
+    }
+  }, [openGroup, positionLayerFlyout])
+
+  return (
+    <div className="draw-toolbar" ref={toolbarRef}>
+      {!displayOnly && (
+        <p className="draw-toolbar-hint">{TOOL_HINTS[activeTool] ?? TOOL_HINTS.none}</p>
+      )}
+
+      <div className={`draw-rail${displayOnly ? ' is-display-only' : ''}`} ref={railRef}>
         {visibleGroups.map((entry) => {
           if (entry.kind === 'tool') {
             return (
@@ -272,6 +307,7 @@ export default function DrawToolbar({
           }
 
           const isOpen = openGroup === entry.id
+          const popupId = `draw-flyout-${entry.id}`
           // A collapsed group still shows which of its tools is live, so the rail never hides the
           // current mode. Layers has no tool of its own — only its own open state.
           const isActive =
@@ -286,8 +322,9 @@ export default function DrawToolbar({
                 type="button"
                 className={`draw-tool${isActive || isOpen ? ' is-active' : ''}`}
                 onClick={() => setOpenGroup((current) => (current === entry.id ? null : entry.id))}
-                aria-haspopup="true"
+                aria-haspopup={entry.kind === 'layers' ? 'dialog' : undefined}
                 aria-expanded={isOpen}
+                aria-controls={popupId}
                 aria-label={entry.label}
               >
                 <span className="draw-tool-icon">{entry.icon}</span>
@@ -298,7 +335,7 @@ export default function DrawToolbar({
               </span>
 
               {isOpen && entry.kind === 'group' && (
-                <div className="draw-flyout" role="group" aria-label={entry.label}>
+                <div id={popupId} className="draw-flyout" role="group" aria-label={entry.label}>
                   {entry.children.map((child) => (
                     <div key={child.key} className="draw-item">
                       <button
@@ -321,26 +358,19 @@ export default function DrawToolbar({
               {/* Layer visibility: toggles rather than a choice, so this flyout stays open while the
                   user ticks several layers and closes only on outside-click/Escape. */}
               {isOpen && entry.kind === 'layers' && (
-                <div className="draw-flyout" role="group" aria-label="Layer visibility">
-                  {LAYER_OPTIONS.map(({ type, label, icon }) => {
-                    const shown = layerVisibility[type] ?? true
-                    return (
-                      <div key={type} className="draw-item">
-                        <button
-                          type="button"
-                          className={`draw-tool draw-layer-toggle${shown ? ' is-active' : ' is-off'}`}
-                          onClick={() => onToggleLayer?.(type)}
-                          aria-pressed={shown}
-                          aria-label={`${label} layer`}
-                        >
-                          <span className="draw-tool-icon">{icon}</span>
-                        </button>
-                        <span className="draw-tip draw-tip-below" role="tooltip">
-                          {label}
-                        </span>
-                      </div>
-                    )
-                  })}
+                <div
+                  id={popupId}
+                  ref={layerFlyoutRef}
+                  className="draw-flyout draw-flyout-layer-panel"
+                  role="dialog"
+                  aria-label="Layers and demo drawing themes"
+                >
+                  <LayerPanel
+                    embedded
+                    displayOnly={displayOnly}
+                    visibility={layerVisibility}
+                    onToggle={onToggleLayer}
+                  />
                 </div>
               )}
             </div>

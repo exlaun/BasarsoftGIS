@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Basarsoft.Api.Data;
 using NetTopologySuite.Geometries;
-using NetTopologySuite.Geometries.Utilities;
 using NetTopologySuite.IO.Converters;
 using Xunit;
 
@@ -28,91 +27,107 @@ public class DemoDataContractTests
         "gaziantep_operator",
         "trabzon_operator",
         "viewer",
+        "ankara_operator",
+        "izmir_operator",
     ];
 
     [Fact]
-    public void ValidateManifest_AcceptsTheRepositoryScenario()
+    public void ValidateManifest_AcceptsTheCommittedOfflineFixtures()
     {
-        // Exercise the exact preflight used by `dotnet run -- seed-demo`.
+        // This is the exact preflight executed before seed-demo can enter its destructive transaction.
         DemoSeeder.ValidateManifest();
     }
 
     [Fact]
     public void HeadlineCountsAndAccountOrder_AreDeterministic()
     {
-        Assert.Equal(17, DemoData.ExpectedUserCount);
-        Assert.Equal(164, DemoData.ExpectedShapeCount);
-        Assert.Equal(139, DemoData.ExpectedPoiCount);
+        Assert.Equal(19, DemoData.ExpectedUserCount);
+        Assert.Equal(328, DemoData.ExpectedShapeCount);
+        Assert.Equal(218, DemoData.ExpectedPointCount);
+        Assert.Equal(60, DemoData.ExpectedLineCount);
+        Assert.Equal(50, DemoData.ExpectedPolygonCount);
+        Assert.Equal(324, DemoData.ExpectedPoiCount);
         Assert.Equal(42, DemoData.ExpectedCategoryCount);
-        Assert.Equal(15, DemoData.ExpectedAreaCount);
+        Assert.Equal(17, DemoData.ExpectedAreaCount);
         Assert.Equal(81, DemoData.ExpectedProvinceCount);
-        Assert.Equal(8, DemoData.ExpectedRouteCount);
-        Assert.Equal(56, DemoData.ExpectedStopCount);
+        Assert.Equal(30, DemoData.ExpectedRouteCount);
+        Assert.Equal(215, DemoData.ExpectedStopCount);
         Assert.Equal("secret123", DemoData.Password);
 
         Assert.Equal(DemoData.ExpectedUserCount, DemoData.Users.Count);
         Assert.Equal(OrderedAccounts, DemoData.Users.Select(user => user.Username));
-        Assert.Equal(DemoData.ExpectedShapeCount, DemoData.Shapes.Count + DemoData.Provinces.Count);
-        Assert.Equal(DemoData.ExpectedPoiCount, DemoData.Pois.Count + DemoData.Provinces.Count);
+        Assert.Equal(DemoData.ExpectedShapeCount, DemoData.Shapes.Count);
+        Assert.Equal(DemoData.ExpectedPoiCount, DemoData.Pois.Count);
         Assert.Equal(DemoData.ExpectedCategoryCount, DemoData.Categories.Count);
         Assert.Equal(DemoData.ExpectedAreaCount,
-            DemoData.Users.Count(user => user.AreaWkt is not null)
-            + DemoData.Roles.Count(role => role.AreaWkt is not null));
+            DemoData.Users.Count(user => user.AreaProvinceNames is not null)
+            + DemoData.Roles.Count(role => role.AreaProvinceNames is not null));
         Assert.Equal(DemoData.ExpectedProvinceCount, DemoData.Provinces.Count);
         Assert.Equal(DemoData.ExpectedRouteCount, DemoData.Routes.Count);
         Assert.Equal(DemoData.ExpectedStopCount, DemoData.Stops.Count);
     }
 
     [Fact]
-    public void Shapes_HaveTheApprovedOwnerAndTypeDistribution()
+    public void Shapes_HaveTheApprovedOwnerTypeThemeAndProvenanceDistribution()
     {
-        var ownerCounts = DemoData.Shapes
-            .GroupBy(shape => shape.Owner)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-        ownerCounts["admin"] += DemoData.Provinces.Count;
-
-        var expectedOwners = new Dictionary<string, int>(StringComparer.Ordinal)
-        {
-            ["admin"] = 100,
-            ["marmara_manager"] = 7,
-            ["aegean_manager"] = 7,
-            ["mediterranean_manager"] = 7,
-            ["central_manager"] = 7,
-            ["blacksea_manager"] = 7,
-            ["eastern_manager"] = 7,
-            ["southeast_manager"] = 7,
-            ["ankara_editor"] = 6,
-            ["istanbul_editor"] = 2,
-            ["izmir_editor"] = 2,
-            ["antalya_editor"] = 2,
-            ["viewer"] = 3,
-        };
-
-        AssertDictionaryEqual(expectedOwners, ownerCounts);
-        Assert.Equal(109,
-            DemoData.Shapes.Count(shape => shape.Type == "point") + DemoData.Provinces.Count);
-        Assert.Equal(30, DemoData.Shapes.Count(shape => shape.Type == "line"));
-        Assert.Equal(25, DemoData.Shapes.Count(shape => shape.Type == "polygon"));
-    }
-
-    [Fact]
-    public void Pois_HaveTheApprovedOwnershipAndLeafCategoryDistribution()
-    {
-        var ownerCounts = DemoData.Pois
-            .GroupBy(poi => poi.Owner)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-        ownerCounts["admin"] += DemoData.Provinces.Count;
-
         AssertDictionaryEqual(
             new Dictionary<string, int>(StringComparer.Ordinal)
             {
-                ["admin"] = 106,
-                ["istanbul_operator"] = 12,
-                ["antalya_operator"] = 7,
-                ["gaziantep_operator"] = 7,
-                ["trabzon_operator"] = 7,
+                ["admin"] = 100,
+                ["marmara_manager"] = 21,
+                ["aegean_manager"] = 21,
+                ["mediterranean_manager"] = 21,
+                ["central_manager"] = 21,
+                ["blacksea_manager"] = 21,
+                ["eastern_manager"] = 21,
+                ["southeast_manager"] = 21,
+                ["ankara_editor"] = 20,
+                ["istanbul_editor"] = 12,
+                ["izmir_editor"] = 12,
+                ["antalya_editor"] = 12,
+                ["viewer"] = 25,
             },
-            ownerCounts);
+            DemoData.Shapes.GroupBy(shape => shape.Owner)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal));
+
+        Assert.Equal(218, DemoData.Shapes.Count(shape => shape.Type == "point"));
+        Assert.Equal(60, DemoData.Shapes.Count(shape => shape.Type == "line"));
+        Assert.Equal(50, DemoData.Shapes.Count(shape => shape.Type == "polygon"));
+        Assert.Equal(DemoData.Shapes.Count,
+            DemoData.Shapes.Select(shape => shape.Name).Distinct(StringComparer.Ordinal).Count());
+
+        foreach (var theme in DemoData.Themes)
+        {
+            Assert.Equal(12, DemoData.Shapes.Count(shape =>
+                shape.Type == "line" && shape.Theme == theme.Key));
+            Assert.Equal(10, DemoData.Shapes.Count(shape =>
+                shape.Type == "polygon" && shape.Theme == theme.Key));
+            Assert.All(DemoData.Shapes.Where(shape => shape.Theme == theme.Key),
+                shape => Assert.Equal(theme.Color, shape.Color));
+        }
+
+        Assert.Equal(DemoData.Shapes.Count,
+            DemoData.Shapes.Select(shape => $"{shape.SourceKey}:{shape.SourceId}")
+                .Distinct(StringComparer.Ordinal).Count());
+        Assert.All(DemoData.Shapes, shape =>
+        {
+            Assert.Equal(DemoData.FixtureSnapshotDate, shape.CapturedAt);
+            Assert.False(string.IsNullOrWhiteSpace(shape.SourceName));
+            Assert.False(string.IsNullOrWhiteSpace(shape.GeometrySource));
+            Assert.InRange(shape.Name.Length, 1, 80);
+        });
+        Assert.DoesNotContain(DemoData.Shapes.Where(shape => shape.Type == "polygon"),
+            shape => shape.Name.Contains("Province", StringComparison.OrdinalIgnoreCase)
+                     || shape.Name.Contains("Authorization", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Pois_AreNationwideLeafCategorizedAndSourceBacked()
+    {
+        Assert.All(DemoData.Pois, poi => Assert.Equal("admin", poi.Owner));
+        Assert.Equal(DemoData.ExpectedPoiCount,
+            DemoData.Pois.Select(poi => $"{poi.SourceKey}:{poi.SourceId}")
+                .Distinct(StringComparer.Ordinal).Count());
 
         var parentNames = DemoData.Categories
             .Where(category => category.Parent is not null)
@@ -122,87 +137,204 @@ public class DemoDataContractTests
             .Where(category => !parentNames.Contains(category.Name))
             .Select(category => category.Name)
             .ToHashSet(StringComparer.Ordinal);
-
         Assert.Equal(9, DemoData.Categories.Count(category => category.Parent is null));
         Assert.Equal(33, leaves.Count);
+        Assert.All(DemoData.Pois, poi => Assert.Contains(poi.Category, leaves));
 
-        // The per-category expectation is manifest-derived (curated + template rotation) and shared
-        // with the seeder's DB verification; here we assert its structural invariants.
-        var expectedCategoryUse = DemoSeeder.ExpectedPoiCategoryUse();
-        Assert.True(expectedCategoryUse.Keys.All(leaves.Contains));
-        Assert.All(leaves, leaf => Assert.True(expectedCategoryUse.GetValueOrDefault(leaf) > 0,
-            $"Leaf category '{leaf}' is never used by a curated or generated POI."));
-        Assert.Equal(DemoData.ExpectedPoiCount, expectedCategoryUse.Values.Sum());
+        var categoryUse = DemoSeeder.ExpectedPoiCategoryUse();
+        Assert.All(leaves, leaf => Assert.True(categoryUse.GetValueOrDefault(leaf) >= 2,
+            $"Leaf '{leaf}' has fewer than two real examples."));
+        var provinceUse = DemoData.Pois.GroupBy(poi => poi.Province)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var expectedExtras = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["İstanbul"] = 15,
+            ["Ankara"] = 12,
+            ["İzmir"] = 10,
+            ["Antalya"] = 10,
+            ["Bursa"] = 6,
+            ["Adana"] = 5,
+            ["Gaziantep"] = 5,
+            ["Konya"] = 5,
+            ["Kayseri"] = 4,
+            ["Mersin"] = 4,
+            ["Trabzon"] = 3,
+            ["Eskişehir"] = 2,
+        };
+        Assert.All(DemoData.Provinces, province => Assert.Equal(
+            3 + expectedExtras.GetValueOrDefault(province.Name),
+            provinceUse.GetValueOrDefault(province.Name)));
+        var byProvince = DemoData.Pois.GroupBy(poi => poi.Province)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        foreach (var province in DemoData.Provinces)
+        {
+            var rows = byProvince[province.Name];
+            Assert.Contains(rows, poi => poi.Category == "Hospital");
+            Assert.Contains(rows, poi => poi.Category is "Restaurant" or "Cafe" or "Bakery" or "Fast Food");
+            Assert.Contains(rows, poi => poi.Category is "Mall" or "Supermarket");
+        }
+        Assert.All(DemoData.Pois, poi =>
+        {
+            Assert.Equal("openstreetmap", poi.SourceKey);
+            Assert.True(
+                poi.SourceId.StartsWith("node/", StringComparison.Ordinal)
+                || poi.SourceId.StartsWith("way/", StringComparison.Ordinal),
+                $"POI '{poi.Name}' lost its canonical OSM object identity.");
+            var expectedHours = DemoData.PoiHoursByCategory[poi.Category];
+            Assert.Equal(expectedHours.Open, poi.Open);
+            Assert.Equal(expectedHours.Close, poi.Close);
+            Assert.Equal(DemoData.FixtureSnapshotDate, poi.CapturedAt);
+            Assert.False(string.IsNullOrWhiteSpace(poi.GeometrySource));
+        });
+        Assert.All(DemoData.Pois.Where(poi => poi.Category == "Hospital"), poi =>
+        {
+            Assert.Equal(new TimeOnly(0, 0), poi.Open);
+            Assert.Equal(new TimeOnly(23, 59), poi.Close);
+        });
 
-        // The rotation spreads the 12 templates evenly over the 81 provinces (each used 6-7 times).
-        var templateUse = Enumerable.Range(0, DemoData.ExpectedProvinceCount)
-            .GroupBy(index => index % DemoData.ProvincePoiTemplates.Count)
-            .Select(group => group.Count())
-            .ToList();
-        Assert.Equal(DemoData.ProvincePoiTemplates.Count, templateUse.Count);
-        Assert.All(templateUse, count => Assert.InRange(count, 6, 7));
+        var baselineByProvince = DemoData.Pois.Take(243)
+            .GroupBy(poi => poi.Province)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        Assert.Equal(81, baselineByProvince.Count);
+        foreach (var province in DemoData.Provinces)
+        {
+            var baseline = baselineByProvince[province.Name];
+            Assert.Equal(3, baseline.Length);
+            Assert.Single(baseline, poi => poi.Category == "Hospital");
+            Assert.Single(baseline,
+                poi => poi.Category is "Restaurant" or "Cafe" or "Bakery" or "Fast Food");
+            Assert.Single(baseline, poi => poi.Category is "Mall" or "Supermarket");
+        }
     }
 
     [Fact]
-    public void Routes_HaveTheApprovedOwnershipAndContiguouslyGroupedStops()
+    public void PoiReviewManifest_IsDatedUniqueAndMinistryCrossChecked()
+    {
+        var sourcePath = Path.Combine(
+            AppContext.BaseDirectory, "Data", "demo", "poi-baseline-selections.json");
+        using var document = JsonDocument.Parse(File.ReadAllText(sourcePath));
+        Assert.Equal(
+            DemoData.FixtureSnapshotDate,
+            document.RootElement.GetProperty("snapshot").GetString());
+
+        var selections = document.RootElement.GetProperty("selections").EnumerateArray().ToArray();
+        Assert.Equal(67, selections.Length);
+        Assert.Equal(
+            selections.Length,
+            selections.Select(selection =>
+                    $"{selection.GetProperty("province").GetString()}:"
+                    + selection.GetProperty("currentCategory").GetString() + ":"
+                    + (selection.TryGetProperty("replacesSourceId", out var replaces)
+                        ? replaces.GetString()
+                        : "province-baseline"))
+                .Distinct(StringComparer.Ordinal)
+                .Count());
+        Assert.Equal(
+            selections.Length,
+            selections.Select(selection => selection.GetProperty("sourceId").GetString())
+                .Distinct(StringComparer.Ordinal)
+                .Count());
+        Assert.All(selections, selection =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(
+                selection.GetProperty("expectedName").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(
+                selection.GetProperty("reviewNote").GetString()));
+        });
+
+        var cityHospitals = selections.Where(selection =>
+                selection.GetProperty("expectedName").GetString()!
+                    .Contains("Şehir Hastanesi", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        Assert.Equal(5, cityHospitals.Length);
+        Assert.All(cityHospitals, selection => Assert.StartsWith(
+            "https://khgm.saglik.gov.tr/",
+            selection.GetProperty("verificationUrl").GetString(),
+            StringComparison.Ordinal));
+        Assert.Contains(selections, selection =>
+            selection.GetProperty("province").GetString() == "Hakkari"
+            && selection.GetProperty("sourceId").GetString() == "way/363127799"
+            && selection.GetProperty("expectedName").GetString() == "Hakkari Devlet Hastanesi");
+    }
+
+    [Fact]
+    public void Transportation_HasTwentyFiveUrbanFiveIntercityAndHealthyGeometry()
     {
         AssertDictionaryEqual(
             new Dictionary<string, int>(StringComparer.Ordinal)
             {
-                ["istanbul_operator"] = 2,
-                ["antalya_operator"] = 2,
-                ["gaziantep_operator"] = 2,
-                ["trabzon_operator"] = 2,
+                ["İstanbul"] = 5,
+                ["Ankara"] = 5,
+                ["İzmir"] = 5,
+                ["Antalya"] = 5,
+                ["Bursa"] = 1,
+                ["Adana"] = 1,
+                ["Konya"] = 1,
+                ["Gaziantep"] = 1,
+                ["Trabzon"] = 1,
             },
-            DemoData.Routes
-                .GroupBy(route => route.Owner)
+            DemoData.Routes.Where(route => route.Kind == "urban")
+                .GroupBy(route => route.City)
                 .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal));
-
-        // manage_transport reaches nobody but the Operator role, so nobody else may own a route.
-        Assert.All(DemoData.Routes, route => Assert.Equal(
-            SeedData.OperatorRoleName,
-            DemoData.Users.Single(user => user.Username == route.Owner).Role));
-
-        // One color each, all of them shaped the way RouteSaveRequest demands.
-        Assert.Equal(
-            DemoData.Routes.Count,
-            DemoData.Routes.Select(route => route.Color).Distinct(StringComparer.Ordinal).Count());
-        Assert.All(DemoData.Routes, route => Assert.Matches("^#[0-9a-fA-F]{6}$", route.Color));
-
-        // Each route owns one unbroken run of the stop manifest, and that run's order is exactly what
-        // the seeder turns into SequenceOrder 1..N.
-        var runs = new List<(string Route, List<string> Stops)>();
-        foreach (var stop in DemoData.Stops)
-        {
-            if (runs.Count == 0 || !string.Equals(runs[^1].Route, stop.Route, StringComparison.Ordinal))
-                runs.Add((stop.Route, []));
-            runs[^1].Stops.Add(stop.Name);
-        }
-
-        Assert.Equal(DemoData.Routes.Select(route => route.Name), runs.Select(run => run.Route));
-        AssertDictionaryEqual(
-            new Dictionary<string, int>(StringComparer.Ordinal)
+        Assert.Equal(5, DemoData.Routes.Count(route => route.Kind == "intercity"));
+        Assert.True(
+            new HashSet<string>(StringComparer.Ordinal)
             {
-                ["Metrobüs (Beylikdüzü–Söğütlüçeşme)"] = 7,
-                ["M4 Kadıköy–Tavşantepe"] = 8,
-                ["Antalya Nostalji Tramvayı"] = 6,
-                ["AntRay T1 Fatih–Expo"] = 7,
-                ["Gaziantep Tramvay T1"] = 7,
-                ["GaziRay (Başpınar–Oğuzeli)"] = 6,
-                ["Trabzon Sahil Hattı"] = 8,
-                ["Trabzon–Uzungöl Hattı"] = 7,
-            },
-            runs.ToDictionary(run => run.Route, run => run.Stops.Count, StringComparer.Ordinal));
+                "İstanbul|34BZ", "İstanbul|34AS", "İstanbul|500T", "İstanbul|15F", "İstanbul|25E",
+                "Ankara|205", "Ankara|303", "Ankara|334-6", "Ankara|413", "Ankara|442",
+                "İzmir|202", "İzmir|515", "İzmir|584", "İzmir|808", "İzmir|950",
+                "Antalya|KL08", "Antalya|VS18", "Antalya|LC07A", "Antalya|ML22", "Antalya|VF63",
+                "Bursa|38/B-2", "Adana|114", "Konya|4-A", "Gaziantep|B39", "Trabzon|121",
+            }.SetEquals(DemoData.Routes.Where(route => route.Kind == "urban")
+                .Select(route => $"{route.City}|{route.LineCode}")
+                .ToHashSet(StringComparer.Ordinal)));
+        Assert.True(
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                "Intercity corridor · İstanbul–Ankara",
+                "Intercity corridor · İstanbul–Bursa–İzmir",
+                "Intercity corridor · Ankara–Konya–Antalya",
+                "Intercity corridor · İzmir–Aydın–Muğla–Antalya",
+                "Intercity corridor · Adana–Gaziantep–Şanlıurfa",
+            }.SetEquals(DemoData.Routes.Where(route => route.Kind == "intercity")
+                .Select(route => route.Name)
+                .ToHashSet(StringComparer.Ordinal)));
 
-        // Stop names repeat across routes on purpose (the two Trabzon lines share transfer points),
-        // never within a single route.
-        Assert.All(runs, run => Assert.Equal(
-            run.Stops.Count,
-            run.Stops.Distinct(StringComparer.Ordinal).Count()));
+        Assert.All(DemoData.Routes, route =>
+        {
+            Assert.True(route.DistanceMeters > 0);
+            Assert.True(route.DurationSeconds > 0);
+            Assert.True(route.DaysAgo >= 0);
+            Assert.StartsWith("LINESTRING", route.GeometryWkt, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(DemoData.FixtureSnapshotDate, route.CapturedAt);
+            Assert.True(
+                Uri.TryCreate(route.SourceUrl, UriKind.Absolute, out var sourceUrl)
+                && sourceUrl.Scheme is "http" or "https");
+        });
+
+        var stopGroups = DemoData.Stops.GroupBy(stop => stop.Route)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        Assert.Equal(DemoData.Routes.Count, stopGroups.Count);
+        foreach (var route in DemoData.Routes)
+        {
+            var stops = stopGroups[route.Name];
+            Assert.Equal(route.Kind == "urban" ? 8 : stops.Count, stops.Count);
+            if (route.Kind == "intercity") Assert.InRange(stops.Count, 2, 4);
+            Assert.Equal(stops.Count,
+                stops.Select(stop => stop.SourceId).Distinct(StringComparer.Ordinal).Count());
+            Assert.All(stops, stop =>
+            {
+                Assert.InRange(stop.Name.Length, 1, 80);
+                Assert.True(stop.DaysAgo >= 0);
+                Assert.Equal(DemoData.FixtureSnapshotDate, stop.CapturedAt);
+                Assert.StartsWith("http", stop.SourceUrl, StringComparison.OrdinalIgnoreCase);
+                Assert.False(string.IsNullOrWhiteSpace(stop.GeometrySource));
+            });
+        }
     }
 
     [Fact]
-    public void ProvinceManifest_HasSevenRegionsAndExactlyMatchesGeoJson()
+    public void ProvinceManifest_HasCoveredCapitalsAndExactlyMatchesGeoJson()
     {
         var expectedRegions = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -214,59 +346,46 @@ public class DemoDataContractTests
             ["Eastern Anatolia"] = 14,
             ["Southeastern Anatolia"] = 9,
         };
-        var actualRegions = DemoData.Provinces
+        AssertDictionaryEqual(expectedRegions, DemoData.Provinces
             .GroupBy(province => province.Region)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-        AssertDictionaryEqual(expectedRegions, actualRegions);
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal));
 
         var sourcePath = Path.Combine(AppContext.BaseDirectory, "Data", "provinces.geojson");
         using var document = JsonDocument.Parse(File.ReadAllText(sourcePath));
-        var sourceNames = document.RootElement
-            .GetProperty("features")
-            .EnumerateArray()
-            .Select(feature => feature.GetProperty("properties").GetProperty("name").GetString())
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => name!)
-            .ToArray();
-        var manifestNames = DemoData.Provinces.Select(province => province.Name).ToArray();
+        var options = new JsonSerializerOptions();
+        options.Converters.Add(new GeoJsonConverterFactory());
+        var features = document.RootElement.GetProperty("features").EnumerateArray().ToArray();
+        Assert.Equal(81, features.Length);
+        var manifestByName = DemoData.Provinces.ToDictionary(province => province.Name, StringComparer.Ordinal);
+        var boundarySourceIds = new HashSet<string>(StringComparer.Ordinal);
 
-        Assert.Equal(DemoData.ExpectedProvinceCount, sourceNames.Length);
-        Assert.Equal(sourceNames.Length, sourceNames.Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(
-            manifestNames.OrderBy(name => name, StringComparer.Ordinal),
-            sourceNames.OrderBy(name => name, StringComparer.Ordinal));
-
-        var geoJsonOptions = new JsonSerializerOptions();
-        geoJsonOptions.Converters.Add(new GeoJsonConverterFactory());
-        var sourceByName = document.RootElement
-            .GetProperty("features")
-            .EnumerateArray()
-            .ToDictionary(
-                feature => feature.GetProperty("properties").GetProperty("name").GetString()!,
-                feature => feature,
-                StringComparer.Ordinal);
-        for (var index = 0; index < DemoData.Provinces.Count; index++)
+        foreach (var feature in features)
         {
-            var province = DemoData.Provinces[index];
-            var feature = sourceByName[province.Name];
-            var boundary = JsonSerializer.Deserialize<Geometry>(
-                feature.GetProperty("geometry").GetRawText(),
-                geoJsonOptions);
-            Assert.NotNull(boundary);
-            if (!boundary.IsValid)
-                boundary = GeometryFixer.Fix(boundary);
-            boundary.SRID = 4326;
+            var properties = feature.GetProperty("properties");
+            var name = properties.GetProperty("name").GetString()!;
+            var manifest = manifestByName[name];
+            Assert.Equal(manifest.Region, properties.GetProperty("region").GetString());
+            Assert.Equal(manifest.Color, properties.GetProperty("color").GetString());
+            Assert.Equal(manifest.CapitalName, properties.GetProperty("capitalName").GetString());
+            Assert.Equal(manifest.BoundarySourceId,
+                properties.GetProperty("boundarySourceId").GetString());
+            Assert.StartsWith("relation/", manifest.BoundarySourceId, StringComparison.Ordinal);
+            Assert.True(boundarySourceIds.Add(manifest.BoundarySourceId),
+                $"Duplicate boundary source id {manifest.BoundarySourceId}.");
+            Assert.Equal(DemoData.FixtureSnapshotDate, manifest.CapturedAt);
 
-            var first = DemoSeeder.DeriveProvincePoints(boundary, index, province.Name);
-            var second = DemoSeeder.DeriveProvincePoints(boundary, index, province.Name);
-            Assert.True(boundary.Covers(first.Marker), $"{province.Name} marker escaped its boundary.");
-            Assert.True(boundary.Covers(first.Hub), $"{province.Name} hub escaped its boundary.");
-            Assert.True(first.Marker.Distance(first.Hub) > 1e-12,
-                $"{province.Name} marker and hub overlap.");
-            Assert.True(first.Marker.EqualsExact(second.Marker)
-                        && first.Hub.EqualsExact(second.Hub),
-                $"{province.Name} derived points are not deterministic.");
+            var boundary = JsonSerializer.Deserialize<Geometry>(
+                feature.GetProperty("geometry").GetRawText(), options)!;
+            Assert.IsType<MultiPolygon>(boundary);
+            Assert.True(boundary.IsValid, $"{name} has invalid source geometry.");
+            var capital = new Point(manifest.CapitalLongitude, manifest.CapitalLatitude);
+            Assert.True(boundary.Covers(capital),
+                $"{manifest.CapitalName} is outside {manifest.Name}.");
         }
+        Assert.Equal(81, boundarySourceIds.Count);
+        Assert.Equal("İzmit", manifestByName["Kocaeli"].CapitalName);
+        Assert.Equal("Adapazarı", manifestByName["Sakarya"].CapitalName);
+        Assert.Equal("Antakya", manifestByName["Hatay"].CapitalName);
     }
 
     [Fact]
@@ -278,9 +397,8 @@ public class DemoDataContractTests
         var rolePermissions = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
         {
             [SeedData.AdminRoleName] = allPermissions,
-            [SeedData.OperatorRoleName] =
-                SeedData.OperatorPermissions.ToHashSet(StringComparer.Ordinal),
-            [SeedData.ViewerRoleName] = new(StringComparer.Ordinal),
+            [SeedData.OperatorRoleName] = SeedData.OperatorPermissions.ToHashSet(StringComparer.Ordinal),
+            [SeedData.ViewerRoleName] = [],
         };
         foreach (var role in DemoData.Roles)
             rolePermissions[role.Name] = role.Permissions.ToHashSet(StringComparer.Ordinal);
@@ -296,39 +414,32 @@ public class DemoDataContractTests
         {
             var inherited = rolePermissions[user.Role];
             Assert.Empty(user.DirectPermissions.Intersect(inherited, StringComparer.Ordinal));
-
-            var effective = inherited
-                .Concat(user.DirectPermissions)
-                .ToHashSet(StringComparer.Ordinal);
+            var effective = inherited.Concat(user.DirectPermissions).ToHashSet(StringComparer.Ordinal);
             var expected = user.Username switch
             {
                 "admin" => allPermissions,
                 "ankara_editor" => Set("add_point", "add_line", "add_polygon"),
                 "istanbul_editor" or "izmir_editor" or "antalya_editor" =>
                     Set("add_point", "add_line"),
-                "istanbul_operator" or "antalya_operator" or
-                    "gaziantep_operator" or "trabzon_operator" => Set("manage_transport"),
+                "istanbul_operator" or "antalya_operator" or "gaziantep_operator"
+                    or "trabzon_operator" or "ankara_operator" or "izmir_operator" =>
+                    Set("manage_transport"),
                 "viewer" => Set(),
                 _ => Set("add_point", "add_line", "add_polygon"),
             };
             AssertSetEqual(expected, effective);
         }
-
         Assert.Equal(["add_polygon"],
             DemoData.Users.Single(user => user.Username == "ankara_editor").DirectPermissions);
-        Assert.All(
-            DemoData.Users.Where(user => user.Username != "ankara_editor"),
+        Assert.All(DemoData.Users.Where(user => user.Username != "ankara_editor"),
             user => Assert.Empty(user.DirectPermissions));
     }
 
     private static HashSet<string> Set(params string[] values) =>
         values.ToHashSet(StringComparer.Ordinal);
 
-    private static void AssertSetEqual(
-        IEnumerable<string> expected,
-        IEnumerable<string> actual) =>
-        Assert.True(
-            expected.ToHashSet(StringComparer.Ordinal).SetEquals(actual),
+    private static void AssertSetEqual(IEnumerable<string> expected, IEnumerable<string> actual) =>
+        Assert.True(expected.ToHashSet(StringComparer.Ordinal).SetEquals(actual),
             $"Expected [{string.Join(", ", expected)}], actual [{string.Join(", ", actual)}].");
 
     private static void AssertDictionaryEqual(

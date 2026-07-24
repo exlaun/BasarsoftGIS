@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import './AttributeModal.css'
+import ModalCloseButton from './ModalCloseButton'
 
 // Popup shown after a shape is drawn (drawend). Collects the shape's attributes — Name and Color —
-// before it is saved to the database. Save passes them up; Cancel discards the drawn shape.
+// before it is saved to the database. Save passes it up; the header X discards the drawn shape.
 const DEFAULT_COLOR = '#2563eb'
 
 export default function AttributeModal({ onSave, onCancel }) {
@@ -15,7 +16,7 @@ export default function AttributeModal({ onSave, onCancel }) {
     nameInputRef.current?.focus()
   }, [])
 
-  // Escape closes the popup (same as Cancel — discards the drawing).
+  // Escape closes the popup and discards the drawing.
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onCancel()
@@ -36,7 +37,10 @@ export default function AttributeModal({ onSave, onCancel }) {
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Shape details">
       <form className="attr-modal" onSubmit={handleSubmit}>
-        <h2 className="attr-modal-title">Shape details</h2>
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">Shape details</h2>
+          <ModalCloseButton onClick={onCancel} label="Close shape details" />
+        </div>
 
         <label className="attr-modal-field">
           <span>Name *</span>
@@ -60,9 +64,6 @@ export default function AttributeModal({ onSave, onCancel }) {
         </label>
 
         <div className="attr-modal-actions">
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onCancel}>
-            Cancel
-          </button>
           <button
             type="submit"
             className="attr-modal-btn attr-modal-save"

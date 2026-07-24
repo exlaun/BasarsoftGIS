@@ -19,3 +19,23 @@ public class ProvinceDetailResponse
 
     public string Wkt { get; set; } = string.Empty;
 }
+
+// GET /api/provinces/map: one boundary/capital pair for the nationwide reference layer. Both
+// geometries use EPSG:4326 WKT and share the same province id/color so the client can style and
+// highlight the relationship without attempting a spatial join in the browser.
+public class ProvinceMapResponse
+{
+    public int Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string Region { get; set; } = string.Empty;
+
+    public string Color { get; set; } = string.Empty;
+
+    public string BoundaryWkt { get; set; } = string.Empty;
+
+    public string CapitalName { get; set; } = string.Empty;
+
+    public string CapitalWkt { get; set; } = string.Empty;
+}

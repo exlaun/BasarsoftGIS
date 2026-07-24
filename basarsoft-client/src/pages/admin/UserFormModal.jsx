@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createUser, updateUser } from '../../api/admin'
+import ModalCloseButton from '../../components/ModalCloseButton'
 
 // Create or edit a user. In create mode you set a username + password and can optionally tick roles to
 // grant right away; in edit mode you can rename, toggle active, and optionally reset the password
@@ -70,6 +71,7 @@ export default function UserFormModal({ mode, user, roles, onClose, onSuccess })
       <form className="admin-modal" onSubmit={handleSubmit}>
         <div className="admin-modal-head">
           <h2 className="admin-modal-title">{isEdit ? 'Edit user' : 'Add user'}</h2>
+          <ModalCloseButton onClick={onClose} label="Close user dialog" />
         </div>
 
         <div className="admin-modal-body">
@@ -124,9 +126,6 @@ export default function UserFormModal({ mode, user, roles, onClose, onSuccess })
         </div>
 
         <div className="admin-modal-foot">
-          <button type="button" className="admin-btn" onClick={onClose}>
-            Cancel
-          </button>
           <button type="submit" className="admin-btn admin-btn-primary" disabled={!canSubmit}>
             {isEdit ? 'Save' : 'Create'}
           </button>

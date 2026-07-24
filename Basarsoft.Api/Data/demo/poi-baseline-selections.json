@@ -1,0 +1,562 @@
+{
+  "snapshot": "2026-07-22",
+  "selections": [
+    {
+      "province": "Kayseri",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/861302200",
+      "expectedName": "Şehir Hastanesi",
+      "verificationUrl": "https://khgm.saglik.gov.tr/TR-92795/sehir-hastanelerimiz.html?Sayfa=2",
+      "reviewNote": "Replaces an entrance node with the mapped city-hospital campus."
+    },
+    {
+      "province": "Kırşehir",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/310469185",
+      "expectedName": "Kırşehir Devlet Hastanesi",
+      "reviewNote": "Replaces an occupational health unit with a state hospital."
+    },
+    {
+      "province": "Adana",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/330200468",
+      "expectedName": "Adana Şehir Hastanesi",
+      "verificationUrl": "https://khgm.saglik.gov.tr/TR-92795/sehir-hastanelerimiz.html?Sayfa=1",
+      "reviewNote": "Replaces a surgical medical center with the mapped city hospital."
+    },
+    {
+      "province": "Hakkari",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/363127799",
+      "expectedName": "Hakkari Devlet Hastanesi",
+      "reviewNote": "Replaces a family health center with the provincial state hospital."
+    },
+    {
+      "province": "Denizli",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/136434233",
+      "expectedName": "Denizli Devlet Hastanesi",
+      "reviewNote": "Replaces an emergency-department point with the complete hospital."
+    },
+    {
+      "province": "Kırıkkale",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/658430952",
+      "expectedName": "Yüksek İhtisas Hastanesi",
+      "reviewNote": "Replaces a dentistry faculty with a named hospital."
+    },
+    {
+      "province": "Sivas",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/966955464",
+      "expectedName": "Sivas Numune Hastanesi",
+      "reviewNote": "Replaces a child-development center with a named hospital."
+    },
+    {
+      "province": "Adıyaman",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/313527798",
+      "expectedName": "Adıyaman Üniversitesi Eğitim Araştırma Hastanesi",
+      "reviewNote": "Uses the mapped university education and research hospital."
+    },
+    {
+      "province": "Mardin",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/475275100",
+      "expectedName": "Mardin Eğitim ve Araştırma Hastanesi",
+      "reviewNote": "Replaces a dental health center with the provincial research hospital."
+    },
+    {
+      "province": "Bayburt",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/969591019",
+      "expectedName": "Bayburt Devlet Hastanesi",
+      "reviewNote": "Replaces the explicitly old hospital grounds with the current state hospital."
+    },
+    {
+      "province": "Ordu",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/670970880",
+      "expectedName": "Ordu Üniversitesi Eğitim Araştırma Hastanesi",
+      "reviewNote": "Replaces a health directorate with the university research hospital."
+    },
+    {
+      "province": "Amasya",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/190818139",
+      "expectedName": "Amasya Üniversitesi Sabuncuoğlu Şerefeddin Eğitim ve Araştırma Hastanesi",
+      "reviewNote": "Replaces a dental health center with the university research hospital."
+    },
+    {
+      "province": "Karabük",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/687627629",
+      "expectedName": "KBÜ Eğitim Araştırma Hastanesi",
+      "reviewNote": "Uses the broader university education and research hospital."
+    },
+    {
+      "province": "Bartın",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/1299798884",
+      "expectedName": "Bartın Devlet Hastanesi",
+      "reviewNote": "Replaces a medical center with the state hospital."
+    },
+    {
+      "province": "Edirne",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/1530289151",
+      "expectedName": "Edirne Sultan 1. Murat Devlet Hastanesi",
+      "reviewNote": "Replaces an ambiguous unit point with the state hospital."
+    },
+    {
+      "province": "Kırklareli",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/573754941",
+      "expectedName": "Kırklareli Eğitim ve Araştırma Hastanesi",
+      "reviewNote": "Replaces a dialysis center with the provincial research hospital."
+    },
+    {
+      "province": "Tekirdağ",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/617098632",
+      "expectedName": "Tekirdağ Doktor İsmail Fehmi Cumalıoğlu Şehir Hastanesi",
+      "verificationUrl": "https://khgm.saglik.gov.tr/TR-92795/sehir-hastanelerimiz.html?Sayfa=2",
+      "reviewNote": "Replaces a family health center with the mapped city hospital."
+    },
+    {
+      "province": "Yalova",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/1306193760",
+      "expectedName": "Yalova Eğitim ve Araştırma Hastanesi",
+      "reviewNote": "Replaces a health-center point with the provincial research hospital."
+    },
+    {
+      "province": "Kocaeli",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/1154009656",
+      "expectedName": "Kocaeli Şehir Hastanesi",
+      "verificationUrl": "https://khgm.saglik.gov.tr/TR-92795/sehir-hastanelerimiz.html?Sayfa=2",
+      "reviewNote": "Replaces a medical center with the mapped city-hospital campus."
+    },
+    {
+      "province": "İstanbul",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/793003829",
+      "expectedName": "Başakşehir Çam ve Sakura Şehir Hastanesi",
+      "verificationUrl": "https://khgm.saglik.gov.tr/TR-92795/sehir-hastanelerimiz.html?Sayfa=1",
+      "reviewNote": "Uses a recognized mapped city-hospital campus."
+    },
+    {
+      "province": "Ardahan",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/1310435506",
+      "expectedName": "Ardahan Devlet Hastanesi",
+      "reviewNote": "Replaces a dental health center with the state hospital."
+    },
+    {
+      "province": "Burdur",
+      "currentCategory": "Hospital",
+      "replacementCategory": "Hospital",
+      "sourceId": "way/1272754030",
+      "expectedName": "Burdur Devlet Hastanesi",
+      "reviewNote": "Uses the active mapped state-hospital campus; the older same-name object carries disused:amenity=hospital."
+    },
+    {
+      "province": "Nevşehir",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/150768852",
+      "expectedName": "Forum Kapadokya",
+      "reviewNote": "Replaces the generic name Market with a mapped shopping center."
+    },
+    {
+      "province": "Yozgat",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/659946314",
+      "expectedName": "Novada AVM",
+      "reviewNote": "Replaces a computer shop incorrectly tagged as a mall."
+    },
+    {
+      "province": "Adana",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/1202381128",
+      "expectedName": "M1 Adana AVM",
+      "reviewNote": "Replaces a school incorrectly tagged as a mall."
+    },
+    {
+      "province": "Osmaniye",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/268889516",
+      "expectedName": "Park 328 AVM",
+      "reviewNote": "Replaces a home-goods retailer with a mapped AVM."
+    },
+    {
+      "province": "Hakkari",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/430615965",
+      "expectedName": "Yaşam Mega Avm",
+      "reviewNote": "Uses a mapped shopping-center footprint rather than a retail point."
+    },
+    {
+      "province": "Hatay",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/306308090",
+      "expectedName": "Primemall AVM",
+      "reviewNote": "Uses a recognized mapped AVM footprint."
+    },
+    {
+      "province": "Mersin",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/217477732",
+      "expectedName": "Forum Mersin AVM",
+      "reviewNote": "Uses a recognized mapped shopping-center footprint."
+    },
+    {
+      "province": "Antalya",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/1152366389",
+      "expectedName": "MarkAntalya",
+      "reviewNote": "Replaces a bazaar point with a major-city shopping center."
+    },
+    {
+      "province": "Konya",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/527221774",
+      "expectedName": "Kent Plaza AVM",
+      "reviewNote": "Replaces an ambiguous mall name with a recognized shopping center."
+    },
+    {
+      "province": "Muğla",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/497730952",
+      "expectedName": "Erasta AVM",
+      "reviewNote": "Replaces an ambiguous retail point with a mapped AVM footprint."
+    },
+    {
+      "province": "Karaman",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/844945472",
+      "expectedName": "Park AVM Karaman",
+      "reviewNote": "Replaces a cafeteria incorrectly tagged as a mall."
+    },
+    {
+      "province": "Denizli",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/305490429",
+      "expectedName": "Forum Denizli",
+      "reviewNote": "Replaces a supermarket-hardware pairing with a mapped shopping center."
+    },
+    {
+      "province": "Uşak",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/138390826",
+      "expectedName": "Özdilek AVM",
+      "reviewNote": "Replaces a long-form home-goods retailer listing with a mapped AVM."
+    },
+    {
+      "province": "Bilecik",
+      "currentCategory": "Mall",
+      "replacementCategory": "Supermarket",
+      "sourceId": "node/8980125508",
+      "expectedName": "BİM",
+      "reviewNote": "Uses the allowed named-supermarket fallback instead of an outlet retailer."
+    },
+    {
+      "province": "Tokat",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/202133725",
+      "expectedName": "Novada Tokat",
+      "reviewNote": "Replaces a building-materials retailer with a mapped shopping center."
+    },
+    {
+      "province": "Batman",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/221191166",
+      "expectedName": "Batman Park AVM",
+      "reviewNote": "Replaces an ambiguous retail point with a mapped AVM footprint."
+    },
+    {
+      "province": "Trabzon",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/157111157",
+      "expectedName": "Forum Trabzon",
+      "reviewNote": "Replaces a department-store point with the shopping-center footprint."
+    },
+    {
+      "province": "Bartın",
+      "currentCategory": "Mall",
+      "replacementCategory": "Supermarket",
+      "sourceId": "node/13201049869",
+      "expectedName": "BİM",
+      "reviewNote": "Uses the allowed named-supermarket fallback instead of an ambiguous mall tag."
+    },
+    {
+      "province": "Düzce",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/277203139",
+      "expectedName": "KremPark AVM",
+      "reviewNote": "Replaces a furniture retailer with a mapped shopping center."
+    },
+    {
+      "province": "Edirne",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/503917613",
+      "expectedName": "Edirne Erasta Alışveriş Merkezi",
+      "reviewNote": "Replaces an event venue incorrectly tagged as a mall."
+    },
+    {
+      "province": "Çanakkale",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/634313448",
+      "expectedName": "Troypark Alışveriş Merkezi",
+      "reviewNote": "Replaces an ambiguous retail point with a mapped shopping center."
+    },
+    {
+      "province": "Kocaeli",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/866045612",
+      "expectedName": "Symbol AVM",
+      "reviewNote": "Replaces an ambiguous retail point with a mapped shopping center."
+    },
+    {
+      "province": "Amasya",
+      "currentCategory": "Mall",
+      "replacementCategory": "Mall",
+      "sourceId": "way/555210978",
+      "expectedName": "Amasya Park AVM",
+      "reviewNote": "Replaces an office arcade with a mapped AVM."
+    },
+    {
+      "province": "Adana",
+      "currentCategory": "Restaurant",
+      "replacementCategory": "Restaurant",
+      "sourceId": "node/10310159309",
+      "expectedName": "Tarihi Nuri Has Kebapçısı",
+      "reviewNote": "Replaces a cafe-named record with a clearly named restaurant."
+    },
+    {
+      "province": "Kars",
+      "currentCategory": "Restaurant",
+      "replacementCategory": "Restaurant",
+      "sourceId": "node/5896875485",
+      "expectedName": "Ani Ocakbasi",
+      "reviewNote": "Replaces the generic name lokanta with a named restaurant."
+    },
+    {
+      "province": "Bilecik",
+      "currentCategory": "Restaurant",
+      "replacementCategory": "Restaurant",
+      "sourceId": "node/13188990801",
+      "expectedName": "Vural Usta Pide",
+      "reviewNote": "Replaces a buffet-named record with a clearly named restaurant."
+    },
+    {
+      "province": "Ankara",
+      "currentCategory": "Restaurant",
+      "replacementCategory": "Restaurant",
+      "sourceId": "node/4119008893",
+      "expectedName": "Tarihî Özen Lokantası",
+      "reviewNote": "Replaces a bakery-named record with a clearly named restaurant."
+    },
+    {
+      "province": "Samsun",
+      "currentCategory": "Restaurant",
+      "replacementCategory": "Restaurant",
+      "sourceId": "way/1429593347",
+      "expectedName": "153 Restoran",
+      "reviewNote": "Replaces a cafe-named record with a mapped restaurant."
+    },
+    {
+      "province": "Bartın",
+      "currentCategory": "Restaurant",
+      "replacementCategory": "Restaurant",
+      "sourceId": "node/12893835290",
+      "expectedName": "Bartın Kent Lokantası",
+      "reviewNote": "Replaces a cafe-named record with a municipal restaurant."
+    },
+    {
+      "province": "İstanbul",
+      "currentCategory": "Historical Site",
+      "replacementCategory": "Visitor Center",
+      "replacesSourceId": "node/269497288",
+      "sourceId": "node/3459530817",
+      "expectedName": "Turist Bilgi Merkezi",
+      "reviewNote": "Moves this category slot to a mapped tourist information center; Ankara receives a real historic-site replacement in the paired review."
+    },
+    {
+      "province": "İstanbul",
+      "currentCategory": "Historical Site",
+      "replacementCategory": "Visitor Center",
+      "replacesSourceId": "node/415157636",
+      "sourceId": "node/9062385892",
+      "expectedName": "Ziyaretçi Eğitim ve Tanıtım Merkezi",
+      "reviewNote": "Uses a specifically named visitor education and information center rather than relabeling an attraction."
+    },
+    {
+      "province": "Ankara",
+      "currentCategory": "Visitor Center",
+      "replacementCategory": "Historical Site",
+      "replacesSourceId": "node/2726257853",
+      "sourceId": "node/34668145",
+      "expectedName": "Anıtkabir",
+      "reviewNote": "Uses the actual historic monument node; the old source was only an unclassified tourism-information point."
+    },
+    {
+      "province": "Ankara",
+      "currentCategory": "Visitor Center",
+      "replacementCategory": "Historical Site",
+      "replacesSourceId": "node/11815139723",
+      "sourceId": "way/638950300",
+      "expectedName": "Güven Abidesi",
+      "reviewNote": "Replaces a school-history information board with a mapped historic monument."
+    },
+    {
+      "province": "İstanbul",
+      "currentCategory": "24/7 Pharmacy",
+      "replacementCategory": "24/7 Pharmacy",
+      "replacesSourceId": "node/5081265969",
+      "sourceId": "node/5329311642",
+      "expectedName": "Hale Eczanesi",
+      "reviewNote": "Replaces a university health center mis-tagged as a pharmacy with a named pharmacy carrying opening_hours=24/7."
+    },
+    {
+      "province": "İzmir",
+      "currentCategory": "Airport",
+      "replacementCategory": "Airport",
+      "replacesSourceId": "way/308553267",
+      "sourceId": "way/440701548",
+      "expectedName": "Adnan Menderes Havalimanı",
+      "reviewNote": "Replaces a military air base with İzmir's mapped public international airport."
+    },
+    {
+      "province": "İzmir",
+      "currentCategory": "Bus Terminal",
+      "replacementCategory": "Bus Terminal",
+      "replacesSourceId": "node/358606063",
+      "sourceId": "way/23629486",
+      "expectedName": "İzmir Şehirlerarası Otobüs Terminali",
+      "reviewNote": "Uses the mapped intercity coach terminal rather than a metro-named local bus interchange."
+    },
+    {
+      "province": "İzmir",
+      "currentCategory": "Bus Terminal",
+      "replacementCategory": "Bus Terminal",
+      "replacesSourceId": "node/491834095",
+      "sourceId": "way/1294951565",
+      "expectedName": "Fahrettin Altay Aktarma Merkezi",
+      "reviewNote": "Uses a named mapped transfer terminal rather than the ambiguous İZYUVA turning-circle record."
+    },
+    {
+      "province": "İzmir",
+      "currentCategory": "Metro Station",
+      "replacementCategory": "Metro Station",
+      "replacesSourceId": "node/685223691",
+      "sourceId": "node/5388472390",
+      "expectedName": "Konak",
+      "reviewNote": "Replaces a subway entrance with the mapped Konak station object."
+    },
+    {
+      "province": "İzmir",
+      "currentCategory": "Metro Station",
+      "replacementCategory": "Metro Station",
+      "replacesSourceId": "node/685223693",
+      "sourceId": "node/5388472391",
+      "expectedName": "Çankaya",
+      "reviewNote": "Replaces a subway entrance with the mapped Çankaya station object."
+    },
+    {
+      "province": "Antalya",
+      "currentCategory": "High School",
+      "replacementCategory": "High School",
+      "replacesSourceId": "node/379330997",
+      "sourceId": "way/299684058",
+      "expectedName": "Antalya Lisesi",
+      "reviewNote": "Replaces a primary school with a mapped Ministry-operated high school."
+    },
+    {
+      "province": "Antalya",
+      "currentCategory": "High School",
+      "replacementCategory": "High School",
+      "replacesSourceId": "node/1646070823",
+      "sourceId": "way/1345821171",
+      "expectedName": "Antalya Mesleki ve Teknik Anadolu Lisesi",
+      "reviewNote": "Replaces an elementary school with a mapped grades 9–12 vocational high school."
+    },
+    {
+      "province": "Kayseri",
+      "currentCategory": "Cafe",
+      "replacementCategory": "Ski Center",
+      "replacesSourceId": "node/801169629",
+      "sourceId": "way/815651521",
+      "expectedName": "Erciyes Kayak Merkezi",
+      "reviewNote": "Provides a second genuine ski-center example from a mapped winter-sports area; Bursa receives a real cafe in the paired review."
+    },
+    {
+      "province": "Bursa",
+      "currentCategory": "Ski Center",
+      "replacementCategory": "Stadium",
+      "replacesSourceId": "node/13401403183",
+      "sourceId": "way/490110777",
+      "expectedName": "Gemlik İlçe Stadyumu",
+      "reviewNote": "Replaces a ski-equipment shop with a named mapped district stadium."
+    },
+    {
+      "province": "Gaziantep",
+      "currentCategory": "Stadium",
+      "replacementCategory": "Stadium",
+      "replacesSourceId": "node/175628712",
+      "sourceId": "way/1136385906",
+      "expectedName": "Kalyon Stadyumu",
+      "reviewNote": "Replaces a generic transit stop named Stadyum with the mapped stadium footprint."
+    },
+    {
+      "province": "Gaziantep",
+      "currentCategory": "Stadium",
+      "replacementCategory": "Museum",
+      "replacesSourceId": "node/10167187176",
+      "sourceId": "node/5591971852",
+      "expectedName": "Devr-i Alem Para Müzesi",
+      "reviewNote": "Replaces a second generic transit stop named Stadyum with a distinct named mapped museum."
+    }
+  ]
+}

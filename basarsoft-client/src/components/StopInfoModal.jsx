@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import './AttributeModal.css'
 import './ShapeInfoModal.css'
+import ModalCloseButton from './ModalCloseButton'
 
 // Read-only info popup for a stop on the map (clicked with the Select tool), following the existing
 // GIS point-popup pattern (PoiInfoModal). Authorized transport managers can start an explicit map
@@ -17,8 +18,11 @@ export default function StopInfoModal({ stop, canRelocate = false, onRelocate, o
 
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Stop info">
-      <div className="attr-modal">
-        <h2 className="attr-modal-title">Stop info</h2>
+      <div className="attr-modal info-modal">
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">Stop info</h2>
+          <ModalCloseButton onClick={onClose} label="Close stop info" />
+        </div>
 
         <dl className="shape-info-meta">
           <div className="shape-info-wide">
@@ -76,9 +80,6 @@ export default function StopInfoModal({ stop, canRelocate = false, onRelocate, o
               Relocate
             </button>
           )}
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onClose}>
-            Close
-          </button>
         </div>
       </div>
     </div>

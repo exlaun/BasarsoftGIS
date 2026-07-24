@@ -8,14 +8,9 @@ const foldText = (value) =>
     .replace(/[\u0300-\u036f]/g, '')
 
 export function routeListState(route) {
-  if (route?.isGeometryStale) return { key: 'stale', label: 'Stale' }
-  if (route?.geometryWkt) return { key: 'ready', label: 'Ready' }
+  if (route?.isGeometryStale) return { key: 'stale', label: 'Needs rebuild' }
+  if (route?.geometryWkt) return { key: 'ready', label: 'Built' }
   return { key: 'not-built', label: 'Not built' }
-}
-
-function enabledStatus(statuses, key) {
-  if (statuses instanceof Set) return statuses.has(key)
-  return statuses?.[key] !== false
 }
 
 function comparable(route, sortBy) {
@@ -30,7 +25,7 @@ function comparable(route, sortBy) {
 
 export function filterAndSortRoutes(
   routes,
-  { query = '', statuses = {}, sortBy = 'createdAt', sortDir = 'desc' } = {},
+  { query = '', sortBy = 'createdAt', sortDir = 'desc' } = {},
 ) {
   const foldedQuery = foldText(query.trim())
   const direction = sortDir === 'asc' ? 1 : -1
@@ -38,9 +33,7 @@ export function filterAndSortRoutes(
   return (routes ?? [])
     .map((route, index) => ({ route, index }))
     .filter(({ route }) => {
-      const state = routeListState(route)
-      return enabledStatus(statuses, state.key) &&
-        (!foldedQuery || foldText(route.name).includes(foldedQuery))
+      return !foldedQuery || foldText(route.name).includes(foldedQuery)
     })
     .sort((left, right) => {
       const a = comparable(left.route, sortBy)

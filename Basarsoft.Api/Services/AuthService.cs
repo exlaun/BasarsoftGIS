@@ -47,15 +47,19 @@ public class AuthService : IAuthService
         return _tokenService.CreateToken(user);
     }
 
-    public async Task<AuthResponse?> LoginAsync(LoginRequest request)
+    public async Task<LoginResult> LoginAsync(LoginRequest request)
     {
         var user = await _db.Users.SingleOrDefaultAsync(u => u.Username == request.Username);
-        // Soft-deleted users are already filtered out by the global query filter. A deactivated
-        // (is_active = false) account exists but cannot log in.
-        if (user is null || !user.IsActive || !BC.Verify(request.Password, user.PasswordHash))
-            return null;
+        // Soft-deleted users are already filtered out by the global query filter. Keep unknown
+        // usernames and wrong passwords indistinguishable, but tell the client when a known account
+        // was deliberately disabled by an administrator.
+        if (user is null || !BC.Verify(request.Password, user.PasswordHash))
+            return LoginResult.InvalidCredentials;
 
-        return _tokenService.CreateToken(user);
+        if (!user.IsActive)
+            return LoginResult.Disabled;
+
+        return LoginResult.Ok(_tokenService.CreateToken(user));
     }
 
     public Task<bool> UserExistsAsync(string username)

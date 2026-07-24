@@ -9,6 +9,8 @@ import {
   updateAdminStop,
 } from '../../api/transportation'
 import { persistedRoutingMutation } from '../../utils/transportationMap'
+import { moveItem } from '../../utils/reorderList'
+import ModalCloseButton from '../../components/ModalCloseButton'
 import AdminConfirm from './AdminConfirm'
 
 const DEFAULT_ROUTE_COLOR = '#2563eb'
@@ -21,8 +23,8 @@ function unpackSnapshot(snapshot) {
 }
 
 function routeState(route) {
-  if (route.isGeometryStale) return { label: 'Stale', className: 'stale' }
-  if (route.geometryWkt) return { label: 'Ready', className: 'ready' }
+  if (route.isGeometryStale) return { label: 'Needs rebuild', className: 'stale' }
+  if (route.geometryWkt) return { label: 'Built', className: 'ready' }
   return { label: 'Not built', className: 'not-built' }
 }
 
@@ -81,8 +83,11 @@ function TransportationEditModal({ target, onClose, onSaved }) {
     <div className="admin-modal-overlay" role="dialog" aria-modal="true" aria-label={`Edit ${target.type}`}>
       <form className="admin-modal" onSubmit={handleSubmit}>
         <div className="admin-modal-head">
-          <h2 className="admin-modal-title">Edit {target.type}</h2>
-          <p className="admin-modal-desc">Presentation-only changes do not rebuild road geometry.</p>
+          <div>
+            <h2 className="admin-modal-title">Edit {target.type}</h2>
+            <p className="admin-modal-desc">Presentation-only changes do not rebuild road geometry.</p>
+          </div>
+          <ModalCloseButton onClick={onClose} label={`Close ${target.type} dialog`} />
         </div>
         <div className="admin-modal-body">
           <label className="admin-field">
@@ -126,7 +131,6 @@ function TransportationEditModal({ target, onClose, onSaved }) {
           {error && <p className="admin-error">{error}</p>}
         </div>
         <div className="admin-modal-foot">
-          <button type="button" className="admin-btn" onClick={onClose}>Cancel</button>
           <button
             type="submit"
             className="admin-btn admin-btn-primary"
@@ -148,6 +152,9 @@ export default function TransportationPage() {
   const [editing, setEditing] = useState(null)
   // Pending delete awaiting confirmation: { type: 'route'|'stop', item } or null.
   const [deleting, setDeleting] = useState(null)
+  const [expandedRouteId, setExpandedRouteId] = useState(null)
+  const [dragIndex, setDragIndex] = useState(null)
+  const [overIndex, setOverIndex] = useState(null)
   const [busyRouteId, setBusyRouteId] = useState(null)
   const [toast, setToast] = useState(null)
   const toastTimer = useRef(null)
@@ -206,11 +213,16 @@ export default function TransportationPage() {
     ])
   }, [replaceRoute])
 
-  const handleMove = async (route, routeStops, index, offset) => {
-    const targetIndex = index + offset
-    if (targetIndex < 0 || targetIndex >= routeStops.length || busyRouteId != null) return
-    const next = [...routeStops]
-    ;[next[index], next[targetIndex]] = [next[targetIndex], next[index]]
+  const resetDrag = () => {
+    setDragIndex(null)
+    setOverIndex(null)
+  }
+
+  const handleDrop = async (route, routeStops) => {
+    const next = moveItem(routeStops, dragIndex, overIndex)
+    resetDrag()
+    if (!next || busyRouteId != null) return
+
     setBusyRouteId(route.id)
     try {
       reconcileOrder(route.id, await reorderAdminStops(route.id, next.map((stop) => stop.id)))
@@ -283,7 +295,7 @@ export default function TransportationPage() {
         <div>
           <h1 className="admin-page-title">Transportation</h1>
           <p className="admin-page-sub">
-            Routes, ordered stops, and persisted OSRM road-geometry health.
+            Select a route to inspect its ordered stops and persisted OSRM road-geometry health.
           </p>
         </div>
         <button type="button" className="admin-btn" onClick={load} disabled={loading}>Refresh</button>
@@ -301,14 +313,35 @@ export default function TransportationPage() {
             const routeStops = stopsByRoute.get(route.id) ?? []
             const state = routeState(route)
             const busy = busyRouteId === route.id
+            const expanded = expandedRouteId === route.id
             return (
-              <section key={route.id} className="admin-card transport-admin-route">
-                <div className="transport-admin-route-head">
-                  <span
-                    className="transport-admin-swatch"
-                    style={{ background: route.color || DEFAULT_ROUTE_COLOR }}
-                    aria-hidden="true"
-                  />
+              <section key={route.id} className={`admin-card transport-admin-route${expanded ? ' is-expanded' : ''}`}>
+                <div
+                  className="transport-admin-route-head"
+                  onClick={() => setExpandedRouteId((current) => current === route.id ? null : route.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      setExpandedRouteId((current) => current === route.id ? null : route.id)
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={expanded}
+                  aria-label={`${expanded ? 'Collapse' : 'Expand'} ${route.name}`}
+                >
+                  <div className="transport-admin-route-leading">
+                    <span className={`transport-admin-expand${expanded ? ' is-expanded' : ''}`} aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M9 6l6 6-6 6" />
+                      </svg>
+                    </span>
+                    <span
+                      className="transport-admin-swatch"
+                      style={{ background: route.color || DEFAULT_ROUTE_COLOR }}
+                      aria-hidden="true"
+                    />
+                  </div>
                   <div className="transport-admin-heading">
                     <h2>{route.name}</h2>
                     <span>{route.stopCount} {route.stopCount === 1 ? 'stop' : 'stops'}</span>
@@ -321,7 +354,11 @@ export default function TransportationPage() {
                       Last error: {route.routingErrorCode || '—'}
                     </span>
                   </div>
-                  <div className="admin-table-actions">
+                  <div
+                    className="admin-table-actions"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
                     <button
                       type="button"
                       className="admin-btn admin-btn-sm"
@@ -348,12 +385,43 @@ export default function TransportationPage() {
                   </div>
                 </div>
 
-                {routeStops.length === 0 ? (
+                {expanded && (routeStops.length === 0 ? (
                   <p className="admin-empty">No stops on this route.</p>
                 ) : (
                   <ol className="transport-admin-stops">
                     {routeStops.map((stop, index) => (
-                      <li key={stop.id}>
+                      <li
+                        key={stop.id}
+                        className={
+                          'transport-admin-stop-row' +
+                          (dragIndex === index ? ' is-dragging' : '') +
+                          (overIndex === index && dragIndex != null && dragIndex !== index
+                            ? ' is-drop-target'
+                            : '')
+                        }
+                        draggable={busyRouteId == null}
+                        onDragStart={busyRouteId == null
+                          ? (event) => {
+                            event.dataTransfer.effectAllowed = 'move'
+                            setDragIndex(index)
+                          }
+                          : undefined}
+                        onDragOver={busyRouteId == null
+                          ? (event) => {
+                            event.preventDefault()
+                            event.dataTransfer.dropEffect = 'move'
+                            setOverIndex(index)
+                          }
+                          : undefined}
+                        onDrop={busyRouteId == null
+                          ? (event) => {
+                            event.preventDefault()
+                            void handleDrop(route, routeStops)
+                          }
+                          : undefined}
+                        onDragEnd={resetDrag}
+                      >
+                        <span className="transport-admin-stop-drag-handle" aria-hidden="true">⠿</span>
                         <span
                           className="transport-admin-order"
                           style={{ background: stop.color || route.color || DEFAULT_ROUTE_COLOR }}
@@ -362,28 +430,15 @@ export default function TransportationPage() {
                         </span>
                         <span className="transport-admin-stop-name">{stop.name || 'Unnamed'}</span>
                         <span className="admin-muted">Added by {stop.createdBy || 'unknown'}</span>
-                        <div className="admin-table-actions">
+                        <div
+                          className="admin-table-actions"
+                          draggable="false"
+                          onDragStart={(event) => event.stopPropagation()}
+                        >
                           <button
                             type="button"
                             className="admin-btn admin-btn-sm"
-                            aria-label={`Move ${stop.name || 'stop'} up`}
-                            disabled={index === 0 || busyRouteId != null}
-                            onClick={() => handleMove(route, routeStops, index, -1)}
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            className="admin-btn admin-btn-sm"
-                            aria-label={`Move ${stop.name || 'stop'} down`}
-                            disabled={index === routeStops.length - 1 || busyRouteId != null}
-                            onClick={() => handleMove(route, routeStops, index, 1)}
-                          >
-                            ↓
-                          </button>
-                          <button
-                            type="button"
-                            className="admin-btn admin-btn-sm"
+                            draggable="false"
                             onClick={() => setEditing({ type: 'stop', item: stop })}
                           >
                             Edit
@@ -392,6 +447,7 @@ export default function TransportationPage() {
                             type="button"
                             className="admin-btn admin-btn-sm admin-btn-danger"
                             disabled={busyRouteId != null}
+                            draggable="false"
                             onClick={() => setDeleting({ type: 'stop', item: stop })}
                           >
                             Delete
@@ -400,7 +456,7 @@ export default function TransportationPage() {
                       </li>
                     ))}
                   </ol>
-                )}
+                ))}
               </section>
             )
           })}

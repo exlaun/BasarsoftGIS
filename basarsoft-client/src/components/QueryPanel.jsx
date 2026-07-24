@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { queryGeometry } from '../api/geometry'
 import { rebasePage } from '../utils/adaptivePagination'
 import useAdaptivePageSize from '../utils/useAdaptivePageSize'
+import ModalCloseButton from './ModalCloseButton'
 import './QueryPanel.css'
 
 const TYPES = ['point', 'line', 'polygon']
@@ -50,14 +51,15 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
   // Live pixel width available to the three resizable columns (panel width minus the info column).
   // Kept in state so the <col> widths render as concrete px — `calc()` on table columns is unreliable.
   const [avail, setAvail] = useState(360)
+  const tableSpaceRef = useRef(null)
   const wrapRef = useRef(null)
   const headerRef = useRef(null)
   const rowRef = useRef(null)
   const pageSize = useAdaptivePageSize({
-    containerRef: wrapRef,
+    containerRef: tableSpaceRef,
     headerRef,
     rowRef,
-    fallbackRowHeight: 37,
+    fallbackRowHeight: 33,
     max: 100,
     measureKey: data?.items?.length ?? 0,
   })
@@ -179,11 +181,7 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
     <aside className={`query-panel${open ? ' is-open' : ''}`} aria-label="Drawings list" aria-hidden={!open}>
       <div className="query-panel-head">
         <h2 className="query-panel-title">Drawings</h2>
-        <button type="button" className="query-panel-close" onClick={onClose} aria-label="Close panel">
-          <svg {...iconProps} width={16} height={16}>
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
+        <ModalCloseButton onClick={onClose} label="Close drawings" />
       </div>
 
       <input
@@ -203,8 +201,9 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
         ))}
       </div>
 
-      <div className="query-panel-table-wrap" ref={wrapRef}>
-        <table className="query-panel-table">
+      <div className="query-panel-table-space" ref={tableSpaceRef}>
+        <div className="query-panel-table-wrap" ref={wrapRef}>
+          <table className="query-panel-table">
           <colgroup>
             <col style={{ width: colWidth('name') }} />
             <col style={{ width: colWidth('type') }} />
@@ -282,11 +281,12 @@ export default function QueryPanel({ open, refreshKey, onRowClick, onInfoClick, 
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
 
-        {!typesKey && <p className="query-panel-empty">Select at least one type to list drawings.</p>}
-        {showEmpty && <p className="query-panel-empty">No drawings match.</p>}
-        {error && <p className="query-panel-empty query-panel-error">Could not load drawings.</p>}
+          {!typesKey && <p className="query-panel-empty">Select at least one type to list drawings.</p>}
+          {showEmpty && <p className="query-panel-empty">No drawings match.</p>}
+          {error && <p className="query-panel-empty query-panel-error">Could not load drawings.</p>}
+        </div>
       </div>
 
       <div className="query-panel-foot">

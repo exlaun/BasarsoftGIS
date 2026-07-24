@@ -1,8 +1,9 @@
 import { useEffect } from 'react'
 import './AttributeModal.css'
 import './ShapeInfoModal.css'
-import { formatTime } from '../utils/poiCategories'
+import { formatWorkingHours } from '../utils/poiCategories'
 import PoiIconBadge from './PoiIconBadge'
+import ModalCloseButton from './ModalCloseButton'
 
 // Read-only info panel for a POI on the map (Select tool click), the POI counterpart of the shape
 // info popup. POIs are shared data, so there is no editing here — just the details plus a Delete
@@ -19,8 +20,11 @@ export default function PoiInfoModal({ poi, canDelete, onDelete, onClose }) {
 
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="POI info">
-      <div className="attr-modal">
-        <h2 className="attr-modal-title">POI info</h2>
+      <div className="attr-modal info-modal">
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">POI info</h2>
+          <ModalCloseButton onClick={onClose} label="Close POI info" />
+        </div>
 
         <dl className="shape-info-meta">
           <div className="shape-info-wide">
@@ -41,9 +45,7 @@ export default function PoiInfoModal({ poi, canDelete, onDelete, onClose }) {
           </div>
           <div>
             <dt>Working hours</dt>
-            <dd>
-              {formatTime(poi.openTime)} – {formatTime(poi.closeTime)}
-            </dd>
+            <dd>{formatWorkingHours(poi.openTime, poi.closeTime)}</dd>
           </div>
           <div>
             <dt>Added by</dt>
@@ -61,9 +63,6 @@ export default function PoiInfoModal({ poi, canDelete, onDelete, onClose }) {
               Delete
             </button>
           )}
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onClose}>
-            Close
-          </button>
         </div>
       </div>
     </div>

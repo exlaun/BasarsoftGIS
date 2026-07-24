@@ -1,22 +1,27 @@
 /* Extra styling for the shape info/edit popup. Base styles are shared from AttributeModal.css. */
 
 .shape-info-meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem;
+  display: flex;
+  flex-direction: column;
   margin: 0;
-  padding: 0;
+  padding: 0.15rem 0.75rem;
+  border-top: 1px solid var(--bar-border);
+  border-bottom: 1px solid var(--bar-border);
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .shape-info-meta > div {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 0.38fr) minmax(0, 1fr);
+  align-items: center;
   min-width: 0;
-  gap: 0.3rem;
-  padding: 0.65rem 0.7rem;
-  border: 1px solid var(--bar-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.045);
+  gap: 0.8rem;
+  padding: 0.62rem 0;
+  border-bottom: 1px solid var(--bar-border);
+}
+
+.shape-info-meta > div:last-child {
+  border-bottom: 0;
 }
 
 .shape-info-meta dt {
@@ -40,7 +45,7 @@
 
 .shape-info-wide,
 .shape-info-name {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .shape-info-color {
@@ -80,16 +85,38 @@
   background: var(--bar-hover);
 }
 
-/* Push the destructive action away from Cancel/Save so it can't be hit by muscle memory. */
+/* Push the destructive action away from Save so it can't be hit by muscle memory. */
 .shape-info-delete {
   margin-right: auto;
 }
 
-/* Route simulation controls sit in their own responsive grid, separate from the Close action. */
-.route-info-modal {
-  gap: 1rem;
+/* All information popups use the same restrained card: one compact header, one labeled data
+   list, and actions separated only where an action really exists. This keeps route, shape, POI,
+   stop, vehicle, and inventory details visually related without turning every field into a box. */
+.info-modal {
+  width: min(440px, calc(100% - 2rem));
+  gap: 0.85rem;
+  padding: 1rem 1.1rem;
 }
 
+.info-modal .attr-modal-head {
+  padding-bottom: 0.15rem;
+}
+
+.info-modal .attr-modal-title {
+  font-size: 1.08rem;
+}
+
+.info-modal .shape-info-meta dd {
+  text-align: left;
+}
+
+.info-modal .attr-modal-actions:empty {
+  display: none;
+}
+
+/* Route simulation controls sit in their own responsive grid, matching the shared info-card
+   spacing and button scale used by Shape info, POI info, and Stop info. */
 .route-info-control-section {
   display: flex;
   flex-direction: column;
@@ -108,6 +135,9 @@
 .route-info-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "primary follow"
+    "end end";
   gap: 0.55rem;
   margin: 0;
 }
@@ -116,10 +146,18 @@
   width: 100%;
 }
 
-.route-info-close-row {
-  margin-top: 0;
-  padding-top: 0.15rem;
-  border-top: 1px solid var(--bar-border);
+.route-info-actions .is-start,
+.route-info-actions .is-resume,
+.route-info-actions .is-stop { grid-area: primary; }
+.route-info-actions .is-follow { grid-area: follow; }
+.route-info-actions .is-end { grid-area: end; }
+.route-info-actions .is-end {
+  justify-content: center;
+  text-align: center;
+}
+.route-info-actions.is-terminal .is-follow {
+  grid-area: primary;
+  grid-column: 1 / -1;
 }
 
 @media (max-width: 420px) {

@@ -56,6 +56,8 @@ public class PoiService : IPoiService
             Name = request.Name,
             Geom = geom,
             CategoryId = categoryId,
+            // The create contract still requires both. The nullable entity fields are for imported
+            // reference POIs whose sources do not publish trustworthy simple daily hours.
             OpenTime = request.OpenTime!.Value,
             CloseTime = request.CloseTime!.Value,
             CreatedAt = DateTime.UtcNow,

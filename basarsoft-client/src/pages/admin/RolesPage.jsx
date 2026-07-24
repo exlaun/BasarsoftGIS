@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listRoles, listPermissions, deleteRole } from '../../api/admin'
+import AdminTable from '../../components/AdminTable'
 import RoleFormModal from './RoleFormModal'
 import RolePermissionsModal from './RolePermissionsModal'
 import GeoAuthModal from './GeoAuthModal'
@@ -7,7 +8,8 @@ import AdminConfirm from './AdminConfirm'
 import { useAuth } from '../../context/auth-context'
 
 export default function RolesPage() {
-  const { refreshProfile } = useAuth()
+  const { refreshProfile, permissions: grantedPermissions } = useAuth()
+  const canManagePermissions = grantedPermissions.includes('manage_permissions')
   const [roles, setRoles] = useState([])
   const [permissions, setPermissions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -26,15 +28,24 @@ export default function RolesPage() {
 
   // setState lives only in the async callbacks (not the effect body) to satisfy the hooks lint rule.
   const load = useCallback(() => {
-    Promise.all([listRoles(), listPermissions()])
-      .then(([r, p]) => {
-        setRoles(r)
-        setPermissions(p)
+    // Roles are the primary resource. Permission-catalogue access is a separate permission, so a
+    // manage_roles-only account must still receive its roles table when that optional request is 403.
+    listRoles()
+      .then((data) => {
+        setRoles(data)
         setError(false)
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false))
-  }, [])
+
+    if (canManagePermissions) {
+      listPermissions()
+        .then(setPermissions)
+        .catch(() => setPermissions([]))
+    } else {
+      Promise.resolve().then(() => setPermissions([]))
+    }
+  }, [canManagePermissions])
 
   useEffect(() => {
     load()
@@ -43,6 +54,8 @@ export default function RolesPage() {
   const closeAnd = (message) => {
     setModal(null)
     if (message) flash('success', message)
+    setLoading(true)
+    setError(false)
     load()
     refreshProfile()
   }
@@ -57,6 +70,54 @@ export default function RolesPage() {
       flash('error', err.response?.data?.message ?? 'Could not delete role.')
     }
   }
+
+  const roleColumns = useMemo(() => [
+    { key: 'name', label: 'Name', sortValue: (role) => role.name, flex: 0.9, minWidth: 130 },
+    {
+      key: 'description',
+      label: 'Description',
+      sortValue: (role) => role.description,
+      flex: 1.4,
+      minWidth: 180,
+      cellClassName: 'admin-wrap',
+      render: (role) => role.description || <span className="admin-muted">—</span>,
+    },
+    {
+      key: 'permissionCount',
+      label: 'Permissions',
+      sortType: 'number',
+      sortValue: (role) => role.permissionIds?.length ?? 0,
+      flex: 0.65,
+      minWidth: 120,
+      render: (role) => role.permissionIds?.length ?? 0,
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      fixedWidth: 300,
+      sortable: false,
+      resizable: false,
+      align: 'right',
+      render: (role) => (
+        <div className="admin-table-actions">
+          <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'edit', role })}>
+            Edit
+          </button>
+          {canManagePermissions && (
+            <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'perms', role })}>
+              Permissions
+            </button>
+          )}
+          <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'geo', role })}>
+            Geographic Access
+          </button>
+          <button type="button" className="admin-btn admin-btn-sm admin-btn-danger" onClick={() => setModal({ type: 'delete', role })}>
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ], [canManagePermissions])
 
   return (
     <div>
@@ -78,43 +139,13 @@ export default function RolesPage() {
         ) : roles.length === 0 ? (
           <p className="admin-empty">No roles yet.</p>
         ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th>Permissions</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {roles.map((r) => (
-                  <tr key={r.id}>
-                    <td>{r.name}</td>
-                    <td className="admin-wrap">{r.description || <span className="admin-muted">—</span>}</td>
-                    <td>{r.permissionIds.length}</td>
-                    <td>
-                      <div className="admin-table-actions">
-                        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'edit', role: r })}>
-                          Edit
-                        </button>
-                        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'perms', role: r })}>
-                          Permissions
-                        </button>
-                        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'geo', role: r })}>
-                          Geographic Access
-                        </button>
-                        <button type="button" className="admin-btn admin-btn-sm admin-btn-danger" onClick={() => setModal({ type: 'delete', role: r })}>
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AdminTable
+            columns={roleColumns}
+            rows={roles}
+            getRowKey={(role) => role.id}
+            defaultSortKey="name"
+            defaultSortDir="asc"
+          />
         )}
       </div>
 

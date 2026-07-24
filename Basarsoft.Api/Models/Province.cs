@@ -3,9 +3,10 @@ using NetTopologySuite.Geometries;
 namespace Basarsoft.Api.Models;
 
 // One Turkish province (il) -> tbl_province. Static reference data for the location-analysis tool's
-// "pick a province" region option, seeded once from Data/provinces.geojson (simplified OSM admin_level=4
-// boundaries). Unlike the drawing tables there is no owning user: the rows are system data, so only the
-// minimal audit pair (CreatedAt + IAuditable's ModifiedDate) applies.
+// "pick a province" region option, synchronized from Data/provinces.geojson (exact OSM
+// network=TR-provinces admin_level=4 relations). Unlike the drawing tables there is no owning user:
+// the rows are system data, so only the minimal audit pair (CreatedAt + IAuditable's ModifiedDate)
+// applies.
 public class Province : IAuditable
 {
     public int Id { get; set; }

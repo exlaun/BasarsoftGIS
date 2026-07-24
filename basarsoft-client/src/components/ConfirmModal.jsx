@@ -1,16 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import './AttributeModal.css'
+import ModalCloseButton from './ModalCloseButton'
 
 // Generic confirmation dialog on the shared attr-modal pattern. Used before destructive actions
-// (currently: soft-deleting a shape). Escape = cancel; Cancel is autofocused so a stray Enter
-// never confirms a destructive action by accident.
+// (currently: soft-deleting a shape). Escape and the header X dismiss it without confirming.
 export default function ConfirmModal({ title, message, confirmLabel = 'Delete', onConfirm, onCancel }) {
-  const cancelButtonRef = useRef(null)
-
-  useEffect(() => {
-    cancelButtonRef.current?.focus()
-  }, [])
-
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onCancel()
@@ -22,17 +16,12 @@ export default function ConfirmModal({ title, message, confirmLabel = 'Delete', 
   return (
     <div className="attr-modal-overlay" role="alertdialog" aria-modal="true" aria-label={title}>
       <div className="attr-modal">
-        <h2 className="attr-modal-title">{title}</h2>
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">{title}</h2>
+          <ModalCloseButton onClick={onCancel} label="Close confirmation" />
+        </div>
         <p className="attr-modal-message">{message}</p>
         <div className="attr-modal-actions">
-          <button
-            ref={cancelButtonRef}
-            type="button"
-            className="attr-modal-btn attr-modal-cancel"
-            onClick={onCancel}
-          >
-            Cancel
-          </button>
           <button type="button" className="attr-modal-btn attr-modal-danger" onClick={onConfirm}>
             {confirmLabel}
           </button>

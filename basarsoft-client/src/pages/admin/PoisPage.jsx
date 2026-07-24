@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listPois, deletePoi } from '../../api/poi'
-import { formatTime } from '../../utils/poiCategories'
+import { formatWorkingHours } from '../../utils/poiCategories'
+import AdminTable from '../../components/AdminTable'
 import AdminConfirm from './AdminConfirm'
 
 // Read-only inventory of every POI in the system with who added it ("ekleyen"). POIs are created
@@ -47,6 +48,64 @@ export default function PoisPage() {
     }
   }
 
+  const poiColumns = useMemo(() => [
+    { key: 'name', label: 'Name', sortValue: (poi) => poi.name, flex: 1, minWidth: 140 },
+    {
+      key: 'categoryPath',
+      label: 'Category',
+      sortValue: (poi) => poi.categoryPath,
+      flex: 1.25,
+      minWidth: 180,
+      cellClassName: 'admin-wrap',
+      render: (poi) => poi.categoryPath || <span className="admin-muted">—</span>,
+    },
+    {
+      key: 'workingHours',
+      label: 'Working hours',
+      sortType: 'text',
+      sortValue: (poi) => poi.openTime,
+      flex: 0.95,
+      minWidth: 140,
+      render: (poi) => formatWorkingHours(poi.openTime, poi.closeTime),
+    },
+    {
+      key: 'createdBy',
+      label: 'Added by',
+      sortValue: (poi) => poi.createdBy,
+      flex: 0.8,
+      minWidth: 120,
+      render: (poi) => poi.createdBy || <span className="admin-muted">—</span>,
+    },
+    {
+      key: 'createdAt',
+      label: 'Added on',
+      sortType: 'date',
+      sortValue: (poi) => poi.createdAt,
+      flex: 0.8,
+      minWidth: 120,
+      render: (poi) => new Date(poi.createdAt).toLocaleDateString(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      fixedWidth: 120,
+      sortable: false,
+      resizable: false,
+      align: 'right',
+      render: (poi) => (
+        <div className="admin-table-actions">
+          <button
+            type="button"
+            className="admin-btn admin-btn-sm admin-btn-danger"
+            onClick={() => setModal({ type: 'delete', poi })}
+          >
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ], [])
+
   return (
     <div>
       <div className="admin-page-head">
@@ -64,40 +123,13 @@ export default function PoisPage() {
         ) : pois.length === 0 ? (
           <p className="admin-empty">No POIs yet. Operators add them with the map’s POI tool.</p>
         ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Category</th>
-                  <th>Working hours</th>
-                  <th>Added by</th>
-                  <th>Added on</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pois.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.name}</td>
-                    <td className="admin-wrap">{p.categoryPath || <span className="admin-muted">—</span>}</td>
-                    <td>
-                      {formatTime(p.openTime)} – {formatTime(p.closeTime)}
-                    </td>
-                    <td>{p.createdBy || <span className="admin-muted">—</span>}</td>
-                    <td>{new Date(p.createdAt).toLocaleDateString()}</td>
-                    <td>
-                      <div className="admin-table-actions">
-                        <button type="button" className="admin-btn admin-btn-sm admin-btn-danger" onClick={() => setModal({ type: 'delete', poi: p })}>
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AdminTable
+            columns={poiColumns}
+            rows={pois}
+            getRowKey={(poi) => poi.id}
+            defaultSortKey="createdAt"
+            defaultSortDir="desc"
+          />
         )}
       </div>
 

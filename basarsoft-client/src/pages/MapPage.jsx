@@ -27,6 +27,7 @@ import { useAuth } from '../context/auth-context'
 import SessionTimer from '../components/SessionTimer'
 import ThemeToggle from '../components/ThemeToggle'
 import DrawToolbar from '../components/DrawToolbar'
+import { isDisplayOnlyMapMode } from '../components/drawToolbarModel'
 import AttributeModal from '../components/AttributeModal'
 import ShapeInfoModal from '../components/ShapeInfoModal'
 import ConfirmModal from '../components/ConfirmModal'
@@ -44,9 +45,11 @@ import StopFormModal from '../components/StopFormModal'
 import StopInfoModal from '../components/StopInfoModal'
 import VehicleInfoModal from '../components/VehicleInfoModal'
 import RouteInfoModal from '../components/RouteInfoModal'
+import SimulationProgressCard from '../components/SimulationProgressCard'
 import { listAllGeometry, saveGeometry, updateGeometry, deleteGeometry, analyzeArea } from '../api/geometry'
 import { listPois, createPoi, deletePoi, listPoiCategories } from '../api/poi'
 import { listProvinces, getProvince, createLocationAnalysis } from '../api/locationAnalysis'
+import { listProvinceMap } from '../api/provinces'
 import {
   listRoutes,
   createRoute,
@@ -75,7 +78,10 @@ import {
 import client, { getStoredAuth } from '../api/client'
 import {
   applyRouteVisibility,
+  isRouteArrowVisibleAtResolution,
   isRouteVisible,
+  isStopLabelVisibleAtResolution,
+  isStopVisibleAtResolution,
   persistedRoutingMutation,
   reconcileRouteVisibility,
   syncRouteOverlaySources,
@@ -85,6 +91,11 @@ import {
   removeVehicleFeature,
   upsertRoute,
 } from '../utils/transportationMap'
+import {
+  isProvinceFeatureHighlighted,
+  parseProvinceMapItems,
+  selectedProvinceIdFromFeatures,
+} from '../utils/provinceMap'
 import {
   endSimulationErrorMessage,
   reconcileSimulationState,
@@ -217,15 +228,73 @@ const poiStyleFn = (feature, resolution) => {
   ]
 }
 
+// Province boundaries and administrative-capital points form a single linked reference layer. They
+// intentionally use the same province color; hover/selection only changes emphasis, never identity.
+const PROVINCE_LABEL_MAX_RESOLUTION = 2500
+const provinceColorWithAlpha = (color, alpha) => {
+  const [red, green, blue] = asArray(color)
+  return [red, green, blue, alpha]
+}
+const provinceBoundaryStyleFn = (feature, interaction) => {
+  const color = feature.get('provinceColor')
+  const highlighted = isProvinceFeatureHighlighted(
+    feature,
+    interaction.hoveredProvinceId,
+    interaction.selectedProvinceId,
+  )
+  return new Style({
+    fill: new Fill({ color: provinceColorWithAlpha(color, highlighted ? 0.2 : 0.07) }),
+    stroke: new Stroke({
+      color,
+      width: highlighted ? 3 : 1.25,
+    }),
+  })
+}
+const provinceCapitalStyleFn = (feature, resolution, interaction) => {
+  const color = feature.get('provinceColor')
+  const highlighted = isProvinceFeatureHighlighted(
+    feature,
+    interaction.hoveredProvinceId,
+    interaction.selectedProvinceId,
+  )
+  const styles = [
+    new Style({
+      image: new CircleStyle({
+        radius: highlighted ? 8 : 5.5,
+        fill: new Fill({ color }),
+        stroke: new Stroke({ color: '#ffffff', width: highlighted ? 2.5 : 1.75 }),
+        declutterMode: 'none',
+      }),
+    }),
+  ]
+  const capitalName = feature.get('capitalName')
+  if (resolution < PROVINCE_LABEL_MAX_RESOLUTION && capitalName) {
+    styles.push(
+      new Style({
+        text: new Text({
+          text: capitalName,
+          font: highlighted ? '700 12px sans-serif' : '600 11px sans-serif',
+          offsetY: -15,
+          fill: new Fill({ color: '#111827' }),
+          stroke: new Stroke({ color: '#ffffff', width: 3 }),
+        }),
+      }),
+    )
+  }
+  return styles
+}
+
 // Fallback marker color for a stop whose route has no color set. Kept in sync with
 // DEFAULT_ROUTE_COLOR in RouteManagementPanel.jsx so a route looks the same on the map and in the panel.
 const STOP_DEFAULT_COLOR = '#2563eb'
 
 // Stop marker: a circle in its route's color with the sequence number inside; the stop name renders
-// above once zoomed past the same label threshold as POIs. No declutter — stops on a route are sparse.
-const stopStyleFn = (feature, resolution) => {
+// only at close city/street scale. Ordinary stops drop out first; the selected route remains visible
+// at a broader scale so selecting a route still explains its path without flooding the national map.
+const stopStyleFn = (feature, resolution, selectedRouteId) => {
   if (feature.get('transportVisible') === false) return null
-  const color = feature.get('routeColor') || STOP_DEFAULT_COLOR
+  if (!isStopVisibleAtResolution(resolution, feature.get('routeId'), selectedRouteId)) return null
+  const color = feature.get('color') || feature.get('routeColor') || STOP_DEFAULT_COLOR
   const order = feature.get('sequenceOrder')
   const name = feature.get('name')
   const styles = [
@@ -242,7 +311,7 @@ const stopStyleFn = (feature, resolution) => {
       }),
     }),
   ]
-  if (resolution < POI_LABEL_MAX_RESOLUTION && name) {
+  if (isStopLabelVisibleAtResolution(resolution) && name) {
     styles.push(
       new Style({
         text: new Text({
@@ -262,7 +331,8 @@ const stopStyleFn = (feature, resolution) => {
 // markers: a route spans a whole city, so it should identify itself well before its individual stops
 // are worth naming. This is only a cheap early-out anyway — Text.overflow defaults to false for
 // line placement, so a name that does not fit along its line is dropped no matter the zoom. That is
-// also why this layer needs no declutter, and so cannot hit the self-collision the POI icons did.
+// The layer uses decluttering so the expanded route fixture cannot stack labels into an unreadable
+// block when several corridors share roads.
 const ROUTE_LABEL_MAX_RESOLUTION = 600
 
 // A route's persisted OSRM road line, drawn transit-map style: a white casing under a stroke in the route's
@@ -311,8 +381,9 @@ const routeLineStyleFn = (feature, resolution, selectedRouteId) => {
 
 // Direction markers live on their own non-selectable layer. The triangle points right before its
 // per-feature tangent rotation is applied; rotateWithView keeps it aligned while the map rotates.
-const routeArrowStyleFn = (feature) => {
+const routeArrowStyleFn = (feature, resolution) => {
   if (feature.get('transportVisible') === false) return null
+  if (!isRouteArrowVisibleAtResolution(resolution)) return null
   return new Style({
     image: new RegularShape({
       points: 3,
@@ -418,6 +489,14 @@ export default function MapPage() {
   // shape layers. In WMS mode this overlay hides too — the WMS image already contains the POIs
   // (GeoServer renders vw_poi with its category style), so keeping it would double every marker.
   const poiLayerRef = useRef(null)
+  // Shared province references are paired client layers: low-opacity boundaries and capital markers.
+  // Their interaction ids are refs because OpenLayers style functions run outside React renders.
+  const provinceBoundarySourceRef = useRef(null)
+  const provinceBoundaryLayerRef = useRef(null)
+  const provinceCapitalSourceRef = useRef(null)
+  const provinceCapitalLayerRef = useRef(null)
+  const hoveredProvinceIdRef = useRef(null)
+  const selectedProvinceIdRef = useRef(null)
   // Transportation overlays stay client-side and visible in both WFS and WMS display modes.
   const stopLayerRef = useRef(null)
   // Persisted OSRM route lines and their sampled, non-selectable direction arrows use independent
@@ -442,8 +521,12 @@ export default function MapPage() {
   const routesRef = useRef([])
   const routeVisibilityRef = useRef({})
   const simulationStatesRef = useRef({})
-  const followedRouteIdsRef = useRef(new Set())
+  const subscribedRouteIdsRef = useRef(new Set())
   const simulationConnectionRef = useRef(null)
+  // SignalR membership and camera following are intentionally separate. A user can stop the camera
+  // while retaining the live subscription so the vehicle marker keeps moving on the map.
+  const cameraFollowRouteIdRef = useRef(null)
+  const cameraFollowFrameRef = useRef(null)
   // GeoServer heat map layer (vw_heat + vec:Heatmap style) + its source; visible only while the
   // 'heatmap' tool is active. Created once, so toggling can never stack duplicate layers.
   const heatLayerRef = useRef(null)
@@ -493,10 +576,16 @@ export default function MapPage() {
   const [editingGeom, setEditingGeom] = useState(false)
   // True while an authorized stop marker is being repositioned before an explicit save/cancel.
   const [editingStopLocation, setEditingStopLocation] = useState(false)
-  // Latest inventory-analysis result { points, lines, polygons, total }, or null. Persists until cleared.
+  // Latest intersection result { points, lines, polygons, pois, stops, routes, total }, or null.
+  // Persists until cleared.
   const [analysisResult, setAnalysisResult] = useState(null)
   // Which geometry types are visible on the map (layer-control checkboxes). All shown by default.
-  const [layerVisibility, setLayerVisibility] = useState({ point: true, line: true, polygon: true })
+  const [layerVisibility, setLayerVisibility] = useState({
+    point: true,
+    line: true,
+    polygon: true,
+    province: true,
+  })
   // Display source: 'vector' = editable WFS-backed vectors (default); 'wms' = flat GeoServer WMS image
   // (display-only, per the mentor's WMS-for-display / WFS-for-editing split).
   const [displayMode, setDisplayMode] = useState('vector')
@@ -544,7 +633,11 @@ export default function MapPage() {
   // Deleting a route also deletes its stops, so both go through a confirmation.
   const [confirmingTransportDelete, setConfirmingTransportDelete] = useState(null)
   const [simulationStates, setSimulationStates] = useState({})
-  const [followedRouteIds, setFollowedRouteIds] = useState(() => new Set())
+  const [cameraFollowRouteId, setCameraFollowRouteId] = useState(null)
+  const [simulationCardStops, setSimulationCardStops] = useState([])
+  const [simulationCardStopsLoading, setSimulationCardStopsLoading] = useState(false)
+  const [simulationCardStopsError, setSimulationCardStopsError] = useState(false)
+  const [simulationCardCollapsed, setSimulationCardCollapsed] = useState(false)
   const [simulationBusyRouteId, setSimulationBusyRouteId] = useState(null)
   const [selectedVehicleRouteId, setSelectedVehicleRouteId] = useState(null)
   // Route info popup (shape-style details + simulation controls), opened by a route map-click or the
@@ -609,26 +702,85 @@ export default function MapPage() {
     statusTimerRef.current = window.setTimeout(() => setStatus(null), duration)
   }, [])
 
+  const updateProvinceInteraction = useCallback((kind, provinceId) => {
+    const targetRef = kind === 'selected' ? selectedProvinceIdRef : hoveredProvinceIdRef
+    if (targetRef.current === provinceId) return
+    targetRef.current = provinceId
+    provinceBoundaryLayerRef.current?.changed()
+    provinceCapitalLayerRef.current?.changed()
+  }, [])
+
+  // Resolve the vehicle's current projected coordinate from the same eased progress used to draw its
+  // marker. A feature coordinate is retained as a fallback for paused/terminal states whose tween
+  // has already been removed or for the short window before the route line is available.
+  const vehicleCoordinate = useCallback((routeId) => {
+    const feature = vehicleSourceRef.current?.getFeatureById(`vehicle-${routeId}`)
+    const line = routeLineSourceRef.current
+      ?.getFeatures()
+      .find((candidate) => candidate.get('apiType') === 'route' && candidate.get('routeId') === routeId)
+    if (line && animatorRef.current.has(routeId)) {
+      const progress = animatorRef.current.easedProgress(routeId, performance.now())
+      return line.getGeometry().getCoordinateAt(Math.max(0, Math.min(1, progress / 100)))
+    }
+    const featureCoordinate = feature?.getGeometry()?.getCoordinates()
+    if (featureCoordinate) return featureCoordinate
+    const state = simulationStatesRef.current[routeId]
+    if (Number.isFinite(state?.longitude) && Number.isFinite(state?.latitude)) {
+      return fromLonLat([state.longitude, state.latitude])
+    }
+    return null
+  }, [])
+
+  const centerCameraOnVehicle = useCallback((routeId) => {
+    if (cameraFollowRouteIdRef.current !== routeId) return
+    const coordinate = vehicleCoordinate(routeId)
+    if (coordinate) mapRef.current?.getView().setCenter(coordinate)
+  }, [vehicleCoordinate])
+
+  // A separate camera loop keeps a paused vehicle centered too; the marker animation loop stops when
+  // it has no tween left, but camera following must continue enforcing the selected center.
+  const cameraFollowFrame = useCallback(() => {
+    const followFrame = () => {
+      const routeId = cameraFollowRouteIdRef.current
+      if (routeId == null) {
+        cameraFollowFrameRef.current = null
+        return
+      }
+      centerCameraOnVehicle(routeId)
+      cameraFollowFrameRef.current = requestAnimationFrame(followFrame)
+    }
+    followFrame()
+  }, [centerCameraOnVehicle])
+
+  const startCameraFollow = useCallback((routeId) => {
+    cameraFollowRouteIdRef.current = routeId
+    setCameraFollowRouteId(routeId)
+    setSimulationCardCollapsed(false)
+    centerCameraOnVehicle(routeId)
+    if (cameraFollowFrameRef.current == null) {
+      cameraFollowFrameRef.current = requestAnimationFrame(cameraFollowFrame)
+    }
+  }, [cameraFollowFrame, centerCameraOnVehicle])
+
+  const stopCameraFollow = useCallback((routeId = null) => {
+    if (routeId != null && cameraFollowRouteIdRef.current !== routeId) return
+    cameraFollowRouteIdRef.current = null
+    setCameraFollowRouteId(null)
+    if (cameraFollowFrameRef.current != null) {
+      cancelAnimationFrame(cameraFollowFrameRef.current)
+      cameraFollowFrameRef.current = null
+    }
+  }, [])
+
   // Place one vehicle marker at its eased progress along its own route line (so it follows the road
   // through curves). Falls back to the last server lon/lat when the route line isn't loaded/visible.
   const positionVehicle = useCallback((routeId) => {
     const feature = vehicleSourceRef.current?.getFeatureById(`vehicle-${routeId}`)
     if (!feature) return
-    const progress = animatorRef.current.easedProgress(routeId, performance.now())
-    const line = routeLineSourceRef.current
-      ?.getFeatures()
-      .find((candidate) => candidate.get('apiType') === 'route' && candidate.get('routeId') === routeId)
-    let coordinate
-    if (line) {
-      coordinate = line.getGeometry().getCoordinateAt(Math.max(0, Math.min(1, progress / 100)))
-    } else {
-      const state = simulationStatesRef.current[routeId]
-      if (Number.isFinite(state?.longitude) && Number.isFinite(state?.latitude)) {
-        coordinate = fromLonLat([state.longitude, state.latitude])
-      }
-    }
+    const coordinate = vehicleCoordinate(routeId)
     if (coordinate) feature.getGeometry().setCoordinates(coordinate)
-  }, [])
+    centerCameraOnVehicle(routeId)
+  }, [centerCameraOnVehicle, vehicleCoordinate])
 
   // Start the per-frame loop if it isn't already running and something is actually easing. The frame
   // callback is a hoisted inner function so it can re-schedule itself, and it stops once every vehicle
@@ -663,7 +815,7 @@ export default function MapPage() {
     setSimulationStates(next)
 
     const route = routesRef.current.find((candidate) => candidate.id === incoming.routeId)
-    if (followedRouteIdsRef.current.has(incoming.routeId) && reconciled.status !== 'NotStarted') {
+    if (subscribedRouteIdsRef.current.has(incoming.routeId) && reconciled.status !== 'NotStarted') {
       upsertVehicleFeature(
         vehicleSourceRef.current,
         reconciled,
@@ -675,24 +827,25 @@ export default function MapPage() {
       removeVehicleFeature(vehicleSourceRef.current, incoming.routeId)
       animatorRef.current.remove(incoming.routeId)
       if (reconciled.status === 'NotStarted') {
+        stopCameraFollow(incoming.routeId)
         setSelectedVehicleRouteId((selected) => selected === incoming.routeId ? null : selected)
       }
     }
-  }, [pushVehicleTarget])
+  }, [pushVehicleTarget, stopCameraFollow])
 
-  // One authenticated SignalR connection per map page. Membership is independent from panel
-  // selection, so users may follow several vehicles and closing the drawer never drops a group.
+  // One authenticated SignalR connection per map page. Subscription membership is independent from
+  // the single camera target, so several markers can remain live while only one controls the view.
   useEffect(() => {
     const connection = createRouteSimulationConnection({
       onState: commitSimulationState,
       onMembershipChange: (nextIds) => {
-        const previous = followedRouteIdsRef.current
-        followedRouteIdsRef.current = nextIds
-        setFollowedRouteIds(nextIds)
+        const previous = subscribedRouteIdsRef.current
+        subscribedRouteIdsRef.current = nextIds
         for (const routeId of previous) {
           if (!nextIds.has(routeId)) {
             removeVehicleFeature(vehicleSourceRef.current, routeId)
             animatorRef.current.remove(routeId)
+            stopCameraFollow(routeId)
             setSelectedVehicleRouteId((selected) => selected === routeId ? null : selected)
           }
         }
@@ -712,7 +865,7 @@ export default function MapPage() {
       simulationConnectionRef.current = null
       connection.dispose().catch(() => {})
     }
-  }, [commitSimulationState, pushVehicleTarget])
+  }, [commitSimulationState, pushVehicleTarget, stopCameraFollow])
 
   const loadSimulationState = useCallback(async (routeId) => {
     try {
@@ -741,12 +894,13 @@ export default function MapPage() {
     syncStopRoutePresentation(sourcesRef.current?.stop, nextRoutes, nextVisibility)
     syncVehicleRoutePresentation(vehicleSourceRef.current, nextRoutes, nextVisibility)
     const routeIds = new Set(nextRoutes.map((route) => route.id))
-    for (const followedRouteId of followedRouteIdsRef.current) {
-      if (!routeIds.has(followedRouteId)) {
-        simulationConnectionRef.current?.unfollow(followedRouteId).catch(() => {})
+    for (const subscribedRouteId of subscribedRouteIdsRef.current) {
+      if (!routeIds.has(subscribedRouteId)) {
+        stopCameraFollow(subscribedRouteId)
+        simulationConnectionRef.current?.unfollow(subscribedRouteId).catch(() => {})
       }
     }
-  }, [])
+  }, [stopCameraFollow])
 
   const commitRoute = useCallback((updatedRoute) => {
     commitRoutes(upsertRoute(routesRef.current, updatedRoute))
@@ -788,6 +942,28 @@ export default function MapPage() {
         if (stopsRequestRef.current === requestId) setRouteStopsLoading(false)
       })
   }, [flashStatus])
+
+  const simulationCardStopsRequestRef = useRef(0)
+  const loadSimulationCardStops = useCallback((routeId) => {
+    const requestId = ++simulationCardStopsRequestRef.current
+    setSimulationCardStops([])
+    setSimulationCardStopsLoading(true)
+    setSimulationCardStopsError(false)
+    listRouteStops(routeId)
+      .then((items) => {
+        if (simulationCardStopsRequestRef.current !== requestId) return
+        if (cameraFollowRouteIdRef.current !== routeId) return
+        setSimulationCardStops(items ?? [])
+      })
+      .catch(() => {
+        if (simulationCardStopsRequestRef.current !== requestId) return
+        if (cameraFollowRouteIdRef.current !== routeId) return
+        setSimulationCardStopsError(true)
+      })
+      .finally(() => {
+        if (simulationCardStopsRequestRef.current === requestId) setSimulationCardStopsLoading(false)
+      })
+  }, [])
 
   // The two right-edge drawers share one slot, so opening either slides the other out. Both toggles
   // read the current value from the closure rather than from a setState updater, keeping the updater
@@ -926,6 +1102,8 @@ export default function MapPage() {
       const state = await startRouteSimulation(routeId)
       commitSimulationState(state)
       await simulationConnectionRef.current?.follow(routeId)
+      startCameraFollow(routeId)
+      loadSimulationCardStops(routeId)
       flashStatus('success', 'Simulation started.')
     } catch (error) {
       if (error.response?.data?.state) commitSimulationState(error.response.data.state)
@@ -933,7 +1111,7 @@ export default function MapPage() {
     } finally {
       setSimulationBusyRouteId(null)
     }
-  }, [canControlSimulation, commitSimulationState, flashStatus])
+  }, [canControlSimulation, commitSimulationState, flashStatus, loadSimulationCardStops, startCameraFollow])
 
   const handleStopSimulation = useCallback(async (routeId) => {
     if (!canControlSimulation) return
@@ -958,6 +1136,8 @@ export default function MapPage() {
       const state = await resumeRouteSimulation(routeId)
       commitSimulationState(state)
       await simulationConnectionRef.current?.follow(routeId)
+      startCameraFollow(routeId)
+      loadSimulationCardStops(routeId)
       flashStatus('success', 'Simulation resumed.')
     } catch (error) {
       if (error.response?.data?.state) commitSimulationState(error.response.data.state)
@@ -965,7 +1145,7 @@ export default function MapPage() {
     } finally {
       setSimulationBusyRouteId(null)
     }
-  }, [canControlSimulation, commitSimulationState, flashStatus])
+  }, [canControlSimulation, commitSimulationState, flashStatus, loadSimulationCardStops, startCameraFollow])
 
   // End stays server-authoritative: only a successful HTTP response clears local state. Explicitly leave
   // the SignalR group as well, so cleanup does not depend on a broadcast racing the HTTP response.
@@ -1002,18 +1182,18 @@ export default function MapPage() {
   const handleFollowRoute = useCallback(async (routeId) => {
     try {
       await simulationConnectionRef.current?.follow(routeId)
+      startCameraFollow(routeId)
+      loadSimulationCardStops(routeId)
     } catch {
       flashStatus('error', 'Could not connect to live vehicle updates.', 5000)
     }
-  }, [flashStatus])
+  }, [flashStatus, loadSimulationCardStops, startCameraFollow])
 
   const handleUnfollowRoute = useCallback(async (routeId) => {
-    try {
-      await simulationConnectionRef.current?.unfollow(routeId)
-    } catch {
-      flashStatus('error', 'Could not leave live vehicle updates.')
-    }
-  }, [flashStatus])
+    // Camera following is deliberately independent from the live SignalR membership. Keeping the
+    // subscription means the marker remains visible and keeps receiving authoritative positions.
+    stopCameraFollow(routeId)
+  }, [stopCameraFollow])
 
   // Drop every stop marker belonging to a route from the map source. Used by route deletion, where
   // the stops go with their route, and shared with nothing else — the module has no other way to
@@ -1032,6 +1212,7 @@ export default function MapPage() {
   const handleDeleteRoute = useCallback(async (route) => {
     try {
       await deleteRoute(route.id)
+      stopCameraFollow(route.id)
       await simulationConnectionRef.current?.unfollow(route.id)
       removeRouteStopFeatures(route.id)
       commitRoutes(routesRef.current.filter((candidate) => candidate.id !== route.id))
@@ -1051,7 +1232,7 @@ export default function MapPage() {
             : error.response?.data?.message ?? 'Could not delete the route.',
       )
     }
-  }, [commitRoutes, removeRouteStopFeatures, flashStatus])
+  }, [commitRoutes, removeRouteStopFeatures, flashStatus, stopCameraFollow])
 
   // Confirmed stop deletion. The response carries the route's surviving stops already renumbered plus
   // the rebuilt route, so one reconciliation updates the panel list, the marker numbers, and the line.
@@ -1204,7 +1385,32 @@ export default function MapPage() {
     // declutter mirrors the SLD's conflictResolution: overlapping labels drop instead of colliding.
     const poiLayer = new VectorLayer({ source: sources.poi, style: poiStyleFn, declutter: true })
     poiLayerRef.current = poiLayer
-    const stopLayer = new VectorLayer({ source: sources.stop, style: stopStyleFn })
+    const provinceBoundarySource = new VectorSource()
+    provinceBoundarySourceRef.current = provinceBoundarySource
+    const provinceBoundaryLayer = new VectorLayer({
+      source: provinceBoundarySource,
+      style: (feature) => provinceBoundaryStyleFn(feature, {
+        hoveredProvinceId: hoveredProvinceIdRef.current,
+        selectedProvinceId: selectedProvinceIdRef.current,
+      }),
+    })
+    provinceBoundaryLayerRef.current = provinceBoundaryLayer
+    const provinceCapitalSource = new VectorSource()
+    provinceCapitalSourceRef.current = provinceCapitalSource
+    const provinceCapitalLayer = new VectorLayer({
+      source: provinceCapitalSource,
+      style: (feature, resolution) => provinceCapitalStyleFn(feature, resolution, {
+        hoveredProvinceId: hoveredProvinceIdRef.current,
+        selectedProvinceId: selectedProvinceIdRef.current,
+      }),
+      declutter: true,
+    })
+    provinceCapitalLayerRef.current = provinceCapitalLayer
+    const stopLayer = new VectorLayer({
+      source: sources.stop,
+      style: (feature, resolution) =>
+        stopStyleFn(feature, resolution, selectedRouteIdRef.current),
+    })
     stopLayerRef.current = stopLayer
     // The style closes over the ref so the layer can re-read the panel's selection on a .changed()
     // without this once-only effect ever re-running.
@@ -1213,6 +1419,7 @@ export default function MapPage() {
     const routeLineLayer = new VectorLayer({
       source: routeLineSource,
       style: (feature, resolution) => routeLineStyleFn(feature, resolution, selectedRouteIdRef.current),
+      declutter: true,
     })
     routeLineLayerRef.current = routeLineLayer
     const routeArrowSource = new VectorSource()
@@ -1282,6 +1489,9 @@ export default function MapPage() {
         new TileLayer({ source: new OSM() }),
         // GeoServer WMS display layer, above OSM. Hidden until the user switches to WMS mode.
         wmsLayer,
+        // Province references are client-rendered in both display modes, so the capital/boundary
+        // relationship stays visible even when personal drawings switch to a flat WMS image.
+        provinceBoundaryLayer,
         // Authorization boundary sits under every shape layer: it's a backdrop, never clickable
         // (its feature carries no apiType/dbId, so select/hover logic skips it anyway).
         new VectorLayer({ source: authAreaSource, style: AUTH_AREA_STYLE }),
@@ -1294,6 +1504,7 @@ export default function MapPage() {
         // Persisted OSRM route lines and their direction arrows sit below every clickable marker.
         routeLineLayer,
         routeArrowLayer,
+        provinceCapitalLayer,
         // POI markers above the personal shapes: they're the shared catalogue everyone must see.
         // Hidden in WMS mode, where GeoServer renders the same POIs inside the flat image.
         poiLayer,
@@ -1319,7 +1530,7 @@ export default function MapPage() {
 
     // Normally following starts after the map is ready. This also covers a very fast connection
     // completing during initialization without losing its already-reconciled state.
-    for (const routeId of followedRouteIdsRef.current) {
+    for (const routeId of subscribedRouteIdsRef.current) {
       const live = simulationStatesRef.current[routeId]
       if (live?.status && live.status !== 'NotStarted') {
         upsertVehicleFeature(
@@ -1344,10 +1555,15 @@ export default function MapPage() {
 
     const onPointerMove = (event) => {
       if (event.dragging) return
-      const feature = map.forEachFeatureAtPixel(
-        event.pixel,
-        (candidate) => candidate.get('isDirectionArrow') ? undefined : candidate,
-      )
+      let feature
+      let provinceFeature
+      map.forEachFeatureAtPixel(event.pixel, (candidate) => {
+        if (candidate.get('isDirectionArrow')) return undefined
+        if (!feature) feature = candidate
+        if (!provinceFeature && candidate.get('provinceId') != null) provinceFeature = candidate
+        return undefined
+      })
+      updateProvinceInteraction('hovered', provinceFeature?.get('provinceId') ?? null)
       const name = feature?.get('name')
       if (name) {
         tooltipEl.textContent = name
@@ -1360,6 +1576,29 @@ export default function MapPage() {
       map.getTargetElement().style.cursor = feature ? 'pointer' : ''
     }
     map.on('pointermove', onPointerMove)
+    const onPointerLeave = () => updateProvinceInteraction('hovered', null)
+    map.getViewport().addEventListener('pointerleave', onPointerLeave)
+
+    // Province reference selection is a display interaction, not an editable-shape tool. Keep it
+    // active for Pan, every analysis/draw mode, and WMS display mode; clicking either the capital or
+    // boundary selects their shared province id, while a click with no province hit clears it.
+    const onProvinceClick = (event) => {
+      const hitFeatures = []
+      map.forEachFeatureAtPixel(event.pixel, (feature) => {
+        hitFeatures.push(feature)
+        return undefined
+      })
+      updateProvinceInteraction('selected', selectedProvinceIdFromFeatures(hitFeatures))
+    }
+    map.on('singleclick', onProvinceClick)
+
+    listProvinceMap()
+      .then((items) => {
+        const { boundaries, capitals } = parseProvinceMapItems(items)
+        provinceBoundarySource.addFeatures(boundaries)
+        provinceCapitalSource.addFeatures(capitals)
+      })
+      .catch(() => flashStatus('error', 'Could not load provinces and capitals.'))
 
     // Route geometry is persisted by the API and rendered independently from stop loading. This
     // also means routes remain visible if a stop request happens to fail.
@@ -1443,11 +1682,19 @@ export default function MapPage() {
 
     return () => {
       map.un('pointermove', onPointerMove)
+      map.un('singleclick', onProvinceClick)
+      map.getViewport().removeEventListener('pointerleave', onPointerLeave)
       map.setTarget(undefined)
       mapRef.current = null
       sourcesRef.current = null
       layersRef.current = null
       poiLayerRef.current = null
+      provinceBoundarySourceRef.current = null
+      provinceBoundaryLayerRef.current = null
+      provinceCapitalSourceRef.current = null
+      provinceCapitalLayerRef.current = null
+      hoveredProvinceIdRef.current = null
+      selectedProvinceIdRef.current = null
       stopLayerRef.current = null
       routeLineSourceRef.current = null
       routeLineLayerRef.current = null
@@ -1457,6 +1704,11 @@ export default function MapPage() {
         cancelAnimationFrame(animationFrameRef.current)
         animationFrameRef.current = null
       }
+      if (cameraFollowFrameRef.current != null) {
+        cancelAnimationFrame(cameraFollowFrameRef.current)
+        cameraFollowFrameRef.current = null
+      }
+      cameraFollowRouteIdRef.current = null
       vehicleSourceRef.current = null
       vehicleLayerRef.current = null
       wmsLayerRef.current = null
@@ -1498,6 +1750,8 @@ export default function MapPage() {
     // The WMS image includes the POIs (vw_poi is in the backend's GetMap layer list), so the client
     // POI overlay hides with the shape layers — otherwise every marker would render twice.
     poiLayerRef.current?.setVisible(!inWms)
+    provinceBoundaryLayerRef.current?.setVisible(layerVisibility.province)
+    provinceCapitalLayerRef.current?.setVisible(layerVisibility.province)
     stopLayerRef.current?.setVisible(true)
     routeLineLayerRef.current?.setVisible(true)
     routeArrowLayerRef.current?.setVisible(true)
@@ -1512,7 +1766,14 @@ export default function MapPage() {
   useEffect(() => {
     selectedRouteIdRef.current = selectedRouteId
     routeLineLayerRef.current?.changed()
+    stopLayerRef.current?.changed()
   }, [selectedRouteId])
+
+  useEffect(() => {
+    if (layerVisibility.province) return
+    updateProvinceInteraction('hovered', null)
+    updateProvinceInteraction('selected', null)
+  }, [layerVisibility.province, updateProvinceInteraction])
 
   // Heat map follows its tool: visible only while 'heatmap' is active, so picking any other tool (or
   // switching to WMS mode, which resets the tool to Pan) turns it off. Refreshed on every activation
@@ -1767,7 +2028,16 @@ export default function MapPage() {
     }
 
     return undefined
-  }, [activeTool, disabledDrawTools, editingGeom, editingStopLocation, flashStatus, openHit, konumRegionMode, konumAnalysis])
+  }, [
+    activeTool,
+    disabledDrawTools,
+    editingGeom,
+    editingStopLocation,
+    flashStatus,
+    openHit,
+    konumRegionMode,
+    konumAnalysis,
+  ])
 
   // Geometry-edit mode: attach Modify (drag individual vertices) + Translate (drag the whole shape)
   // to just the selected feature. Both are removed when editing ends.
@@ -1865,7 +2135,7 @@ export default function MapPage() {
       setRefreshKey((key) => key + 1)
       if (apiType === 'polygon' && saved.intersectionCount != null) {
         const n = saved.intersectionCount
-        flashStatus('success', `Polygon saved. ${n} ${n === 1 ? 'inventory' : 'inventories'} inside.`, 6000)
+        flashStatus('success', `Polygon saved. ${n} ${n === 1 ? 'inventory' : 'inventories'} intersecting the area.`, 6000)
       } else {
         flashStatus('success', `${apiType} saved.`)
       }
@@ -2297,6 +2567,11 @@ export default function MapPage() {
   // keep the chosen region + outline so weights can be retuned without re-picking the area.
   const handleKonumReset = () => setKonumAnalysis(null)
 
+  const handleKonumClose = () => {
+    setActiveTool('none')
+    resetKonum()
+  }
+
   // Query panel — row click: fly the map to that shape and open its info popup. The drawer stays
   // open underneath (the popup overlay has the higher z-index). The right padding keeps the shape
   // centered in the VISIBLE part of the map instead of under the 400px drawer.
@@ -2393,6 +2668,19 @@ export default function MapPage() {
               onClick={handleToggleRoutePanel}
               aria-pressed={routePanelOpen}
             >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+              </svg>
               Routes
             </button>
             <button
@@ -2420,15 +2708,16 @@ export default function MapPage() {
         </div>
       </header>
       <div className="map-body">
-        {displayMode === 'vector' ? (
-          <DrawToolbar
-            activeTool={activeTool}
-            disabledTools={disabledDrawTools}
-            onSelectTool={handleSelectTool}
-            layerVisibility={layerVisibility}
-            onToggleLayer={toggleLayer}
-          />
-        ) : (
+        <DrawToolbar
+          key={displayMode}
+          activeTool={activeTool}
+          disabledTools={disabledDrawTools}
+          onSelectTool={handleSelectTool}
+          layerVisibility={layerVisibility}
+          onToggleLayer={toggleLayer}
+          displayOnly={isDisplayOnlyMapMode(displayMode)}
+        />
+        {displayMode === 'wms' && (
           <div className="map-wms-hint" role="status">
             WMS display mode - shapes are served as images by GeoServer. Switch to WFS for drawing and
             editing.
@@ -2441,8 +2730,8 @@ export default function MapPage() {
             both display modes — it searches the loaded features, not the rendered pixels. */}
         <PoiSearchBar pois={poiFeatures} onPick={handlePoiSearchPick} />
 
-        {/* Konum Analizi wizard: follows its toolbar tool (vector mode only — the toolbar itself is
-            hidden in WMS mode and handleDisplayMode resets the tool). No permission gate: the
+        {/* Konum Analizi wizard follows its toolbar tool (vector mode only — handleDisplayMode resets
+            the active tool and the WMS toolbar exposes Layers only). No permission gate: the
             assignment requires the plain User role to run analyses too. */}
         {displayMode === 'vector' && activeTool === 'konum' && (
           <LocationAnalysisPanel
@@ -2457,6 +2746,24 @@ export default function MapPage() {
             analysis={konumAnalysis}
             onStart={handleKonumStart}
             onReset={handleKonumReset}
+            onClose={handleKonumClose}
+          />
+        )}
+
+        {cameraFollowRouteId != null && routeInfoRouteId == null && (
+          <SimulationProgressCard
+            route={routes.find((route) => route.id === cameraFollowRouteId)}
+            simulation={simulationForRoute(simulationStates, cameraFollowRouteId)}
+            stops={simulationCardStops}
+            stopsLoading={simulationCardStopsLoading}
+            stopsError={simulationCardStopsError}
+            collapsed={simulationCardCollapsed}
+            sidePanelOpen={routePanelOpen || drawerOpen}
+            canControl={canControlSimulation}
+            busy={simulationBusyRouteId === cameraFollowRouteId}
+            onToggleCollapsed={() => setSimulationCardCollapsed((collapsed) => !collapsed)}
+            onSimulationAction={handleSimulationAction}
+            onUnfollow={handleUnfollowRoute}
           />
         )}
 
@@ -2487,7 +2794,7 @@ export default function MapPage() {
           onBuildRoute={handleBuildRoute}
           canControlSimulation={canControlSimulation}
           simulationStates={simulationStates}
-          followedRouteIds={followedRouteIds}
+          cameraFollowRouteId={cameraFollowRouteId}
           simulationBusyRouteId={simulationBusyRouteId}
           onSimulationAction={handleSimulationAction}
           onFollowRoute={handleFollowRoute}
@@ -2630,7 +2937,7 @@ export default function MapPage() {
           <RouteInfoModal
             route={routes.find((route) => route.id === routeInfoRouteId)}
             simulation={simulationForRoute(simulationStates, routeInfoRouteId)}
-            followed={followedRouteIds.has(routeInfoRouteId)}
+            cameraFollowed={cameraFollowRouteId === routeInfoRouteId}
             canControl={canControlSimulation}
             busy={simulationBusyRouteId === routeInfoRouteId}
             onSimulationAction={handleSimulationAction}
@@ -2693,10 +3000,15 @@ export default function MapPage() {
           {analysisResult && (
             <div className="map-analysis-panel" role="status">
               <div className="map-analysis-total">
-                {analysisResult.total} {analysisResult.total === 1 ? 'shape' : 'shapes'} in area
+                {analysisResult.total} {analysisResult.total === 1 ? 'map feature' : 'map features'} in area
               </div>
               <div className="map-analysis-breakdown">
-                {analysisResult.points} points · {analysisResult.lines} lines · {analysisResult.polygons} polygons
+                <span>{analysisResult.points} points</span>
+                <span>{analysisResult.lines} lines</span>
+                <span>{analysisResult.polygons} polygons</span>
+                <span>{analysisResult.pois} POIs</span>
+                <span>{analysisResult.stops} stops</span>
+                <span>{analysisResult.routes} routes</span>
               </div>
               <button type="button" className="map-analysis-clear" onClick={handleClearAnalysis}>
                 Clear

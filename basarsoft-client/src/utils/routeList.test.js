@@ -10,18 +10,19 @@ const routes = [
 
 test('route list derives health states and folds Turkish text searches', () => {
   assert.equal(routeListState(routes[0]).key, 'ready')
+  assert.equal(routeListState(routes[0]).label, 'Built')
   assert.equal(routeListState(routes[1]).key, 'stale')
+  assert.equal(routeListState(routes[1]).label, 'Needs rebuild')
   assert.equal(routeListState(routes[2]).key, 'not-built')
+  assert.equal(routeListState(routes[2]).label, 'Not built')
   assert.deepEqual(filterAndSortRoutes(routes, { query: 'izmir' }).map((route) => route.id), [1])
 })
 
-test('route list filters states and sorts every visible table attribute', () => {
-  const statuses = { ready: true, stale: true, 'not-built': false }
+test('route list sorts every visible table attribute', () => {
   assert.deepEqual(filterAndSortRoutes(routes, {
-    statuses,
     sortBy: 'stopCount',
     sortDir: 'desc',
-  }).map((route) => route.id), [2, 1])
+  }).map((route) => route.id), [2, 1, 3])
   assert.deepEqual(filterAndSortRoutes(routes, {
     sortBy: 'createdAt',
     sortDir: 'asc',

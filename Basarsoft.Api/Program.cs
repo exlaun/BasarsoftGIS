@@ -9,6 +9,7 @@ using Basarsoft.Api.Services;
 using Basarsoft.Api.Settings;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -73,6 +74,9 @@ builder.Services.AddScoped<IUserAdminService, UserAdminService>();
 // Geographic authorization: per-user/per-role drawing areas + enforcement lookup.
 builder.Services.AddScoped<IGeoAuthorizationService, GeoAuthorizationService>();
 
+// Validated, process-cached province metadata (boundary + capital + region/color + provenance).
+builder.Services.AddSingleton<IProvinceCatalog, ProvinceCatalog>();
+
 // POI module: the shared POI catalogue + its parent-child category tree.
 builder.Services.AddScoped<IPoiService, PoiService>();
 builder.Services.AddScoped<IPoiCategoryService, PoiCategoryService>();
@@ -127,6 +131,15 @@ builder.Services.AddProblemDetails();
 // <input type="time"> submits (the built-in converter would reject it as missing seconds).
 builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.Converters.Add(new FlexibleTimeOnlyConverter()));
+
+// The nationwide province layer is a large, shared reference payload. Register compression here
+// and apply it only to that endpoint below, keeping compression away from user-specific responses.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["application/json"]);
+});
+builder.Services.AddMemoryCache();
 
 // Swagger / OpenAPI, with a Bearer button so protected endpoints can be tested from the browser.
 builder.Services.AddEndpointsApiExplorer();
@@ -264,26 +277,33 @@ var app = builder.Build();
 // must not be possible to leave turned on in appsettings. (The CommandLine configuration provider
 // ignores tokens with no -/--/ prefix, so "seed-demo" cannot collide with a config key.)
 var seedDemo = args.Contains("seed-demo", StringComparer.OrdinalIgnoreCase);
+// EF tooling loads the startup assembly to discover services before it invokes our
+// IDesignTimeDbContextFactory. Never let a metadata-only command reach startup seeders.
+var efDesignTime = AppDomain.CurrentDomain.GetAssemblies().Any(assembly =>
+    assembly.GetName().Name == "Microsoft.EntityFrameworkCore.Design");
 
 // Seed the RBAC baseline (permission catalogue, Admin role, and the bootstrap admin's grant)
 // idempotently on startup. The migration must already be applied (tables exist); each step is guarded
 // so re-runs no-op. In demo mode this is skipped: DemoSeeder runs it itself, AFTER the wipe.
-using (var scope = app.Services.CreateScope())
+if (!efDesignTime)
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-    if (seedDemo)
+    using (var scope = app.Services.CreateScope())
     {
-        var seeded = await DemoSeeder.RunAsync(
-            db, app.Environment, app.Logger, skipConfirmation: args.Contains("--yes"));
-        return seeded ? 0 : 1;
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        if (seedDemo)
+        {
+            var seeded = await DemoSeeder.RunAsync(
+                db, app.Environment, app.Logger, skipConfirmation: args.Contains("--yes"));
+            return seeded ? 0 : 1;
+        }
+
+        await AdminSeeder.SeedAsync(db);
+
+        // Turkey's exact 81 provinces for location analysis and the shared province/capital map layer.
+        // The validated catalog updates changed boundaries while preserving stable database ids.
+        await ProvinceSeeder.SeedAsync(db, scope.ServiceProvider.GetRequiredService<IProvinceCatalog>());
     }
-
-    await AdminSeeder.SeedAsync(db);
-
-    // Turkey's 81 provinces for the location-analysis dropdown: loaded once from Data/provinces.geojson,
-    // no-ops when the table is already filled.
-    await ProvinceSeeder.SeedAsync(db);
 }
 
 // Catch unhandled exceptions first so nothing downstream can leak a stack trace. Delegates to
@@ -298,6 +318,13 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// /api/provinces/map is authenticated, privately revalidated reference data and is several MB as
+// WKT. Restrict response compression to it so authenticated, user-specific payloads are unaffected.
+app.UseWhen(
+    context => HttpMethods.IsGet(context.Request.Method) &&
+               context.Request.Path.Equals("/api/provinces/map", StringComparison.OrdinalIgnoreCase),
+    branch => branch.UseResponseCompression());
 
 // Order matters: CORS, then rate limiting (rejects flooders before any BCrypt/DB work), then
 // authentication, then authorization, then endpoints.
@@ -314,3 +341,12 @@ app.Run();
 // Only reached when the host shuts down. Explicit because the seed-demo branch above returns an exit
 // code, which makes every path in this file have to produce one.
 return 0;
+
+// EF Core tooling looks for this conventional hook before it invokes the top-level entry point.
+// A metadata-only host keeps `dotnet ef migrations ...` away from runtime startup seeders; the
+// actual context is then created by AppDbContextFactory with the normal configuration precedence.
+public partial class Program
+{
+    public static IHostBuilder CreateHostBuilder(string[] args) =>
+        new HostBuilder();
+}

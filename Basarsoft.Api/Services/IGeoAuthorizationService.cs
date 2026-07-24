@@ -4,7 +4,7 @@ using NetTopologySuite.Geometries;
 namespace Basarsoft.Api.Services;
 
 // Outcome of assigning an area: saved, the target user/role doesn't exist, or the WKT wasn't a
-// single valid polygon. Mirrors the status-enum pattern used by GeometryUpdateResult.
+// valid polygonal area. Mirrors the status-enum pattern used by GeometryUpdateResult.
 public enum GeoAreaWriteStatus
 {
     Success,
@@ -18,7 +18,7 @@ public interface IGeoAuthorizationService
     Task<GeoAreaResponse?> GetForUserAsync(int userId);
     Task<GeoAreaResponse?> GetForRoleAsync(int roleId);
 
-    // Upserts the target's area from polygon WKT (a redraw replaces the previous polygon).
+    // Upserts the target's area from Polygon/MultiPolygon WKT (a redraw replaces the previous area).
     Task<GeoAreaWriteStatus> SetForUserAsync(int userId, string wkt);
     Task<GeoAreaWriteStatus> SetForRoleAsync(int roleId, string wkt);
 
@@ -26,8 +26,8 @@ public interface IGeoAuthorizationService
     Task<bool> ClearForUserAsync(int userId);
     Task<bool> ClearForRoleAsync(int roleId);
 
-    // The polygon a user's drawings must stay inside, or null for unrestricted. The user's own area
-    // overrides role areas; otherwise the union of the user's roles' areas (may be a MultiPolygon).
+    // The polygonal area a user's drawings must stay inside, or null for unrestricted. The user's own
+    // area overrides role areas; otherwise the union of the user's roles' areas.
     Task<Geometry?> GetEffectiveAreaAsync(int userId);
 
     // True when the caller is area-bound and `geom` is not fully inside that area. Covers (not

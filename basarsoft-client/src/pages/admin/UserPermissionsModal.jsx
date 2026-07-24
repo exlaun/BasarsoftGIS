@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getUserPermissions, setUserPermissions } from '../../api/admin'
+import ModalCloseButton from '../../components/ModalCloseButton'
 
 // The inheritance-aware permission editor — the literal implementation of the mentor's rule.
 // Every catalogue permission is shown with its source:
@@ -70,14 +71,17 @@ export default function UserPermissionsModal({ user, onClose, onSuccess }) {
     <div className="admin-modal-overlay" role="dialog" aria-modal="true" aria-label="Manage user permissions">
       <div className="admin-modal admin-modal-wide">
         <div className="admin-modal-head">
-          <h2 className="admin-modal-title">Permissions — {user.username}</h2>
-          <p className="admin-modal-desc">
-            Permissions that come from a role are locked and marked <em>From role</em>. Tick the rest to grant
-            them directly to this user.
-          </p>
+          <div>
+            <h2 className="admin-modal-title">Permissions — {user.username}</h2>
+            <p className="admin-modal-desc">
+              Permissions that come from a role are locked and marked <em>From role</em>. Tick the rest to grant
+              them directly to this user.
+            </p>
+          </div>
+          <ModalCloseButton onClick={onClose} label="Close user permissions dialog" />
         </div>
 
-        <div className="admin-modal-body">
+        <div className="admin-modal-body admin-permissions-body" tabIndex="0" aria-label="Permission list">
           {loading && <p className="admin-empty">Loading…</p>}
           {loadError && <p className="admin-error">Could not load permissions.</p>}
           {perms && (
@@ -117,9 +121,6 @@ export default function UserPermissionsModal({ user, onClose, onSuccess }) {
         </div>
 
         <div className="admin-modal-foot">
-          <button type="button" className="admin-btn" onClick={onClose}>
-            Cancel
-          </button>
           <button
             type="button"
             className="admin-btn admin-btn-primary"

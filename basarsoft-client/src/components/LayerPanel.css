@@ -24,6 +24,14 @@
   opacity: 0.7;
 }
 
+.layer-panel-mode-note {
+  max-width: 225px;
+  margin: 0 0 0.15rem;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  opacity: 0.76;
+}
+
 .layer-panel-row {
   display: flex;
   align-items: center;
@@ -42,4 +50,59 @@
 .layer-panel-icon {
   display: inline-flex;
   opacity: 0.85;
+}
+
+.layer-panel-embedded {
+  position: static;
+  min-width: 245px;
+  padding: 0.3rem 0.4rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.layer-panel-legend {
+  margin-top: 0.2rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--bar-border);
+  font-size: 0.75rem;
+}
+
+.layer-panel-legend summary {
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+
+.layer-panel-legend ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layer-panel-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+
+.layer-panel-swatch {
+  flex: 0 0 auto;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25);
+}
+
+.layer-panel-legend p {
+  max-width: 245px;
+  margin: 0.55rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  opacity: 0.78;
 }

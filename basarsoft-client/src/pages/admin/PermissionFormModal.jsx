@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPermission } from '../../api/admin'
+import ModalCloseButton from '../../components/ModalCloseButton'
 
 // Add a permission to the shared catalogue (name is the machine key, e.g. "report_export").
 export default function PermissionFormModal({ onClose, onSuccess }) {
@@ -47,8 +48,11 @@ export default function PermissionFormModal({ onClose, onSuccess }) {
     <div className="admin-modal-overlay" role="dialog" aria-modal="true" aria-label="Add permission">
       <form className="admin-modal" onSubmit={handleSubmit}>
         <div className="admin-modal-head">
-          <h2 className="admin-modal-title">Add permission</h2>
-          <p className="admin-modal-desc">Name is the machine key (e.g. add_point).</p>
+          <div>
+            <h2 className="admin-modal-title">Add permission</h2>
+            <p className="admin-modal-desc">Name is the machine key (e.g. add_point).</p>
+          </div>
+          <ModalCloseButton onClick={onClose} label="Close permission dialog" />
         </div>
 
         <div className="admin-modal-body">
@@ -78,9 +82,6 @@ export default function PermissionFormModal({ onClose, onSuccess }) {
         </div>
 
         <div className="admin-modal-foot">
-          <button type="button" className="admin-btn" onClick={onClose}>
-            Cancel
-          </button>
           <button type="submit" className="admin-btn admin-btn-primary" disabled={!canSubmit}>
             Add
           </button>

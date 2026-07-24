@@ -40,21 +40,6 @@
   font-weight: 700;
 }
 
-.query-panel-close {
-  display: inline-flex;
-  padding: 0.3rem;
-  border: 1px solid var(--bar-border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--bar-text);
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.query-panel-close:hover {
-  background: var(--bar-hover);
-}
-
 .query-panel-search {
   padding: 0.5rem 0.6rem;
   border-radius: 6px;
@@ -97,8 +82,14 @@
   cursor: pointer;
 }
 
-.query-panel-table-wrap {
+.query-panel-table-space {
   flex: 1;
+  min-height: 0;
+}
+
+.query-panel-table-wrap {
+  width: 100%;
+  max-height: calc(100% - 2px);
   overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid var(--bar-border);
@@ -187,7 +178,9 @@
 }
 
 .query-panel-table td {
-  padding: 0.5rem 0.55rem;
+  /* At 33px per row, the drawer can use the two row-sized gaps that remained with the old
+     37px footprint while keeping the info control comfortably inside each row. */
+  padding: 0.25rem 0.55rem;
   border-bottom: 1px solid var(--bar-border);
   font-weight: 600;
   overflow: hidden;

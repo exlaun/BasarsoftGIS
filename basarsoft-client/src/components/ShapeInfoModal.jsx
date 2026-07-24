@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './AttributeModal.css'
 import './ShapeInfoModal.css'
+import ModalCloseButton from './ModalCloseButton'
 
 const DEFAULT_COLOR = '#2563eb'
 
@@ -31,7 +32,7 @@ export default function ShapeInfoModal({
     if (canEdit) nameInputRef.current?.focus()
   }, [canEdit])
 
-  // Escape closes the popup (same as Cancel).
+  // Escape closes the popup without saving changes.
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onCancel()
@@ -61,8 +62,11 @@ export default function ShapeInfoModal({
 
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Shape details">
-      <form className="attr-modal" onSubmit={handleSubmit}>
-        <h2 className="attr-modal-title">{canEdit ? 'Edit shape' : 'Shape details'}</h2>
+      <form className="attr-modal info-modal" onSubmit={handleSubmit}>
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">{canEdit ? 'Edit shape' : 'Shape details'}</h2>
+          <ModalCloseButton onClick={onCancel} label="Close shape details" />
+        </div>
 
         <dl className="shape-info-meta">
           {!canEdit && (
@@ -154,9 +158,6 @@ export default function ShapeInfoModal({
               Delete
             </button>
           )}
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onCancel}>
-            {canEdit ? 'Cancel' : 'Close'}
-          </button>
           {canEdit && (
             <button
               type="submit"

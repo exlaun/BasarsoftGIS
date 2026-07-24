@@ -282,6 +282,52 @@
   gap: 0.8rem;
   padding: 0.9rem;
   border-bottom: 1px solid var(--bar-border);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.transport-admin-route-head:hover,
+.transport-admin-route.is-expanded .transport-admin-route-head {
+  background: var(--admin-surface-2);
+}
+
+.transport-admin-route-head:focus-visible {
+  outline: 2px solid var(--admin-accent);
+  outline-offset: -2px;
+}
+
+.transport-admin-route-leading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.transport-admin-expand,
+.admin-tree-caret {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.58;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.transport-admin-expand svg,
+.admin-tree-caret svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.transport-admin-expand.is-expanded,
+.admin-tree-caret.is-expanded {
+  transform: rotate(90deg);
+  opacity: 0.95;
+}
+
+.admin-tree-caret.is-empty {
+  opacity: 0;
 }
 
 .transport-admin-swatch {
@@ -328,11 +374,39 @@
 
 .transport-admin-stops li {
   display: grid;
-  grid-template-columns: auto minmax(160px, 1fr) minmax(150px, auto) auto;
+  grid-template-columns: auto auto minmax(160px, 1fr) minmax(150px, auto) auto;
   align-items: center;
   gap: 0.7rem;
   padding: 0.45rem 0;
   border-bottom: 1px solid var(--bar-border);
+  cursor: grab;
+  transition: background 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+}
+
+.transport-admin-stops li:hover {
+  background: var(--admin-surface-2);
+}
+
+.transport-admin-stops li:active {
+  cursor: grabbing;
+}
+
+.transport-admin-stops li.is-dragging {
+  opacity: 0.4;
+}
+
+.transport-admin-stops li.is-drop-target {
+  box-shadow: inset 0 2px 0 var(--admin-accent);
+}
+
+.transport-admin-stop-drag-handle {
+  width: 1rem;
+  color: var(--bar-text);
+  font-size: 1rem;
+  line-height: 1;
+  opacity: 0.5;
+  cursor: grab;
+  user-select: none;
 }
 
 .transport-admin-stops li:last-child {
@@ -453,6 +527,10 @@
 }
 
 .admin-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 1.1rem 1.3rem 0.5rem;
 }
 
@@ -470,11 +548,45 @@
 }
 
 .admin-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 0.8rem 1.3rem;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
+}
+
+/* The permission catalogue is the long-lived part of this dialog. Keep the header and Save action
+   fixed while the catalogue itself owns the scroll range; this also overrides the checklist's
+   normal clipped-border overflow rule. */
+.admin-permissions-body {
+  overflow: hidden;
+}
+
+.admin-permissions-body .admin-checklist {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: auto;
+  scrollbar-color: var(--bar-border) transparent;
+}
+
+.admin-permissions-body .admin-checklist::-webkit-scrollbar {
+  width: 10px;
+}
+
+.admin-permissions-body .admin-checklist::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-permissions-body .admin-checklist::-webkit-scrollbar-thumb {
+  background: var(--bar-border);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
 }
 
 .admin-modal-foot {
@@ -491,6 +603,31 @@
   border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
+}
+
+.admin-geo-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.admin-geo-tools .admin-btn {
+  padding: 0.42rem 0.62rem;
+}
+
+.admin-geo-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.admin-geo-hint {
+  margin: -0.3rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  opacity: 0.72;
 }
 
 /* ---- Form fields ---- */
@@ -676,13 +813,18 @@
   .admin-main {
     padding: 1rem;
   }
-  .transport-admin-route-head,
-  .transport-admin-stops li {
+  .transport-admin-route-head {
     grid-template-columns: auto 1fr;
+  }
+  .transport-admin-stops li {
+    grid-template-columns: auto auto 1fr;
   }
   .transport-admin-metrics,
   .transport-admin-route-head .admin-table-actions,
   .transport-admin-stops .admin-table-actions {
     grid-column: 1 / -1;
+  }
+  .transport-admin-stops li > .admin-muted {
+    grid-column: 3;
   }
 }

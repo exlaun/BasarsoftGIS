@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listUsers, listRoles, deleteUser } from '../../api/admin'
+import AdminTable from '../../components/AdminTable'
 import UserFormModal from './UserFormModal'
 import UserRolesModal from './UserRolesModal'
 import UserPermissionsModal from './UserPermissionsModal'
@@ -8,7 +9,8 @@ import AdminConfirm from './AdminConfirm'
 import { useAuth } from '../../context/auth-context'
 
 export default function UsersPage() {
-  const { refreshProfile, userId } = useAuth()
+  const { refreshProfile, userId, permissions } = useAuth()
+  const canManageRoles = permissions.includes('manage_roles')
   const [users, setUsers] = useState([])
   const [roles, setRoles] = useState([])
   const [loading, setLoading] = useState(true)
@@ -27,15 +29,24 @@ export default function UsersPage() {
 
   // setState lives only in the async callbacks (not the effect body) to satisfy the hooks lint rule.
   const load = useCallback(() => {
-    Promise.all([listUsers(), listRoles()])
-      .then(([u, r]) => {
-        setUsers(u)
-        setRoles(r)
+    // Users are the primary resource for this page. A manage_users-only account is not allowed to
+    // call the roles catalogue, so a denied optional roles request must never hide the users table.
+    listUsers()
+      .then((data) => {
+        setUsers(data)
         setError(false)
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false))
-  }, [])
+
+    if (canManageRoles) {
+      listRoles()
+        .then(setRoles)
+        .catch(() => setRoles([]))
+    } else {
+      Promise.resolve().then(() => setRoles([]))
+    }
+  }, [canManageRoles])
 
   useEffect(() => {
     load()
@@ -44,6 +55,8 @@ export default function UsersPage() {
   const closeAnd = (message) => {
     setModal(null)
     if (message) flash('success', message)
+    setLoading(true)
+    setError(false)
     load()
     refreshProfile()
   }
@@ -58,6 +71,96 @@ export default function UsersPage() {
       flash('error', err.response?.data?.message ?? 'Could not delete user.')
     }
   }
+
+  const userColumns = useMemo(() => [
+    { key: 'username', label: 'Username', sortValue: (user) => user.username, flex: 0.95, minWidth: 120 },
+    {
+      key: 'status',
+      label: 'Status',
+      sortType: 'number',
+      sortValue: (user) => (user.isActive ? 0 : 1),
+      flex: 0.7,
+      minWidth: 100,
+      render: (user) => (
+        <span className="admin-status">
+          <span className={`admin-dot ${user.isActive ? 'admin-dot-on' : 'admin-dot-off'}`} />
+          {user.isActive ? 'Active' : 'Disabled'}
+        </span>
+      ),
+    },
+    {
+      key: 'roles',
+      label: 'Roles',
+      sortType: 'number',
+      sortValue: (user) => user.roles?.length ?? 0,
+      flex: 1.2,
+      minWidth: 150,
+      render: (user) => user.roles?.length === 0 ? (
+        <span className="admin-muted">—</span>
+      ) : (
+        <span className="admin-badge-list">
+          {user.roles.map((role) => (
+            <span key={role.id} className="admin-badge admin-badge-role">
+              {role.name}
+            </span>
+          ))}
+        </span>
+      ),
+    },
+    {
+      key: 'createdAt',
+      label: 'Created',
+      sortType: 'date',
+      sortValue: (user) => user.createdAt,
+      flex: 0.85,
+      minWidth: 110,
+      render: (user) => new Date(user.createdAt).toLocaleDateString(),
+    },
+    {
+      key: 'modifiedDate',
+      label: 'Modified',
+      sortType: 'date',
+      sortValue: (user) => user.modifiedDate,
+      flex: 0.85,
+      minWidth: 110,
+      render: (user) => new Date(user.modifiedDate).toLocaleDateString(),
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      fixedWidth: 380,
+      sortable: false,
+      resizable: false,
+      align: 'right',
+      render: (user) => (
+        <div className="admin-table-actions">
+          <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'edit', user })}>
+            Edit
+          </button>
+          {canManageRoles && (
+            <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'roles', user })}>
+              Roles
+            </button>
+          )}
+          <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'perms', user })}>
+            Permissions
+          </button>
+          <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'geo', user })}>
+            Geographic Access
+          </button>
+          <button
+            type="button"
+            className="admin-btn admin-btn-sm admin-btn-danger"
+            disabled={user.id === userId}
+            title={user.id === userId ? 'You cannot delete your own account.' : undefined}
+            onClick={() => setModal({ type: 'delete', user })}
+          >
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ], [canManageRoles, userId])
 
   return (
     <div>
@@ -79,73 +182,13 @@ export default function UsersPage() {
         ) : users.length === 0 ? (
           <p className="admin-empty">No users yet.</p>
         ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Username</th>
-                  <th>Status</th>
-                  <th>Roles</th>
-                  <th>Created</th>
-                  <th>Modified</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr key={u.id}>
-                    <td>{u.username}</td>
-                    <td>
-                      <span className="admin-status">
-                        <span className={`admin-dot ${u.isActive ? 'admin-dot-on' : 'admin-dot-off'}`} />
-                        {u.isActive ? 'Active' : 'Disabled'}
-                      </span>
-                    </td>
-                    <td>
-                      {u.roles.length === 0 ? (
-                        <span className="admin-muted">—</span>
-                      ) : (
-                        <span className="admin-badge-list">
-                          {u.roles.map((r) => (
-                            <span key={r.id} className="admin-badge admin-badge-role">
-                              {r.name}
-                            </span>
-                          ))}
-                        </span>
-                      )}
-                    </td>
-                    <td>{new Date(u.createdAt).toLocaleDateString()}</td>
-                    <td>{new Date(u.modifiedDate).toLocaleDateString()}</td>
-                    <td>
-                      <div className="admin-table-actions">
-                        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'edit', user: u })}>
-                          Edit
-                        </button>
-                        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'roles', user: u })}>
-                          Roles
-                        </button>
-                        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'perms', user: u })}>
-                          Permissions
-                        </button>
-                        <button type="button" className="admin-btn admin-btn-sm" onClick={() => setModal({ type: 'geo', user: u })}>
-                          Geographic Access
-                        </button>
-                        <button
-                          type="button"
-                          className="admin-btn admin-btn-sm admin-btn-danger"
-                          disabled={u.id === userId}
-                          title={u.id === userId ? 'You cannot delete your own account.' : undefined}
-                          onClick={() => setModal({ type: 'delete', user: u })}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AdminTable
+            columns={userColumns}
+            rows={users}
+            getRowKey={(user) => user.id}
+            defaultSortKey="createdAt"
+            defaultSortDir="desc"
+          />
         )}
       </div>
 

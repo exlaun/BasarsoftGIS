@@ -8,7 +8,7 @@ public interface IGeometryService
     // Returns Success (with the saved row as WKT), InvalidGeometry (unknown type / bad WKT / wrong
     // geometry type for that table), or OutsideAuthorizedArea (the caller has a geographic
     // authorization area and the shape isn't fully inside it). Polygon creates also include the
-    // contained-shape count.
+    // count of existing inventories that touch or cross the new polygon.
     Task<GeometryUpdateResult> CreateAsync(string type, GeometryCreateRequest request, int userId);
 
     // Lists the caller's non-deleted shapes of one type as WKT. Empty if the type is unknown.
@@ -24,9 +24,9 @@ public interface IGeometryService
     // OutsideAuthorizedArea when it sits outside the caller's geographic authorization area.
     Task<DeleteStatus> DeleteAsync(string type, int id, int userId);
 
-    // Counts how many of the caller's shapes (points + lines + polygons) intersect the polygon given
-    // as WKT — even a small overlap counts (ST_Intersects). The polygon is NOT saved. Returns null if
-    // the WKT is invalid or isn't a polygon.
+    // Counts the caller's private drawings plus shared POIs, stops, and built routes that intersect
+    // the polygon given as WKT — even a small overlap counts (ST_Intersects). The polygon is NOT
+    // saved. Returns null if the WKT is invalid or isn't a polygon.
     Task<AnalysisResponse?> AnalyzeAsync(string wkt, int userId);
 
     // One page of the caller's shapes as flat rows, filtered/sorted/paged IN SQL (the query panel's

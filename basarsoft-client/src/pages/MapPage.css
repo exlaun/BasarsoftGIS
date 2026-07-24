@@ -74,7 +74,7 @@
 /* A lone button carries its own pill outline (Logout, Return to map page). */
 .map-bar-btn.is-solo {
   border: 1px solid var(--bar-border);
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 /* Fuses related buttons into one rounded pill with hairline internal dividers
@@ -83,7 +83,7 @@
   display: inline-flex;
   align-items: stretch;
   border: 1px solid var(--bar-border);
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
 }
 
@@ -94,7 +94,7 @@
 /* Shown in place of the draw toolbar while in WMS (display-only) mode. */
 .map-wms-hint {
   position: absolute;
-  bottom: 1.25rem;
+  bottom: 4.5rem;
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
@@ -127,13 +127,49 @@
   transform-origin: center;
 }
 
-/* Move the OSM attribution out of the crowded bottom-right corner (where the name input
-   sits) to the bottom-left, lifted just above the draw bar. */
+/* Keep the standard map attribution anchored to the actual lower-left corner. */
 .map-container .ol-attribution {
   right: auto;
   left: 0.5rem;
-  bottom: 4rem;
+  bottom: 0.5rem;
   border-radius: 4px;
+}
+
+/* Make the zoom control and POI search read as one intentional map-control cluster. */
+.map-container .ol-zoom {
+  top: 0.8rem;
+  /* Center the compact zoom pill beneath the wider feature rail. */
+  left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--bar-border);
+  border-radius: 10px;
+  background: var(--bar-bg);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+}
+
+.map-container .ol-zoom button {
+  display: block;
+  width: 2.35rem;
+  height: 1.75rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.map-container .ol-zoom button + button {
+  border-top: 1px solid var(--bar-border);
+}
+
+.map-container .ol-zoom button:hover {
+  background: var(--bar-hover);
 }
 
 /* Name shown on hover over a saved shape. Positioned by an ol/Overlay. */
@@ -232,7 +268,7 @@
   color: var(--bar-text);
   border: 1px solid var(--bar-border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
-  min-width: 190px;
+  min-width: 270px;
 }
 
 .map-analysis-total {
@@ -241,6 +277,9 @@
 }
 
 .map-analysis-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem 0.7rem;
   font-size: 0.78rem;
   opacity: 0.8;
 }

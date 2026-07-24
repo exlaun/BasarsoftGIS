@@ -2,12 +2,13 @@ import { useEffect } from 'react'
 import './AttributeModal.css'
 import './ShapePickerModal.css'
 import PoiIconBadge from './PoiIconBadge'
+import ModalCloseButton from './ModalCloseButton'
 
 const DEFAULT_COLOR = '#2563eb'
 
 // Chooser shown when a click hits several overlapping map items: personal shapes use their color
 // swatch while POIs use the effective category badge. Picking a row opens the matching info popup;
-// Escape/Cancel closes without selecting anything.
+// Escape or the header X closes without selecting anything.
 export default function ShapePickerModal({ features, onPick, onCancel }) {
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -20,7 +21,10 @@ export default function ShapePickerModal({ features, onPick, onCancel }) {
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Select a map item">
       <div className="attr-modal">
-        <h2 className="attr-modal-title">Select a map item</h2>
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">Select a map item</h2>
+          <ModalCloseButton onClick={onCancel} label="Close map item selection" />
+        </div>
         <p className="shape-picker-subtitle">
           {features.length} items overlap here. Which one do you want to open?
         </p>
@@ -56,11 +60,6 @@ export default function ShapePickerModal({ features, onPick, onCancel }) {
           })}
         </div>
 
-        <div className="attr-modal-actions">
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onCancel}>
-            Cancel
-          </button>
-        </div>
       </div>
     </div>
   )

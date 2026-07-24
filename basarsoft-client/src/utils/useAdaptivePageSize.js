@@ -1,8 +1,8 @@
 import { useLayoutEffect, useState } from 'react'
 import { calculatePageCapacity } from './adaptivePagination'
 
-// Measures the stable list viewport plus one representative collapsed row. Expanded route content
-// deliberately does not influence the page size: it scrolls inside the same viewport instead.
+// Measures the stable list viewport plus one representative item. A caller can point rowRef at an
+// expanded item when its details belong to the fixed page viewport rather than a scroll container.
 export default function useAdaptivePageSize({
   containerRef,
   headerRef,

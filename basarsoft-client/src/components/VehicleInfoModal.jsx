@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { formatSimulationProgress } from '../utils/routeSimulation'
 import './AttributeModal.css'
 import './ShapeInfoModal.css'
+import ModalCloseButton from './ModalCloseButton'
 
 export default function VehicleInfoModal({ route, simulation, onClose }) {
   useEffect(() => {
@@ -18,8 +19,11 @@ export default function VehicleInfoModal({ route, simulation, onClose }) {
 
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Vehicle info">
-      <div className="attr-modal">
-        <h2 className="attr-modal-title">Vehicle info</h2>
+      <div className="attr-modal info-modal">
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">Vehicle info</h2>
+          <ModalCloseButton onClick={onClose} label="Close vehicle info" />
+        </div>
         <dl className="shape-info-meta">
           <div className="shape-info-wide"><dt>Route</dt><dd>{route?.name ?? `Route ${simulation.routeId}`}</dd></div>
           <div><dt>Status</dt><dd>{simulation.status}</dd></div>
@@ -27,11 +31,6 @@ export default function VehicleInfoModal({ route, simulation, onClose }) {
           <div><dt>Nearest stop</dt><dd>{simulation.currentStopName || '—'}</dd></div>
           <div className="shape-info-wide"><dt>Position</dt><dd>{position}</dd></div>
         </dl>
-        <div className="attr-modal-actions">
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onClose}>
-            Close
-          </button>
-        </div>
       </div>
     </div>
   )

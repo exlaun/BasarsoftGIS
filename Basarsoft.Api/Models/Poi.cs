@@ -22,10 +22,12 @@ public class Poi : IGeoFeature
     // FK -> tbl_poi_category.id. Every POI belongs to exactly one category from the admin's tree.
     public int CategoryId { get; set; }
 
-    // Daily working hours (mesai saatleri), e.g. 09:00 - 18:00. TimeOnly maps to Postgres `time`.
-    public TimeOnly OpenTime { get; set; }
+    // Daily working hours (mesai saatleri), e.g. 09:00 - 18:00. Imported reference POIs keep these
+    // null when the source has no trustworthy simple daily range; user-created POIs still require
+    // both values at the API boundary. TimeOnly maps to Postgres `time`.
+    public TimeOnly? OpenTime { get; set; }
 
-    public TimeOnly CloseTime { get; set; }
+    public TimeOnly? CloseTime { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

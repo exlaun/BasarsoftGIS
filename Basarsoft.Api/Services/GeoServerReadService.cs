@@ -285,13 +285,13 @@ public class GeoServerReadService : IGeoServerReadService
         };
     }
 
-    // The view emits times as 'HH24:MI:SS' text (to_char), so this is a plain string parse; a missing
-    // or malformed value degrades to 00:00:00 instead of failing the whole catalogue.
-    private static TimeOnly ReadTime(JsonElement props, string name) =>
+    // The view emits known times as 'HH24:MI:SS' text (to_char). Missing, null, or malformed values
+    // stay unknown instead of becoming a misleading midnight opening time.
+    private static TimeOnly? ReadTime(JsonElement props, string name) =>
         props.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String &&
         TimeOnly.TryParse(el.GetString(), CultureInfo.InvariantCulture, out var time)
             ? time
-            : default;
+            : null;
 
     // GeoServer usually encodes timestamps as ISO-8601 strings in GeoJSON, but tolerate epoch millis too.
     private static DateTime ReadDate(JsonElement props, string name)

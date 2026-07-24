@@ -51,7 +51,8 @@ public class GeoServerReadServiceTests
         var second = rows[1];
         Assert.Null(second.CategoryColor);
         Assert.Equal(PoiIconCatalog.DefaultIconKey, second.CategoryIconKey);
-        Assert.Equal(default, second.OpenTime); // malformed WFS time degrades without losing the row
+        Assert.Null(second.OpenTime); // malformed WFS time remains unknown without losing the row
+        Assert.Equal(new TimeOnly(18, 0), second.CloseTime);
     }
 
     private static GeoServerReadService CreateService(StubHttpMessageHandler handler) =>

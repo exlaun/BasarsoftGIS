@@ -173,7 +173,7 @@ public class AdminUsersController : ControllerBase
         catch (Exception ex) { return ServerError(ex, nameof(GetGeoArea)); }
     }
 
-    // Assign/replace the user's geographic authorization area (polygon WKT, EPSG:4326).
+    // Assign/replace the user's geographic authorization area (Polygon/MultiPolygon WKT, EPSG:4326).
     [HttpPut("{id:int}/geo-area")]
     public async Task<ActionResult> SetGeoArea(int id, GeoAreaRequest request)
     {
@@ -183,7 +183,7 @@ public class AdminUsersController : ControllerBase
             {
                 GeoAreaWriteStatus.NotFound => NotFound(new { message = "User not found." }),
                 GeoAreaWriteStatus.InvalidGeometry =>
-                    BadRequest(new { message = "WKT must be a single valid polygon." }),
+                    BadRequest(new { message = "WKT must be a valid polygon or multipolygon." }),
                 _ => NoContent(),
             };
         }

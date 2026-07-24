@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { setRolePermissions } from '../../api/admin'
+import ModalCloseButton from '../../components/ModalCloseButton'
 
 // Assign permissions to a role: a checkbox per catalogue permission, pre-ticked for the ones the role
 // already grants. Every user holding this role inherits the selected permissions.
@@ -39,8 +40,11 @@ export default function RolePermissionsModal({ role, allPermissions, onClose, on
     <div className="admin-modal-overlay" role="dialog" aria-modal="true" aria-label="Manage role permissions">
       <div className="admin-modal admin-modal-wide">
         <div className="admin-modal-head">
-          <h2 className="admin-modal-title">Permissions — {role.name}</h2>
-          <p className="admin-modal-desc">Users with this role inherit the ticked permissions.</p>
+          <div>
+            <h2 className="admin-modal-title">Permissions — {role.name}</h2>
+            <p className="admin-modal-desc">Users with this role inherit the ticked permissions.</p>
+          </div>
+          <ModalCloseButton onClick={onClose} label="Close role permissions dialog" />
         </div>
 
         <div className="admin-modal-body">
@@ -63,9 +67,6 @@ export default function RolePermissionsModal({ role, allPermissions, onClose, on
         </div>
 
         <div className="admin-modal-foot">
-          <button type="button" className="admin-btn" onClick={onClose}>
-            Cancel
-          </button>
           <button type="button" className="admin-btn admin-btn-primary" onClick={handleSave} disabled={submitting}>
             Save
           </button>

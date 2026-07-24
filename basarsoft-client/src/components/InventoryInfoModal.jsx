@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import './AttributeModal.css'
 import './ShapeInfoModal.css'
+import ModalCloseButton from './ModalCloseButton'
 
 const DEFAULT_COLOR = '#2563eb'
 
@@ -24,8 +25,11 @@ export default function InventoryInfoModal({ info, onClose }) {
 
   return (
     <div className="attr-modal-overlay" role="dialog" aria-modal="true" aria-label="Inventory info">
-      <div className="attr-modal">
-        <h2 className="attr-modal-title">Inventory info</h2>
+      <div className="attr-modal info-modal">
+        <div className="attr-modal-head">
+          <h2 className="attr-modal-title">Inventory info</h2>
+          <ModalCloseButton onClick={onClose} label="Close inventory info" />
+        </div>
 
         <dl className="shape-info-meta">
           <div className="shape-info-wide">
@@ -81,11 +85,6 @@ export default function InventoryInfoModal({ info, onClose }) {
           )}
         </dl>
 
-        <div className="attr-modal-actions">
-          <button type="button" className="attr-modal-btn attr-modal-cancel" onClick={onClose}>
-            Close
-          </button>
-        </div>
       </div>
     </div>
   )

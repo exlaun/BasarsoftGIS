@@ -31,7 +31,7 @@ export function reconcileSimulationState(current, incoming) {
 // A route that has never started exposes only Start. A live run exposes Stop + End; once paused, Stop
 // becomes Resume. End clears the run so the route falls back to first-time Start. This state-derived
 // list is shared by the route panel and popup, so stale actions never remain visible.
-export function simulationControls({ simulation, canControl, followed, route }) {
+export function simulationControls({ simulation, canControl, cameraFollowed, route }) {
   const status = simulation?.status ?? 'NotStarted'
   const ready = Boolean(route?.stopCount >= 2 && route?.geometryWkt && !route?.isGeometryStale)
   const actions = []
@@ -57,9 +57,9 @@ export function simulationControls({ simulation, canControl, followed, route }) 
     ready,
     actions,
     showFollow: status !== 'NotStarted',
-    followAction: followed ? 'unfollow' : 'follow',
-    followLabel: followed ? 'Stop Following' : 'Follow',
-    followDisabled: !followed && status !== 'Running',
+    followAction: cameraFollowed ? 'unfollow' : 'follow',
+    followLabel: cameraFollowed ? 'Stop Following' : 'Follow',
+    followDisabled: !cameraFollowed && status === 'NotStarted',
   }
 }
 

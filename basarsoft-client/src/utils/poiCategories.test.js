@@ -6,9 +6,16 @@ import {
   POI_ICON_CATALOG,
   categoryBadgeAppearance,
   effectiveCategoryIconKey,
+  formatWorkingHours,
   normalizePoiIconKey,
   poiIconUrl,
 } from './poiCategories.js'
+
+test('formats verified hours and explains nullable demo hours', () => {
+  assert.equal(formatWorkingHours('09:30:00', '18:15:00'), '09:30 – 18:15')
+  assert.equal(formatWorkingHours(null, null), 'Hours unavailable')
+  assert.equal(formatWorkingHours('09:30:00', null), 'Hours unavailable')
+})
 
 test('normalizes icon keys to the fixed allowlist and safe pin fallback', () => {
   assert.equal(normalizePoiIconKey(' Coffee '), 'coffee')

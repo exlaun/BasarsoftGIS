@@ -16,6 +16,10 @@ TestResults/
 *.userosscache
 *.sln.docstates
 
+# Local Python fixture-tool caches
+__pycache__/
+*.py[cod]
+
 # Local configuration and secrets
 .env
 .env.*

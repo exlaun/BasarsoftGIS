@@ -1,4 +1,6 @@
 import './LayerPanel.css'
+import { DEMO_DRAWING_THEMES, DEMO_THEME_NOTE } from '../utils/demoThemes'
+import { visibleLayerEntries } from './drawToolbarModel'
 
 // Inline feather-style icons (inherit currentColor, no icon dependency) — matches the
 // convention in DrawToolbar.jsx / ThemeToggle.jsx.
@@ -32,24 +34,48 @@ const PolygonIcon = (
     <path d="M12 2l9.5 6.9-3.6 11.2H6.1L2.5 8.9 12 2z" />
   </svg>
 )
+const ProvinceIcon = (
+  <svg {...iconProps}>
+    <path d="M4 5.5 9 3l6 2.5L20 3v15.5L15 21l-6-2.5L4 21V5.5z" />
+    <path d="M9 3v15.5M15 5.5V21" />
+    <circle cx="12" cy="11.5" r="1.8" fill="currentColor" stroke="none" />
+  </svg>
+)
 
 const LAYERS = [
   { type: 'point', label: 'Points', icon: PointIcon },
   { type: 'line', label: 'Lines', icon: LineIcon },
   { type: 'polygon', label: 'Polygons', icon: PolygonIcon },
+  { type: 'province', label: 'Provinces & capitals', icon: ProvinceIcon },
 ]
 
-// Floating layer-visibility control: one checkbox per geometry type. Unchecking hides that
-// type's vector layer from the map; features are kept intact and reappear when re-checked.
-export default function LayerPanel({ visibility, onToggle }) {
+// Layer visibility and the provenance-minded demo drawing legend. The toolbar embeds this panel in
+// its Layers flyout; the `embedded` variant removes the legacy standalone positioning/chrome.
+export default function LayerPanel({
+  visibility,
+  onToggle,
+  embedded = false,
+  displayOnly = false,
+}) {
+  const visibleLayers = visibleLayerEntries(LAYERS, displayOnly)
+
   return (
-    <div className="layer-panel" role="group" aria-label="Layer visibility">
+    <div
+      className={`layer-panel${embedded ? ' layer-panel-embedded' : ''}`}
+      role="group"
+      aria-label="Layer visibility"
+    >
       <span className="layer-panel-title">Layers</span>
-      {LAYERS.map(({ type, label, icon }) => (
+      {displayOnly && (
+        <p className="layer-panel-mode-note">
+          WMS combines personal drawings into one server-rendered image.
+        </p>
+      )}
+      {visibleLayers.map(({ type, label, icon }) => (
         <label key={type} className="layer-panel-row">
           <input
             type="checkbox"
-            checked={visibility[type]}
+            checked={visibility[type] ?? true}
             onChange={() => onToggle(type)}
           />
           <span className="layer-panel-icon" aria-hidden="true">
@@ -58,6 +84,22 @@ export default function LayerPanel({ visibility, onToggle }) {
           <span className="layer-panel-label">{label}</span>
         </label>
       ))}
+      <details className="layer-panel-legend">
+        <summary>Demo drawing themes</summary>
+        <ul>
+          {DEMO_DRAWING_THEMES.map(({ label, color }) => (
+            <li key={label}>
+              <span
+                className="layer-panel-swatch"
+                style={{ backgroundColor: color }}
+                aria-hidden="true"
+              />
+              <span>{label}</span>
+            </li>
+          ))}
+        </ul>
+        <p>{DEMO_THEME_NOTE}</p>
+      </details>
     </div>
   )
 }
